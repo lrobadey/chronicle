@@ -1,18 +1,11 @@
 /**
- * Chronicle v4 - Main Exports
- * 
- * A cleaner, leaner narrative engine.
+ * Chronicle vNext - Main Exports
  */
 
-// Core engine
-export * from './core';
-
-// GM agent
-export * from './gm';
-
-// Narrator
-export * from './narrator';
-
-// Worlds
-export { createIsleOfMarrowWorld } from './worlds/isle-of-marrow';
-
+export * from './sim';
+export * from './engine';
+export * from './agents/llm';
+export * from './agents/gm';
+export * from './agents/npc';
+export * from './agents/narrator';
+export { createIsleOfMarrowWorldVNext } from './worlds/isle-of-marrow.vnext';

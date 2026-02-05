@@ -3,7 +3,7 @@ import path from 'path';
 
 export default defineConfig({
   test: {
-    include: ['src/tests/**/*.test.ts'],
+    include: ['src/tests-vnext/**/*.test.ts'],
     globals: true,
     environment: 'node',
     outputFile: undefined,
@@ -16,4 +16,3 @@ export default defineConfig({
     },
   },
 });
-
