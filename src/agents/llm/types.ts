@@ -16,6 +16,9 @@ export interface ResponseCreateParams {
   model: string;
   input: string | ResponseInputItem[];
   instructions?: string;
+  reasoning?: {
+    effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  };
   tools?: ResponseToolDefinition[];
   tool_choice?: 'auto' | 'required' | { type: 'function'; name: string } | { type: 'allowed_tools'; mode: 'auto' | 'required'; tools: Array<{ type: 'function'; name: string }> };
 }

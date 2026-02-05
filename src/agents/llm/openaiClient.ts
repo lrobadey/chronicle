@@ -12,6 +12,7 @@ export class OpenAIClient implements LLMClient {
       model: params.model,
       input: params.input as any,
       instructions: params.instructions,
+      reasoning: params.reasoning ?? { effort: 'medium' },
       tools: params.tools as any,
       tool_choice: (params.tool_choice ?? (params.tools?.length ? 'auto' : undefined)) as any,
     } as any);
