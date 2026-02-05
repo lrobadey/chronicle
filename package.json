@@ -1,0 +1,43 @@
+{
+  "name": "chronicle",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run src/tests",
+    "test:watch": "vitest src/tests",
+    "test:core": "vitest run src/tests/core-systems.test.ts",
+    "test:graph": "vitest run src/tests/graph.test.ts",
+    "test:travel": "vitest run src/tests/travel.test.ts",
+    "test:arbiter": "vitest run src/tests/arbiter.test.ts",
+    "test:gm": "vitest run src/tests/gm-tools.test.ts",
+    "test:integration": "vitest run src/tests/integration.test.ts",
+    "cli": "tsx src/cli.ts",
+    "server": "tsx src/server.ts"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.0.6",
+    "@langchain/openai": "^1.1.2",
+    "boxen": "^8.0.1",
+    "chalk": "^5.6.2",
+    "dotenv": "^16.4.5",
+    "langchain": "^1.0.6",
+    "log-update": "^7.0.1",
+    "openai": "^4.67.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "wrap-ansi": "^9.0.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0",
+    "vitest": "^4.0.12"
+  }
+}

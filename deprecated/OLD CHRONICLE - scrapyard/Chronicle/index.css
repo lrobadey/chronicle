@@ -1,0 +1,536 @@
+/* Modern Apple/OpenAI-inspired CSS for Chronicle */
+
+/* Custom Properties for consistent theming */
+:root {
+  /* Chronicle Core Palette */
+  --abyss: #0B1E34;           /* Deep Blue - Primary Background */
+  --icefield: #CFE9FF;        /* Icy Blue - Primary Text, Highlights */
+  --silver-slate: #A3AFBF;    /* Cool Gray - Secondary Text, Borders */
+  --aurora: #00E0FF;          /* Bold Accent Cyan - CTAs, Selection */
+  
+  /* Background Colors */
+  --bg-primary: var(--abyss);
+  --bg-secondary: #1a2a3f;    /* Slightly lighter than abyss */
+  --bg-tertiary: #2a3a4f;     /* Even lighter for depth */
+  --bg-overlay: rgba(11, 30, 52, 0.8);
+  --bg-glass: rgba(26, 42, 63, 0.7);
+  
+  /* Text Colors */
+  --text-primary: var(--icefield);
+  --text-secondary: var(--silver-slate);
+  --text-muted: #8a9ba8;      /* Muted version of silver-slate */
+  --text-accent: var(--aurora);
+  
+  /* Border Colors */
+  --border-primary: var(--silver-slate);
+  --border-secondary: #8a9ba8;
+  --border-accent: var(--aurora);
+  
+  /* Shadow Colors */
+  --shadow-light: rgba(0, 224, 255, 0.1);
+  --shadow-medium: rgba(0, 224, 255, 0.2);
+  --shadow-heavy: rgba(0, 224, 255, 0.3);
+  
+  /* Gradients */
+  --gradient-primary: linear-gradient(135deg, var(--aurora) 0%, #00b8d4 100%);
+  --gradient-secondary: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+  --gradient-glass: linear-gradient(135deg, rgba(26, 42, 63, 0.8) 0%, rgba(42, 58, 79, 0.6) 100%);
+}
+
+/* Base Styles */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: Georgia, 'Libre Baskerville', 'Times New Roman', serif;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* Removed legacy landing-page hero styles */
+
+/* Modern Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--silver-slate);
+  border-radius: 3px;
+  transition: background 0.2s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--aurora);
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+}
+
+/* Special heading styles for the app title */
+.app-title {
+  font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'SF Pro Display', Inter, system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+/* Removed legacy pill-input styles from old landing page */
+
+/* Refined typography for better readability */
+p, span, div {
+  font-family: Georgia, 'Libre Baskerville', 'Times New Roman', serif;
+}
+
+/* Chat messages with refined typography */
+.chat-bubble p {
+  font-family: Georgia, 'Libre Baskerville', 'Times New Roman', serif;
+  line-height: 1.5;
+}
+
+/* Sidebar content with refined typography */
+.sidebar-content {
+  font-family: Georgia, 'Libre Baskerville', 'Times New Roman', serif;
+  line-height: 1.5;
+}
+
+/* Modern Button Styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.5rem;
+  border-radius: 12px;
+  font-family: Georgia, 'Libre Baskerville', 'Times New Roman', serif;
+  font-weight: 500;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border: none;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.btn:hover::before {
+  opacity: 1;
+}
+
+.btn-primary {
+  background: var(--gradient-primary);
+  color: white;
+  box-shadow: 0 4px 14px 0 var(--shadow-medium);
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 25px 0 var(--shadow-heavy);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+.btn:disabled:hover {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.btn-secondary {
+  background: var(--bg-glass);
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
+  backdrop-filter: blur(10px);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--aurora);
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  box-shadow: 0 4px 14px 0 rgba(239, 68, 68, 0.3);
+}
+
+.btn-danger:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 25px 0 rgba(239, 68, 68, 0.4);
+}
+
+/* Card Styles */
+.card {
+  background: var(--bg-glass);
+  border: 1px solid var(--border-primary);
+  border-radius: 16px;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.card:hover {
+  border-color: var(--border-accent);
+  box-shadow: 0 8px 32px 0 var(--shadow-light);
+}
+
+/* Input Styles */
+.input {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  color: var(--text-primary);
+  font-family: Georgia, 'Libre Baskerville', 'Times New Roman', serif;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--aurora);
+  box-shadow: 0 0 0 3px var(--shadow-light);
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Glass Effect */
+.glass {
+  background: var(--bg-glass);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border-primary);
+  border-radius: 16px;
+}
+
+/* Gradient Text */
+.gradient-text {
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+/* Constellation Animation Keyframes */
+@keyframes dotAppear {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.2);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes lineDraw {
+  0% {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+@keyframes constellationPulse {
+  0% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scale(1.25);
+    filter: brightness(1.5);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+
+@keyframes collapseInward {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0);
+  }
+}
+
+@keyframes worldForm {
+  0% {
+    opacity: 0;
+    transform: scale(0) rotate(0deg);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.5) rotate(180deg);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(360deg);
+  }
+}
+
+/* Loading Animation */
+.loading-shimmer {
+  background: linear-gradient(90deg, var(--bg-secondary) 25%, var(--bg-tertiary) 50%, var(--bg-secondary) 75%);
+  background-size: 200px 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Modern Focus States */
+.focus-ring:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--shadow-light);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .card {
+    border-radius: 12px;
+  }
+  
+  .btn {
+    padding: 0.625rem 1.25rem;
+    font-size: 0.8125rem;
+  }
+}
+
+/* Custom Component Overrides */
+.chat-bubble {
+  border-radius: 18px;
+  padding: 0.875rem 1.25rem;
+  max-width: 80%;
+  word-wrap: break-word;
+  position: relative;
+}
+
+.chat-bubble.player {
+  background: var(--gradient-primary);
+  color: white;
+  margin-left: auto;
+  border-bottom-right-radius: 6px;
+}
+
+.chat-bubble.gm {
+  background: var(--bg-glass);
+  color: var(--text-primary);
+  border: 1px solid var(--border-primary);
+  margin-right: auto;
+  border-bottom-left-radius: 6px;
+}
+
+.chat-bubble.system {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  margin-right: auto;
+  border-bottom-left-radius: 6px;
+}
+
+/* Map Styles */
+.map-container {
+  background: var(--bg-secondary);
+  border-radius: 16px;
+  overflow: hidden;
+  position: relative;
+}
+
+.map-feature {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 4px;
+}
+
+.map-feature:hover {
+  transform: scale(1.05);
+  z-index: 10;
+}
+
+/* Weather Effects */
+.weather-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.weather-rain {
+  background: linear-gradient(180deg, transparent 0%, rgba(14, 165, 233, 0.1) 100%);
+  animation: rain 0.5s linear infinite;
+}
+
+@keyframes rain {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+/* Sidebar Styles */
+.sidebar-section {
+  background: var(--bg-glass);
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.sidebar-header {
+  padding: 1rem;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-primary);
+  font-weight: 600;
+  color: var(--text-accent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sidebar-content {
+  padding: 1rem;
+  color: var(--text-secondary);
+}
+
+/* Header Styles */
+.app-header {
+  background: var(--bg-glass);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border-primary);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+/* Utility Classes */
+.text-gradient {
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.border-gradient {
+  border: 1px solid transparent;
+  background: linear-gradient(var(--bg-glass), var(--bg-glass)) padding-box,
+              var(--gradient-primary) border-box;
+}
+
+.shadow-glow {
+  box-shadow: 0 0 20px 0 var(--shadow-medium);
+}
+
+.hover-lift {
+  transition: transform 0.2s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-2px);
+}
+
+/* Animation Classes */
+.animate-dotAppear {
+  animation: dotAppear 0.8s ease-out forwards;
+}
+
+.animate-lineDraw {
+  animation: lineDraw 1s ease-out forwards;
+}
+
+.animate-constellationPulse {
+  animation: constellationPulse 0.3s ease-in-out;
+}
+
+.animate-collapseInward {
+  animation: collapseInward 0.8s ease-in forwards;
+}
+
+.animate-worldForm {
+  animation: worldForm 1.2s ease-out forwards;
+} 

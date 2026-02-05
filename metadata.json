@@ -1,0 +1,5 @@
+{
+  "name": "Chronicle",
+  "description": "An interactive web application that visualizes the data flow and architecture of a GM LLM-powered game engine. It demonstrates the ReAct agent loop, tool usage, and state management in a turn-based system.",
+  "requestFramePermissions": []
+}

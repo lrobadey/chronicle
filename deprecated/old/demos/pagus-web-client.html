@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Chronicle Pagus Web Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --accent: #38bdf8;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --danger: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: radial-gradient(circle at top, rgba(56,189,248,0.15), transparent 55%), var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+    main {
+      width: min(960px, 100%);
+      background: rgba(15,23,42,0.85);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(148,163,184,0.2);
+      border-radius: 18px;
+      padding: 2rem;
+      box-shadow: 0 20px 40px rgba(15,23,42,0.45);
+      display: grid;
+      gap: 1.5rem;
+    }
+    header h1 {
+      font-size: 1.75rem;
+      margin: 0;
+      letter-spacing: 0.03em;
+    }
+    header p {
+      margin: 0.25rem 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    #status {
+      padding: 0.75rem 1rem;
+      border-radius: 12px;
+      background: rgba(30,41,59,0.7);
+      border: 1px solid rgba(56,189,248,0.2);
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 0.9rem;
+    }
+    #status .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+    #status.ready .dot { background: #34d399; }
+    #status.error {
+      border-color: rgba(248,113,113,0.35);
+      background: rgba(127,29,29,0.35);
+    }
+    #status.error .dot {
+      background: var(--danger);
+      animation: none;
+    }
+    @keyframes pulse {
+      0%,100% { transform: scale(0.9); opacity: 0.6; }
+      50% { transform: scale(1.2); opacity: 1; }
+    }
+    #history {
+      max-height: 300px;
+      overflow-y: auto;
+      background: var(--panel);
+      border-radius: 12px;
+      padding: 1rem;
+      border: 1px solid rgba(148,163,184,0.1);
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    .message {
+      display: grid;
+      gap: 0.35rem;
+      padding: 0.75rem;
+      border-radius: 12px;
+      background: rgba(15,23,42,0.55);
+      border: 1px solid rgba(148,163,184,0.12);
+    }
+    .message.agent {
+      border-color: rgba(56,189,248,0.35);
+      background: rgba(56,189,248,0.12);
+    }
+    .message .role {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+    }
+    form {
+      display: grid;
+      gap: 0.75rem;
+    }
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      padding: 1rem;
+      border-radius: 12px;
+      border: 1px solid rgba(148,163,184,0.2);
+      background: rgba(15,23,42,0.7);
+      color: var(--text);
+      font: inherit;
+      resize: vertical;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: rgba(56,189,248,0.6);
+      box-shadow: 0 0 0 2px rgba(56,189,248,0.25);
+    }
+    button {
+      justify-self: end;
+      padding: 0.75rem 1.5rem;
+      border-radius: 999px;
+      border: none;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      color: #031019;
+      background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+      cursor: pointer;
+      transition: transform 0.12s ease, opacity 0.12s ease;
+    }
+    button[disabled] {
+      opacity: 0.6;
+      cursor: wait;
+    }
+    button:not([disabled]):hover {
+      transform: translateY(-1px);
+    }
+    #steps {
+      background: rgba(15,23,42,0.7);
+      border-radius: 12px;
+      border: 1px solid rgba(148,163,184,0.12);
+      padding: 1rem;
+      max-height: 220px;
+      overflow-y: auto;
+      font-size: 0.85rem;
+      display: none;
+    }
+    #steps.visible { display: block; }
+    pre {
+      margin: 0;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Chronicle - Pagus Web Demo</h1>
+      <p>Talk to the Historian agent in your browser. Requires an OpenAI API key to be set before launch.</p>
+    </header>
+
+    <section id="status">
+      <span class="dot"></span>
+      <span class="label">Checking agent availability...</span>
+    </section>
+
+    <section id="history" aria-live="polite"></section>
+
+    <form id="chat-form">
+      <label for="message" class="sr-only">Your message</label>
+      <textarea id="message" name="message" placeholder="Ask about Riverton, plan your travel, or explore Pagus Clanis..." required></textarea>
+      <button type="submit">Send to Historian</button>
+    </form>
+
+    <section id="steps">
+      <strong style="display:block;margin-bottom:0.5rem;color:var(--muted);">Intermediate Steps</strong>
+      <pre id="steps-pre"></pre>
+    </section>
+  </main>
+
+  <script>
+    const historyEl = document.getElementById('history');
+    const statusEl = document.getElementById('status');
+    const statusLabel = statusEl.querySelector('.label');
+    const form = document.getElementById('chat-form');
+    const textarea = document.getElementById('message');
+    const stepsPanel = document.getElementById('steps');
+    const stepsPre = document.getElementById('steps-pre');
+
+    function appendMessage(role, text) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'message ' + (role === 'agent' ? 'agent' : 'player');
+
+      const meta = document.createElement('span');
+      meta.className = 'role';
+      meta.textContent = role === 'agent' ? 'Historian' : 'Player';
+
+      const body = document.createElement('div');
+      body.className = 'text';
+      body.textContent = text;
+
+      wrapper.appendChild(meta);
+      wrapper.appendChild(body);
+      historyEl.appendChild(wrapper);
+      historyEl.scrollTop = historyEl.scrollHeight;
+    }
+
+    async function refreshStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        if (data.ready) {
+          statusEl.classList.add('ready');
+          statusLabel.textContent = 'Agent ready. Your messages will call the Historian.';
+        } else {
+          statusEl.classList.add('error');
+          statusLabel.textContent = 'Agent unavailable: set OPENAI_API_KEY before starting the server.';
+        }
+      } catch (error) {
+        statusEl.classList.add('error');
+        statusLabel.textContent = 'Failed to reach server. Check console and reload.';
+      }
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const message = textarea.value.trim();
+      if (!message) return;
+
+      appendMessage('player', message);
+      form.querySelector('button').disabled = true;
+      textarea.value = '';
+
+      try {
+        const res = await fetch('/api/message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          appendMessage('agent', data.error || 'Agent unavailable.');
+          return;
+        }
+        appendMessage('agent', data.reply);
+        if (data.steps && data.steps.length) {
+          stepsPanel.classList.add('visible');
+          stepsPre.textContent = JSON.stringify(data.steps, null, 2);
+        }
+      } catch (error) {
+        appendMessage('agent', 'Request failed: ' + (error?.message || error));
+      } finally {
+        form.querySelector('button').disabled = false;
+        textarea.focus();
+      }
+    });
+
+    refreshStatus();
+  </script>
+</body>
+</html>

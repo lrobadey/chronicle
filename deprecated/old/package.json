@@ -1,0 +1,47 @@
+{
+  "name": "v2",
+  "version": "1.0.0",
+  "description": "**🚀 PURE V2 ARCHITECTURE - ZERO DEPENDENCIES ON V1**",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "serve": "tsx server.ts",
+    "test:adapter": "tsx __tests__/PagusClanisAdapter.test.ts",
+    "test:time": "tsx __tests__/TimeAdvancementTool.test.ts",
+    "demo:pagus": "tsx demos/pagus-demo.ts",
+    "demo:time": "tsx demos/time-advancement-demo.ts",
+    "demo:interactive-time": "tsx demos/interactive-time-cli.ts",
+    "demo:adapter": "tsx demos/adapter-entities-demo.ts",
+    "demo:full-check": "tsx demos/full-system-check.ts",
+    "test": "npm run test:systems",
+    "demo:calc-travel": "tsx demos/calc-travel-demo.ts",
+    "demo:web": "tsx demos/pagus-web-server.ts",
+    "test:travel": "tsx __tests__/RunTravelSystemTool.test.ts",
+    "test:systems": "tsx __tests__/SystemsSmoke.test.ts",
+    "test:agent": "tsx __tests__/AgentOrchestratorWiring.test.ts",
+    "test:all": "npm run test:systems && npm run test:travel && npm run test:time && npm run test:adapter && npm run test:agent",
+    "cli": "tsx demos/interactive-cli.ts",
+    "demo:interactive-agent": "tsx demos/interactive-agent-cli.ts",
+    "demo:full-interactive": "tsx demos/full-system-interactive.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@langchain/core": "^0.3.67",
+    "@langchain/langgraph": "^0.4.3",
+    "@langchain/openai": "^0.6.4",
+    "dotenv": "^17.2.1",
+    "langchain": "^0.3.16",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2",
+    "zod": "^3.25.76",
+    "chalk": "^5.3.0",
+    "ora": "^8.1.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.4",
+    "undici-types": "^7.13.0"
+  }
+}

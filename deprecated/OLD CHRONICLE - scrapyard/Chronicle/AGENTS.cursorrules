@@ -1,0 +1,258 @@
+# AI Agents Guide - Chronicle Project
+
+**⚠️ CRITICAL: This is a working application that users depend on. Extreme caution required. ⚠️**
+
+---
+
+## 🚨 MANDATORY PRINCIPLES
+
+### 0. TASK TRACKING
+- **Always use todo lists** to track all tasks and subtasks.
+- **Update todo lists** as progress is made.
+- **Mark todos as completed or cancelled** immediately when done or no longer needed.
+- **Review and maintain todo lists** to ensure accuracy and clarity throughout the development process.
+
+### 1. PRESERVE FUNCTIONALITY
+- **The current app works well** - do not break it
+- **Every change is potentially dangerous** - treat it as such
+- **Users depend on this app** - prioritize stability over features
+- **If in doubt, don't change it**
+
+### 2. EXTENSIVE REASONING
+- **Think through every change** before making it
+- **Consider all side effects** and dependencies
+- **Plan the entire change** before touching any code
+- **Have a rollback strategy** ready
+- **Document your reasoning** for every decision
+
+### 3. GRADUAL INTEGRATION
+- **Integrate INTO existing architecture** - don't replace it
+- **Add new features alongside** current features
+- **Maintain backward compatibility** at all times
+- **One change at a time** - never multiple simultaneous changes
+- **Test thoroughly** after every single change
+
+### 4. USER CONFIRMATION REQUIRED
+- **ALWAYS ask for user confirmation** before making any changes
+- **Provide detailed explanation** of what will be added/modified
+- **List all files that will be affected** with specific changes
+- **Explain the reasoning** behind each change
+- **Show potential risks** and side effects
+- **Wait for explicit approval** before proceeding
+- **If user asks for clarification** - provide more detail
+- **If user rejects the plan** - propose alternatives or stop
+
+---
+
+## 📋 BEFORE MAKING ANY CHANGES
+
+### Step 1: Understand the Current State
+- [ ] Read and understand the relevant code completely
+- [ ] Identify all dependencies and side effects
+- [ ] Understand the data flow and state management
+- [ ] Know how the current feature works end-to-end
+
+### Step 2: Plan the Change
+- [ ] Write down exactly what you want to change
+- [ ] Identify all files that will be affected
+- [ ] Plan the implementation step by step
+- [ ] Consider alternative approaches
+- [ ] Have a rollback plan ready
+
+### Step 3: Validate the Plan
+- [ ] Does this change preserve existing functionality?
+- [ ] Are there any breaking changes?
+- [ ] How will this affect the user experience?
+- [ ] What could go wrong?
+- [ ] How will I test this change?
+
+### Step 4: Get User Confirmation
+- [ ] **Present detailed plan** to user with all changes listed
+- [ ] **Explain reasoning** for each proposed change
+- [ ] **List all files** that will be modified with specific changes
+- [ ] **Show potential risks** and side effects
+- [ ] **Wait for explicit approval** before proceeding
+- [ ] **If user asks questions** - provide more detail
+- [ ] **If user rejects plan** - propose alternatives or stop
+
+---
+
+## 🔄 INTEGRATION STRATEGY
+
+### Phase 1: Parallel Development
+- **Build new systems separately** from existing code
+- **Test new systems in isolation** before integration
+- **Don't touch existing code** until new systems are proven
+- **Create clear interfaces** between old and new systems
+
+### Phase 2: Gradual Integration
+- **Add new features alongside** existing features
+- **Maintain dual systems** during transition
+- **Test both old and new** approaches
+- **Switch over gradually** - not all at once
+
+### Phase 3: Cleanup
+- **Only after new systems are proven stable**
+- **Remove old code carefully** - one piece at a time
+- **Test thoroughly** after each removal
+- **Keep backups** of removed code
+
+---
+
+## 🧪 TESTING REQUIREMENTS
+
+### Before Making Changes
+- [ ] Current app works correctly
+- [ ] All existing features function properly
+- [ ] Performance is acceptable
+- [ ] No errors in console
+
+### After Making Changes
+- [ ] New feature works as intended
+- [ ] All existing features still work
+- [ ] No new errors or warnings
+- [ ] Performance hasn't degraded
+- [ ] User experience is smooth
+
+### Testing Checklist
+- [ ] **Unit tests** for new components
+- [ ] **Integration tests** with existing systems
+- [ ] **End-to-end tests** of user flows
+- [ ] **Performance tests** to check for regressions
+- [ ] **Manual testing** of all user-facing features
+- [ ] **Error handling** tests
+- [ ] **Edge case** testing
+
+---
+
+## 📊 PROGRESS TRACKING
+
+### Document Everything
+- **Every change made** - what, why, how
+- **Issues encountered** - problems and solutions
+- **Unexpected side effects** - what broke and why
+- **Performance impact** - before/after metrics
+- **User feedback** - how changes affect experience
+
+### Update Living Documents
+- **FUTURE_INTEGRATION.md** - update progress and learnings
+- **This document** - add new guidelines as discovered
+- **Code comments** - explain complex changes
+- **README.md** - update with new features
+
+---
+
+## 🚫 WHAT NOT TO DO
+
+### Never:
+- **Make changes without user confirmation** - ALWAYS ask first
+- **Make multiple changes simultaneously**
+- **Remove working code** without thorough testing
+- **Assume something is safe** to change
+- **Skip testing** to save time
+- **Ignore error messages** or warnings
+- **Break existing functionality** for new features
+- **Make changes without understanding** the current code
+- **Rush implementation** - take time to do it right
+
+### Avoid:
+- **Large refactors** - prefer small, incremental changes
+- **Breaking changes** - maintain backward compatibility
+- **Performance regressions** - test performance impact
+- **User experience degradation** - prioritize smooth UX
+
+---
+
+## ✅ WHAT TO DO
+
+### Always:
+- **Think before coding** - plan thoroughly
+- **Test everything** - no exceptions
+- **Document changes** - explain what and why
+- **Consider side effects** - think about dependencies
+- **Have rollback plans** - know how to undo changes
+- **Preserve functionality** - don't break what works
+- **Communicate clearly** - explain your reasoning
+- **Take your time** - quality over speed
+
+### Prefer:
+- **Small, incremental changes** over large refactors
+- **Additive changes** over replacement changes
+- **Parallel development** over direct modification
+- **Thorough testing** over quick implementation
+- **Clear documentation** over clever code
+
+---
+
+## 🆘 WHEN TO STOP
+
+### Stop immediately if:
+- **Existing functionality breaks** - rollback immediately
+- **Performance degrades significantly** - investigate and fix
+- **User experience suffers** - prioritize user needs
+- **Errors appear** - don't ignore them
+- **You're unsure** about a change - ask for help
+- **The change is too complex** - break it down smaller
+
+### Get help when:
+- **You don't understand** the current code
+- **The change seems risky** - better safe than sorry
+- **Multiple systems** are involved
+- **Performance is critical** - don't guess
+- **User experience** might be affected
+
+---
+
+## 📝 COMMUNICATION
+
+### When making changes:
+1. **Ask for confirmation** - present detailed plan first
+2. **Explain what you're doing** - be clear about the goal
+3. **Document your reasoning** - why this approach?
+4. **List potential risks** - what could go wrong?
+5. **Describe testing plan** - how will you verify it works?
+6. **Note rollback strategy** - how to undo if needed?
+
+### When requesting confirmation:
+- **Present complete plan** with all changes listed
+- **Show file-by-file breakdown** of modifications
+- **Explain the reasoning** behind each change
+- **List potential risks** and side effects
+- **Provide testing strategy** for validation
+- **Wait for explicit approval** before proceeding
+
+### When updating documents:
+- **Be specific** about what changed
+- **Explain why** the change was made
+- **Note any issues** encountered
+- **Record learnings** for future reference
+- **Update progress** accurately
+
+---
+
+## 🎯 SUCCESS CRITERIA
+
+### A successful change:
+- ✅ **Preserves all existing functionality**
+- ✅ **Adds new value** without breaking old value
+- ✅ **Maintains or improves performance**
+- ✅ **Enhances user experience**
+- ✅ **Is thoroughly tested**
+- ✅ **Is well documented**
+- ✅ **Can be rolled back** if needed
+
+### Remember:
+**The goal is to improve the app, not to change it for the sake of changing it. Every change should make the app better for users while maintaining the stability they depend on.**
+
+---
+
+## 📞 EMERGENCY CONTACTS
+
+If something goes wrong:
+1. **Stop making changes** immediately
+2. **Assess the damage** - what's broken?
+3. **Rollback if possible** - restore working state
+4. **Document the issue** - what went wrong and why?
+5. **Get help** - don't try to fix complex issues alone
+
+**Remember: The current app works well. Your job is to make it better, not to break it.** 
