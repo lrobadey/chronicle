@@ -1,4 +1,5 @@
-import type { LLMClient, ResponseInputItem } from '../llm/types';
+import type { LLMClient, ResponseInputItem, ResponseOutputItem } from '../llm/types';
+import { classifyLLMError } from '../llm/errorUtils';
 import { GM_SYSTEM_PROMPT } from './prompts';
 import { GM_TOOL_DEFS } from './tools';
 import type { WorldEvent } from '../../sim/events';
@@ -17,14 +18,28 @@ export interface GMAgentParams {
   runtime: GMToolRuntime;
   llm: LLMClient;
   maxIterations?: number;
-  trace?: { toolCalls: Array<{ tool: string; input: unknown; output: unknown }> };
+  trace?: {
+    toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
+    llmCalls?: Array<{
+      agent: 'gm' | 'npc' | 'narrator';
+      responseId?: string;
+      previousResponseId?: string;
+      inputItems?: number;
+      outputItems?: number;
+      toolCalls?: number;
+      usage?: unknown;
+      status?: string;
+      error?: unknown;
+    }>;
+  };
 }
 
 export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boolean }> {
   const { apiKey, model = 'gpt-5.2', playerText, runtime, llm, maxIterations = 8, trace } = params;
-  let input: ResponseInputItem[] = [
-    { role: 'user', content: playerText },
-  ];
+
+  let previousResponseId: string | undefined;
+  let pendingInput: ResponseInputItem[] = [{ role: 'user', content: playerText }];
+  let hasObservedWorld = false;
 
   if (!apiKey) {
     await runtime.observe_world({ perspective: 'gm' });
@@ -33,22 +48,52 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
   }
 
   for (let i = 0; i < maxIterations; i++) {
-    const response = await llm.responsesCreate({
-      apiKey,
-      model,
-      instructions: GM_SYSTEM_PROMPT,
-      input,
-      tools: GM_TOOL_DEFS,
+    let response;
+    try {
+      response = await llm.responsesCreate({
+        apiKey,
+        model,
+        instructions: GM_SYSTEM_PROMPT,
+        input: pendingInput,
+        previous_response_id: previousResponseId,
+        tools: GM_TOOL_DEFS,
+        truncation: 'auto',
+        store: true,
+      });
+    } catch (error) {
+      const classified = classifyLLMError(error);
+      pushLLMTrace(trace, {
+        agent: 'gm',
+        previousResponseId: previousResponseId,
+        inputItems: pendingInput.length,
+        status: 'failed',
+        error: classified,
+      });
+      throw error;
+    }
+
+    const responseItems = response.output || [];
+    const toolCalls = responseItems.filter(isFunctionCallItem);
+    pushLLMTrace(trace, {
+      agent: 'gm',
+      responseId: response.id,
+      previousResponseId,
+      inputItems: pendingInput.length,
+      outputItems: responseItems.length,
+      toolCalls: toolCalls.length,
+      usage: response.usage,
+      status: response.status,
+      error: response.error ?? response.incomplete_details,
     });
 
-    input = input.concat(response.output as ResponseInputItem[]);
-
-    const toolCalls = response.output.filter(isFunctionCallItem);
+    previousResponseId = response.id || previousResponseId;
 
     if (!toolCalls.length) {
       await runtime.finish_turn({ summary: response.output_text || 'Turn ended' });
       return { finished: true };
     }
+
+    const nextInput: ResponseInputItem[] = [];
 
     for (let idx = 0; idx < toolCalls.length; idx++) {
       const call = toolCalls[idx];
@@ -58,49 +103,97 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       if (parsed.ok === false) {
         const output = { error: 'invalid_tool_arguments', details: parsed.error };
         trace?.toolCalls.push({ tool: call.name, input: call.arguments, output });
-        input.push({ type: 'function_call_output', call_id: callId, output: JSON.stringify(output) });
+        nextInput.push({
+          type: 'function_call_output',
+          call_id: callId,
+          output: safeJSONStringify(output),
+        });
         continue;
       }
 
       const args = parsed.value;
+      if (call.name !== 'observe_world' && !hasObservedWorld) {
+        const output = {
+          error: 'observe_world_required',
+          details: 'observe_world must be called successfully before other GM tools',
+        };
+        trace?.toolCalls.push({ tool: call.name, input: args, output });
+        nextInput.push({
+          type: 'function_call_output',
+          call_id: callId,
+          output: safeJSONStringify(output),
+        });
+        continue;
+      }
+
       try {
         if (call.name === 'observe_world') {
           const output = await runtime.observe_world(args as { perspective: 'gm' | 'player' });
+          hasObservedWorld = true;
           trace?.toolCalls.push({ tool: call.name, input: args, output });
-          input.push({ type: 'function_call_output', call_id: callId, output: JSON.stringify(output) });
+          nextInput.push({
+            type: 'function_call_output',
+            call_id: callId,
+            output: safeJSONStringify(output),
+          });
           continue;
         }
 
         if (call.name === 'consult_npc') {
           const output = await runtime.consult_npc(args as { npcId: string; topic?: string });
           trace?.toolCalls.push({ tool: call.name, input: args, output });
-          input.push({ type: 'function_call_output', call_id: callId, output: JSON.stringify(output) });
+          nextInput.push({
+            type: 'function_call_output',
+            call_id: callId,
+            output: safeJSONStringify(output),
+          });
           continue;
         }
 
         if (call.name === 'propose_events') {
           const output = await runtime.propose_events(args as { events: WorldEvent[] });
           trace?.toolCalls.push({ tool: call.name, input: args, output });
-          input.push({ type: 'function_call_output', call_id: callId, output: JSON.stringify(output) });
+          nextInput.push({
+            type: 'function_call_output',
+            call_id: callId,
+            output: safeJSONStringify(output),
+          });
           continue;
         }
 
         if (call.name === 'finish_turn') {
           const output = await runtime.finish_turn(args as { summary: string });
           trace?.toolCalls.push({ tool: call.name, input: args, output });
-          input.push({ type: 'function_call_output', call_id: callId, output: JSON.stringify(output) });
+          nextInput.push({
+            type: 'function_call_output',
+            call_id: callId,
+            output: safeJSONStringify(output),
+          });
           return { finished: true };
         }
 
         const output = { error: 'unknown_tool', name: call.name };
         trace?.toolCalls.push({ tool: call.name, input: args, output });
-        input.push({ type: 'function_call_output', call_id: callId, output: JSON.stringify(output) });
+        nextInput.push({
+          type: 'function_call_output',
+          call_id: callId,
+          output: safeJSONStringify(output),
+        });
       } catch (error) {
-        const output = { error: 'tool_runtime_error', message: error instanceof Error ? error.message : 'unknown_error' };
+        const output = {
+          error: 'tool_runtime_error',
+          details: classifyLLMError(error),
+        };
         trace?.toolCalls.push({ tool: call.name, input: args, output });
-        input.push({ type: 'function_call_output', call_id: callId, output: JSON.stringify(output) });
+        nextInput.push({
+          type: 'function_call_output',
+          call_id: callId,
+          output: safeJSONStringify(output),
+        });
       }
     }
+
+    pendingInput = nextInput;
   }
 
   await runtime.finish_turn({ summary: 'Max iterations reached' });
@@ -120,6 +213,38 @@ function parseToolArgs(value: string | undefined): { ok: true; value: Record<str
   }
 }
 
-function isFunctionCallItem(item: Record<string, unknown>): item is { type: 'function_call'; name: string; arguments: string; call_id?: string } {
+function safeJSONStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return JSON.stringify({ error: 'non_serializable_tool_output' });
+  }
+}
+
+function isFunctionCallItem(item: ResponseOutputItem): item is {
+  type: 'function_call';
+  name: string;
+  arguments: string;
+  call_id?: string;
+} {
   return item.type === 'function_call' && typeof item.name === 'string' && typeof item.arguments === 'string';
+}
+
+function pushLLMTrace(
+  trace: GMAgentParams['trace'] | undefined,
+  entry: {
+    agent: 'gm' | 'npc' | 'narrator';
+    responseId?: string;
+    previousResponseId?: string;
+    inputItems?: number;
+    outputItems?: number;
+    toolCalls?: number;
+    usage?: unknown;
+    status?: string;
+    error?: unknown;
+  },
+) {
+  if (!trace) return;
+  trace.llmCalls = trace.llmCalls || [];
+  trace.llmCalls.push(entry);
 }

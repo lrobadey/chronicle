@@ -19,6 +19,17 @@ export interface TurnRecord {
 
 export interface TurnTrace {
   toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
+  llmCalls?: Array<{
+    agent: 'gm' | 'npc' | 'narrator';
+    responseId?: string;
+    previousResponseId?: string;
+    inputItems?: number;
+    outputItems?: number;
+    toolCalls?: number;
+    usage?: unknown;
+    status?: string;
+    error?: unknown;
+  }>;
   llmMessages?: Array<{ role: string; content?: string }>;
 }
 

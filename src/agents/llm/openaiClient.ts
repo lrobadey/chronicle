@@ -4,13 +4,20 @@ import type { LLMClient, ResponseCreateParams, ResponseCreateResult } from './ty
 export class OpenAIClient implements LLMClient {
   async responsesCreate(params: ResponseCreateParams): Promise<ResponseCreateResult> {
     if (!params.apiKey) {
-      return { output: [], output_text: '' };
+      return { id: 'local-no-api-key', output: [], output_text: '', status: 'completed' };
     }
 
     const client = new OpenAI({ apiKey: params.apiKey });
     const response = await client.responses.create({
       model: params.model,
       input: params.input as any,
+      previous_response_id: params.previous_response_id,
+      conversation: params.conversation as any,
+      store: params.store,
+      truncation: params.truncation,
+      max_output_tokens: params.max_output_tokens,
+      text: params.text as any,
+      metadata: params.metadata,
       instructions: params.instructions,
       reasoning: params.reasoning ?? { effort: 'medium' },
       tools: params.tools as any,
@@ -18,6 +25,11 @@ export class OpenAIClient implements LLMClient {
     } as any);
 
     return {
+      id: response.id,
+      status: response.status ?? undefined,
+      error: response.error ?? undefined,
+      incomplete_details: response.incomplete_details ?? undefined,
+      usage: response.usage as unknown as ResponseCreateResult['usage'],
       output: (response.output ?? []) as unknown as ResponseCreateResult['output'],
       output_text: response.output_text ?? '',
     };

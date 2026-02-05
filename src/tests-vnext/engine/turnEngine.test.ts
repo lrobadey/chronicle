@@ -63,12 +63,23 @@ describe('TurnEngine', () => {
     try {
       const llm = new QueueLLM([
         {
+          output: [{ type: 'function_call', name: 'observe_world', arguments: '{"perspective":"gm"}', call_id: 'gm0' }],
+          output_text: '',
+        },
+        {
           output: [{ type: 'function_call', name: 'consult_npc', arguments: '{"npcId":"mira-salt"}', call_id: 'gm1' }],
           output_text: '',
         },
         {
-          output: [],
-          output_text: '{"publicUtterance":"Storm coming.","privateIntent":"warn_player","emotionalTone":"grim"}',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_npc_turn',
+              arguments: '{"publicUtterance":"Storm coming.","privateIntent":"warn_player","emotionalTone":"grim"}',
+              call_id: 'npc1',
+            },
+          ],
+          output_text: '',
         },
         {
           output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm2' }],
@@ -104,11 +115,15 @@ describe('TurnEngine', () => {
     try {
       const llm = new QueueLLM([
         {
-          output: [{ type: 'function_call', name: 'propose_events', arguments: '{"events":[{"type":"MoveActor","actorId":"player-1","to":{"x":10,"y":0,"z":0}}]}', call_id: 't1' }],
+          output: [{ type: 'function_call', name: 'observe_world', arguments: '{"perspective":"gm"}', call_id: 't1a' }],
           output_text: '',
         },
         {
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 't2' }],
+          output: [{ type: 'function_call', name: 'propose_events', arguments: '{"events":[{"type":"MoveActor","actorId":"player-1","to":{"x":10,"y":0,"z":0},"toLocationId":null,"mode":"walk","note":null}]}', call_id: 't1b' }],
+          output_text: '',
+        },
+        {
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 't1c' }],
           output_text: '',
         },
         {
@@ -116,11 +131,15 @@ describe('TurnEngine', () => {
           output_text: 'The shoreline shifts under your boots.',
         },
         {
-          output: [{ type: 'function_call', name: 'propose_events', arguments: '{"events":[{"type":"MoveActor","actorId":"player-1","to":{"x":20,"y":0,"z":0}}]}', call_id: 't3' }],
+          output: [{ type: 'function_call', name: 'observe_world', arguments: '{"perspective":"gm"}', call_id: 't2a' }],
           output_text: '',
         },
         {
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 't4' }],
+          output: [{ type: 'function_call', name: 'propose_events', arguments: '{"events":[{"type":"MoveActor","actorId":"player-1","to":{"x":20,"y":0,"z":0},"toLocationId":null,"mode":"walk","note":null}]}', call_id: 't2b' }],
+          output_text: '',
+        },
+        {
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 't2c' }],
           output_text: '',
         },
         {

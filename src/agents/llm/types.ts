@@ -15,6 +15,13 @@ export interface ResponseCreateParams {
   apiKey?: string;
   model: string;
   input: string | ResponseInputItem[];
+  previous_response_id?: string;
+  conversation?: string;
+  store?: boolean;
+  truncation?: 'auto' | 'disabled';
+  max_output_tokens?: number;
+  text?: { format?: unknown };
+  metadata?: Record<string, string>;
   instructions?: string;
   reasoning?: {
     effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
@@ -28,7 +35,22 @@ export interface ResponseOutputItem {
   [key: string]: unknown;
 }
 
+export interface ResponseUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  output_tokens_details?: {
+    reasoning_tokens?: number;
+  };
+  [key: string]: unknown;
+}
+
 export interface ResponseCreateResult {
+  id: string;
+  status?: string;
+  error?: unknown;
+  incomplete_details?: unknown;
+  usage?: ResponseUsage;
   output: ResponseOutputItem[];
   output_text: string;
 }

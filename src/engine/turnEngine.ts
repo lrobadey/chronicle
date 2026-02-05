@@ -96,7 +96,7 @@ export class TurnEngine {
     const acceptedEvents: WorldEvent[] = [];
     const rejectedEvents: Array<{ event: WorldEvent; reason: string }> = [];
     const npcOutputs: NpcAgentOutput[] = [];
-    const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [] } : undefined;
+    const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [], llmCalls: [] } : undefined;
     draft.meta.turn = nextTurn;
 
     const applyProposedEvents = (events: WorldEvent[]) => {
@@ -156,6 +156,7 @@ export class TurnEngine {
           observation,
           playerText,
           llm: this.llm,
+          trace,
         });
         npcOutputs.push(output);
         return output;
@@ -205,6 +206,7 @@ export class TurnEngine {
       telemetry: afterTelemetry,
       diff,
       llm: this.llm,
+      trace,
     });
 
     const record: TurnRecord = {
