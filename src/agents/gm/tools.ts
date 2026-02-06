@@ -21,218 +21,49 @@ const PROMPT_OPTION_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-const PENDING_PROMPT_SCHEMA = {
-  oneOf: [
-    { type: 'null' },
-    {
-      type: 'object',
-      properties: {
-        id: { type: 'string' },
-        kind: { type: 'string', enum: ['confirm_travel', 'clarify_target', 'clarify_explore'] },
-        question: { type: 'string' },
-        options: { type: ['array', 'null'], items: PROMPT_OPTION_SCHEMA },
-        data: { type: ['object', 'null'], additionalProperties: true },
-        createdTurn: { type: 'number' },
-      },
-      required: ['id', 'kind', 'question', 'options', 'data', 'createdTurn'],
-      additionalProperties: false,
+const EVENT_ITEM_SCHEMA = {
+  type: 'object',
+  properties: {
+    type: {
+      type: 'string',
+      enum: [
+        'MoveActor',
+        'PickUpItem',
+        'DropItem',
+        'Speak',
+        'AdvanceTime',
+        'CreateEntity',
+        'SetFlag',
+        'TravelToLocation',
+        'Explore',
+        'Inspect',
+      ],
     },
-  ],
+    actorId: { type: 'string' },
+    to: GRID_POS_SCHEMA,
+    toLocationId: { type: ['string', 'null'] },
+    mode: { type: ['string', 'null'], enum: ['walk', 'run', null] },
+    itemId: { type: 'string' },
+    at: { type: ['object', 'null'], additionalProperties: true },
+    text: { type: 'string' },
+    toActorId: { type: ['string', 'null'] },
+    minutes: { type: 'number' },
+    entity: { type: 'object', additionalProperties: true },
+    key: { type: 'string' },
+    value: {
+      type: ['string', 'number', 'boolean', 'null', 'object', 'array'],
+    },
+    locationId: { type: 'string' },
+    pace: { type: ['string', 'null'], enum: ['walk', 'run', null] },
+    confirmId: { type: ['string', 'null'] },
+    area: { type: 'string', enum: ['shoreline', 'docks', 'under_ribs', 'around_here'] },
+    direction: { type: ['string', 'null'], enum: ['east', 'west', 'north', 'south', null] },
+    subject: { type: 'string' },
+    note: { type: ['string', 'null'] },
+  },
+  required: ['type'],
+  additionalProperties: false,
 } as const;
-
-const EVENT_SCHEMAS = [
-  {
-    type: 'object',
-    properties: {
-      type: { type: 'string', enum: ['MoveActor'] },
-      actorId: { type: 'string' },
-      to: GRID_POS_SCHEMA,
-      toLocationId: { type: ['string', 'null'] },
-      mode: { type: ['string', 'null'], enum: ['walk', 'run', null] },
-      note: { type: ['string', 'null'] },
-    },
-    required: ['type', 'actorId', 'to', 'toLocationId', 'mode', 'note'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      type: { type: 'string', enum: ['PickUpItem'] },
-      actorId: { type: 'string' },
-      itemId: { type: 'string' },
-      note: { type: ['string', 'null'] },
-    },
-    required: ['type', 'actorId', 'itemId', 'note'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      type: { type: 'string', enum: ['DropItem'] },
-      actorId: { type: 'string' },
-      itemId: { type: 'string' },
-      at: {
-        oneOf: [GRID_POS_SCHEMA, { type: 'null' }],
-      },
-      note: { type: ['string', 'null'] },
-    },
-    required: ['type', 'actorId', 'itemId', 'at', 'note'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      type: { type: 'string', enum: ['Speak'] },
-      actorId: { type: 'string' },
-      text: { type: 'string' },
-      toActorId: { type: ['string', 'null'] },
-      note: { type: ['string', 'null'] },
-    },
-    required: ['type', 'actorId', 'text', 'toActorId', 'note'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      type: { type: 'string', enum: ['AdvanceTime'] },
-      minutes: { type: 'number' },
-      note: { type: ['string', 'null'] },
-    },
-    required: ['type', 'minutes', 'note'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      type: { type: 'string', enum: ['CreateEntity'] },
-      entity: {
-        oneOf: [
-          {
-            type: 'object',
-            properties: {
-              kind: { type: 'string', enum: ['item'] },
-              data: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string' },
-                  name: { type: 'string' },
-                  description: { type: ['string', 'null'] },
-                  location: {
-                    type: 'object',
-                    properties: {
-                      kind: { type: 'string', enum: ['ground'] },
-                      pos: GRID_POS_SCHEMA,
-                    },
-                    required: ['kind', 'pos'],
-                    additionalProperties: false,
-                  },
-                },
-                required: ['id', 'name', 'description', 'location'],
-                additionalProperties: false,
-              },
-            },
-            required: ['kind', 'data'],
-            additionalProperties: false,
-          },
-          {
-            type: 'object',
-            properties: {
-              kind: { type: 'string', enum: ['npc'] },
-              data: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string' },
-                  name: { type: 'string' },
-                  pos: GRID_POS_SCHEMA,
-                },
-                required: ['id', 'name', 'pos'],
-                additionalProperties: false,
-              },
-            },
-            required: ['kind', 'data'],
-            additionalProperties: false,
-          },
-          {
-            type: 'object',
-            properties: {
-              kind: { type: 'string', enum: ['location'] },
-              data: {
-                type: 'object',
-                properties: {
-                  id: { type: 'string' },
-                  name: { type: 'string' },
-                  description: { type: 'string' },
-                  anchor: GRID_POS_SCHEMA,
-                },
-                required: ['id', 'name', 'description', 'anchor'],
-                additionalProperties: false,
-              },
-            },
-            required: ['kind', 'data'],
-            additionalProperties: false,
-          },
-        ],
-      },
-      note: { type: ['string', 'null'] },
-    },
-    required: ['type', 'entity', 'note'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      type: { type: 'string', enum: ['SetFlag'] },
-      key: { type: 'string' },
-      value: {
-        oneOf: [
-          { type: 'string' },
-          { type: 'number' },
-          { type: 'boolean' },
-          { type: 'null' },
-        ],
-      },
-      note: { type: ['string', 'null'] },
-    },
-    required: ['type', 'key', 'value', 'note'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      type: { type: 'string', enum: ['TravelToLocation'] },
-      actorId: { type: 'string' },
-      locationId: { type: 'string' },
-      pace: { type: ['string', 'null'], enum: ['walk', 'run', null] },
-      confirmId: { type: ['string', 'null'] },
-      note: { type: ['string', 'null'] },
-    },
-    required: ['type', 'actorId', 'locationId', 'pace', 'confirmId', 'note'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      type: { type: 'string', enum: ['Explore'] },
-      actorId: { type: 'string' },
-      area: { type: 'string', enum: ['shoreline', 'docks', 'under_ribs', 'around_here'] },
-      direction: { type: ['string', 'null'], enum: ['east', 'west', 'north', 'south', null] },
-      note: { type: ['string', 'null'] },
-    },
-    required: ['type', 'actorId', 'area', 'direction', 'note'],
-    additionalProperties: false,
-  },
-  {
-    type: 'object',
-    properties: {
-      type: { type: 'string', enum: ['Inspect'] },
-      actorId: { type: 'string' },
-      subject: { type: 'string' },
-      note: { type: ['string', 'null'] },
-    },
-    required: ['type', 'actorId', 'subject', 'note'],
-    additionalProperties: false,
-  },
-] as const;
 
 export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
   {
@@ -271,7 +102,7 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
     parameters: {
       type: 'object',
       properties: {
-        events: { type: 'array', items: { oneOf: EVENT_SCHEMAS } },
+        events: { type: 'array', items: EVENT_ITEM_SCHEMA },
       },
       required: ['events'],
       additionalProperties: false,
@@ -289,10 +120,20 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
         playerPrompt: {
           type: ['object', 'null'],
           properties: {
-            pending: PENDING_PROMPT_SCHEMA,
+            pending: {
+              type: ['object', 'null'],
+              properties: {
+                id: { type: 'string' },
+                kind: { type: 'string', enum: ['confirm_travel', 'clarify_target', 'clarify_explore'] },
+                question: { type: 'string' },
+                options: { type: ['array', 'null'], items: PROMPT_OPTION_SCHEMA },
+                data: { type: ['object', 'null'], additionalProperties: true },
+                createdTurn: { type: 'number' },
+              },
+              additionalProperties: false,
+            },
             clear: { type: ['boolean', 'null'] },
           },
-          required: ['pending', 'clear'],
           additionalProperties: false,
         },
       },
