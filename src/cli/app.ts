@@ -15,7 +15,7 @@ export interface CliState {
 }
 
 export interface CliEngine {
-  initSession(params: { sessionId?: string; apiKey?: string }): Promise<InitResult>;
+  initSession(params: { sessionId?: string; apiKey?: string; stream?: { onOpeningDelta?: (delta: string) => void } }): Promise<InitResult>;
   getTelemetry(sessionId: string, playerId: string): Promise<RunTurnOutput['telemetry']>;
   runTurn(input: {
     sessionId: string;
@@ -24,6 +24,7 @@ export interface CliEngine {
     apiKey?: string;
     narratorStyle?: NarratorStyle;
     debug?: { includeTrace?: boolean };
+    stream?: { onNarrationDelta?: (delta: string) => void };
   }): Promise<RunTurnOutput>;
 }
 
@@ -95,7 +96,11 @@ export async function initCliSession(params: {
   write: (text: string) => void;
 }): Promise<CliState> {
   const { engine, sessionId, apiKey, narratorStyle, includeTrace, write } = params;
-  const { result, usedFallback } = await initWithFallback(engine, sessionId, apiKey);
+  let openingStreamed = false;
+  const { result, usedFallback } = await initWithFallback(engine, sessionId, apiKey, delta => {
+    openingStreamed = true;
+    write(delta);
+  });
 
   if (!apiKey) {
     write('(No API key - running in deterministic fallback mode)\n\n');
@@ -103,7 +108,11 @@ export async function initCliSession(params: {
     write('(API unavailable - switched to deterministic fallback mode)\n\n');
   }
 
-  write(`${result.opening}\n\n`);
+  if (openingStreamed) {
+    write('\n\n');
+  } else {
+    write(`${result.opening}\n\n`);
+  }
   return {
     sessionId: result.sessionId,
     playerId: 'player-1',
@@ -180,14 +189,22 @@ export async function handleCliLine(params: {
     }
   }
 
-  const turn = await runTurnWithFallback(engine, state, line);
+  let narrationStreamed = false;
+  const turn = await runTurnWithFallback(engine, state, line, delta => {
+    narrationStreamed = true;
+    write(delta);
+  });
   if (turn.usedFallback) {
     state = { ...state, apiKey: undefined };
     write('\n(API request failed - switched to deterministic fallback mode)\n');
   }
 
   state = { ...state, sessionId: turn.result.sessionId };
-  write(`\n${turn.result.narration}\n`);
+  if (narrationStreamed) {
+    write('\n');
+  } else {
+    write(`\n${turn.result.narration}\n`);
+  }
 
   if (state.includeTrace) {
     const tools = turn.result.trace?.toolCalls?.map(call => call.tool) ?? [];
@@ -239,25 +256,36 @@ Turn: ${telemetry.turn}
 `.trimEnd();
 }
 
-async function initWithFallback(engine: CliEngine, sessionId: string | undefined, apiKey: string | undefined) {
+async function initWithFallback(
+  engine: CliEngine,
+  sessionId: string | undefined,
+  apiKey: string | undefined,
+  onOpeningDelta?: (delta: string) => void,
+) {
   if (!apiKey) {
-    return { result: await engine.initSession({ sessionId }), usedFallback: false };
+    return { result: await engine.initSession({ sessionId, stream: onOpeningDelta ? { onOpeningDelta } : undefined }), usedFallback: false };
   }
   try {
-    return { result: await engine.initSession({ sessionId, apiKey }), usedFallback: false };
+    return { result: await engine.initSession({ sessionId, apiKey, stream: onOpeningDelta ? { onOpeningDelta } : undefined }), usedFallback: false };
   } catch (error) {
     if (!isRecoverableLLMError(error)) throw error;
-    return { result: await engine.initSession({ sessionId }), usedFallback: true };
+    return { result: await engine.initSession({ sessionId, stream: onOpeningDelta ? { onOpeningDelta } : undefined }), usedFallback: true };
   }
 }
 
-async function runTurnWithFallback(engine: CliEngine, state: CliState, playerText: string) {
+async function runTurnWithFallback(
+  engine: CliEngine,
+  state: CliState,
+  playerText: string,
+  onNarrationDelta?: (delta: string) => void,
+) {
   const payload = {
     sessionId: state.sessionId,
     playerId: state.playerId,
     playerText,
     narratorStyle: state.narratorStyle,
     debug: state.includeTrace ? { includeTrace: true } : undefined,
+    stream: onNarrationDelta ? { onNarrationDelta } : undefined,
   };
 
   if (!state.apiKey) {

@@ -4,21 +4,23 @@ import type { CliEngine, CliState } from '../../cli/app';
 import { handleCliLine, initCliSession, resolveApiKey } from '../../cli/app';
 
 class StubCliEngine implements CliEngine {
-  readonly initCalls: Array<{ sessionId?: string; apiKey?: string }> = [];
+  readonly initCalls: Array<{ sessionId?: string; apiKey?: string; stream?: { onOpeningDelta?: (delta: string) => void } }> = [];
   readonly turnCalls: Array<{ apiKey?: string; playerText: string; includeTrace?: boolean }> = [];
   initCounter = 0;
 
-  async initSession(params: { sessionId?: string; apiKey?: string }) {
+  async initSession(params: { sessionId?: string; apiKey?: string; stream?: { onOpeningDelta?: (delta: string) => void } }) {
     this.initCalls.push(params);
     if (params.apiKey === 'bad-key') {
       throw { status: 429, code: 'insufficient_quota', name: 'RateLimitError' };
     }
     this.initCounter += 1;
+    const opening = `opening-${params.sessionId || `session-${this.initCounter}`}`;
+    params.stream?.onOpeningDelta?.(opening);
     return {
       sessionId: params.sessionId || `session-${this.initCounter}`,
       created: true,
       telemetry: await this.getTelemetry(params.sessionId || `session-${this.initCounter}`, 'player-1'),
-      opening: `opening-${params.sessionId || `session-${this.initCounter}`}`,
+      opening,
     };
   }
 
@@ -51,6 +53,7 @@ class StubCliEngine implements CliEngine {
     apiKey?: string;
     narratorStyle?: 'lyric' | 'cinematic' | 'michener';
     debug?: { includeTrace?: boolean };
+    stream?: { onNarrationDelta?: (delta: string) => void };
   }) {
     this.turnCalls.push({
       apiKey: input.apiKey,
@@ -60,13 +63,15 @@ class StubCliEngine implements CliEngine {
     if (input.apiKey === 'bad-key') {
       throw { status: 429, code: 'insufficient_quota', name: 'RateLimitError' };
     }
+    const narration = `narration-${input.playerText}`;
+    input.stream?.onNarrationDelta?.(narration);
     return {
       sessionId: input.sessionId,
       turn: 1,
       acceptedEvents: [],
       rejectedEvents: [],
       telemetry: await this.getTelemetry(input.sessionId, input.playerId),
-      narration: `narration-${input.playerText}`,
+      narration,
       trace: input.debug?.includeTrace
         ? { toolCalls: [{ tool: 'observe_world', input: { perspective: 'player' }, output: { ok: true } }] }
         : undefined,
@@ -97,6 +102,7 @@ describe('CLI app', () => {
     assert.equal(engine.initCalls[0]?.apiKey, 'bad-key');
     assert.equal(engine.initCalls[1]?.apiKey, undefined);
     assert.ok(writes.join('').includes('switched to deterministic fallback mode'));
+    assert.ok(writes.join('').includes('opening-session-1'));
   });
 
   it('handles trace, style, and turn fallback robustly', async () => {
@@ -122,6 +128,7 @@ describe('CLI app', () => {
     assert.equal(engine.turnCalls[0]?.apiKey, 'bad-key');
     assert.equal(engine.turnCalls[1]?.apiKey, undefined);
     assert.equal(engine.turnCalls[1]?.includeTrace, true);
+    assert.ok(writes.join('').includes('narration-look around'));
     assert.ok(writes.join('').includes('Trace: observe_world'));
   });
 });

@@ -24,7 +24,7 @@ Legacy runtime code was moved out of active source to `deprecated/legacy-v4/src`
 
 Input:
 ```json
-{ "sessionId": "optional", "apiKey": "optional" }
+{ "sessionId": "optional", "apiKey": "optional", "stream": true }
 ```
 
 Output:
@@ -46,6 +46,7 @@ Input:
   "sessionId": "string",
   "playerText": "string",
   "apiKey": "optional",
+  "stream": true,
   "narratorStyle": "lyric|cinematic|michener",
   "debug": { "includeTrace": true }
 }
@@ -63,6 +64,16 @@ Output (additive vNext fields):
   "trace": {}
 }
 ```
+
+Streaming mode:
+- `POST /api/init` and `POST /api/turn` accept `"stream": true`.
+- When enabled, the server responds with `text/event-stream` domain events.
+
+SSE events:
+- Init: `init.started`, `opening.delta`, `init.completed`, `error`
+- Turn: `turn.started`, `narration.delta`, `turn.completed`, `error`
+
+`init.completed` and `turn.completed` carry the same payload shape as non-stream JSON responses.
 
 Error shape:
 ```json

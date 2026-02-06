@@ -37,19 +37,26 @@ describe('TurnEngine', () => {
         },
       ]);
       const engine = new TurnEngine({ store, llm });
-      const init = await engine.initSession({});
+      const openingDeltas: string[] = [];
+      const init = await engine.initSession({
+        stream: { onOpeningDelta: delta => openingDeltas.push(delta) },
+      });
+      assert.equal(openingDeltas.length > 0, true);
 
+      const narrationDeltas: string[] = [];
       const turn = await engine.runTurn({
         sessionId: init.sessionId,
         playerId: 'player-1',
         playerText: 'Move east',
         apiKey: 'test-key',
+        stream: { onNarrationDelta: delta => narrationDeltas.push(delta) },
       });
 
       assert.equal(turn.turn, 1);
       assert.equal(turn.acceptedEvents.length, 1);
       assert.equal(turn.acceptedEvents[0]?.meta?.turn, 1);
       assert.equal(turn.acceptedEvents[0]?.meta?.by, 'gm');
+      assert.equal(narrationDeltas.length > 0, true);
 
       const persisted = await store.loadSession(init.sessionId);
       assert.equal(persisted?.meta.turn, 1);

@@ -38,6 +38,18 @@ async function createRunningServer(): Promise<RunningServer> {
   return { server, baseUrl: `http://127.0.0.1:${address.port}` };
 }
 
+function parseSSE(payload: string): Array<{ event: string; data: unknown }> {
+  const blocks = payload.split('\n\n').map(block => block.trim()).filter(Boolean);
+  return blocks.map(block => {
+    const lines = block.split('\n');
+    const eventLine = lines.find(line => line.startsWith('event: '));
+    const dataLine = lines.find(line => line.startsWith('data: '));
+    const event = eventLine ? eventLine.slice('event: '.length) : 'message';
+    const data = dataLine ? JSON.parse(dataLine.slice('data: '.length)) as unknown : undefined;
+    return { event, data };
+  });
+}
+
 describe('vNext API compatibility', () => {
   it('returns compatible shape for /api/init and /api/turn', async () => {
     const { baseUrl } = await createRunningServer();
@@ -85,5 +97,60 @@ describe('vNext API compatibility', () => {
     const body = await turnResponse.json() as Record<string, unknown>;
     assert.equal(body.code, 'invalid_input');
     assert.equal(typeof body.error, 'string');
+  });
+
+  it('streams /api/init with SSE domain events', async () => {
+    const { baseUrl } = await createRunningServer();
+    const response = await fetch(`${baseUrl}/api/init`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ stream: true }),
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal((response.headers.get('content-type') || '').includes('text/event-stream'), true);
+    const payload = await response.text();
+    const events = parseSSE(payload);
+    assert.deepEqual(events.map(event => event.event), [
+      'init.started',
+      'opening.delta',
+      'init.completed',
+    ]);
+    const completed = events[2]?.data as Record<string, unknown>;
+    assert.equal(typeof completed.sessionId, 'string');
+    assert.equal(typeof completed.initialNarration, 'string');
+  });
+
+  it('streams /api/turn with SSE domain events', async () => {
+    const { baseUrl } = await createRunningServer();
+    const initResponse = await fetch(`${baseUrl}/api/init`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    const initBody = await initResponse.json() as Record<string, unknown>;
+
+    const response = await fetch(`${baseUrl}/api/turn`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: initBody.sessionId,
+        playerText: 'Look around',
+        stream: true,
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal((response.headers.get('content-type') || '').includes('text/event-stream'), true);
+    const payload = await response.text();
+    const events = parseSSE(payload);
+    assert.deepEqual(events.map(event => event.event), [
+      'turn.started',
+      'narration.delta',
+      'turn.completed',
+    ]);
+    const completed = events[2]?.data as Record<string, unknown>;
+    assert.equal(typeof completed.sessionId, 'string');
+    assert.equal(typeof completed.narration, 'string');
+    assert.equal(typeof completed.turn, 'number');
   });
 });

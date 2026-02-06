@@ -43,6 +43,7 @@ export interface RunTurnInput {
   apiKey?: string;
   narratorStyle?: NarratorStyle;
   debug?: { includeTrace?: boolean };
+  stream?: { onNarrationDelta?: (delta: string) => void };
 }
 
 export interface RunTurnOutput {
@@ -66,12 +67,12 @@ export class TurnEngine {
     this.worldFactory = config.worldFactory || (() => createIsleOfMarrowWorldVNext());
   }
 
-  async initSession(params: { sessionId?: string; apiKey?: string }): Promise<InitResult> {
-    const { sessionId, apiKey } = params;
+  async initSession(params: { sessionId?: string; apiKey?: string; stream?: { onOpeningDelta?: (delta: string) => void } }): Promise<InitResult> {
+    const { sessionId, apiKey, stream } = params;
     const ensured = await this.store.ensureSession(sessionId, this.worldFactory);
     assertNoInvariantIssues(ensured.state, 'Session initialized with invalid world state');
     const telemetry = buildTelemetry(ensured.state, 'player-1');
-    const opening = await narrateOpening({ apiKey, telemetry, llm: this.llm });
+    const opening = await narrateOpening({ apiKey, telemetry, llm: this.llm, onOpeningDelta: stream?.onOpeningDelta });
     return { sessionId: ensured.sessionId, created: ensured.created, telemetry, opening };
   }
 
@@ -83,7 +84,7 @@ export class TurnEngine {
   }
 
   async runTurn(input: RunTurnInput): Promise<RunTurnOutput> {
-    const { sessionId, playerId, playerText, apiKey, narratorStyle, debug } = input;
+    const { sessionId, playerId, playerText, apiKey, narratorStyle, debug, stream } = input;
     if (!playerText?.trim()) throw new InputValidationError('playerText is required');
 
     const state = await this.store.loadSession(sessionId);
@@ -222,6 +223,7 @@ export class TurnEngine {
       diff,
       rejectedEvents,
       llm: this.llm,
+      onNarrationDelta: stream?.onNarrationDelta,
       trace,
     });
 

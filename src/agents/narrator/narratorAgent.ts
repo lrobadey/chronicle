@@ -15,6 +15,7 @@ export interface NarratorParams {
   diff: TurnDiff;
   rejectedEvents?: Array<{ reason: string; event?: unknown }>;
   llm: LLMClient;
+  onNarrationDelta?: (delta: string) => void;
   trace?: {
     llmCalls?: Array<{
       agent: 'gm' | 'npc' | 'narrator';
@@ -36,18 +37,23 @@ export interface NarratorOpeningParams {
   style?: NarratorStyle;
   telemetry: Telemetry;
   llm: LLMClient;
+  onOpeningDelta?: (delta: string) => void;
   trace?: NarratorParams['trace'];
 }
 
 export async function narrateTurn(params: NarratorParams): Promise<string> {
-  const { apiKey, model = 'gpt-5.2', style = 'michener', playerText, telemetry, diff, rejectedEvents, llm, trace } = params;
+  const { apiKey, model = 'gpt-5.2', style = 'michener', playerText, telemetry, diff, rejectedEvents, llm, onNarrationDelta, trace } = params;
   if (!apiKey) {
-    return fallbackNarration(playerText, telemetry, diff, rejectedEvents);
+    const fallback = fallbackNarration(playerText, telemetry, diff, rejectedEvents);
+    onNarrationDelta?.(fallback);
+    return fallback;
   }
   try {
     const response = await llm.responsesCreate({
       apiKey,
       model,
+      stream: true,
+      onOutputTextDelta: onNarrationDelta,
       instructions: NARRATOR_STYLE_PROMPTS[style],
       input: JSON.stringify({
         attemptedAction: playerText,
@@ -68,7 +74,11 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
       status: response.status,
       error: response.error ?? response.incomplete_details,
     });
-    return response.output_text?.trim() || fallbackNarration(playerText, telemetry, diff, rejectedEvents);
+    const rendered = response.output_text?.trim() || fallbackNarration(playerText, telemetry, diff, rejectedEvents);
+    if (!response.output_text?.trim()) {
+      onNarrationDelta?.(rendered);
+    }
+    return rendered;
   } catch (error) {
     pushLLMTrace(trace, {
       agent: 'narrator',
@@ -76,19 +86,25 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
       status: 'failed',
       error: classifyLLMError(error),
     });
-    return fallbackNarration(playerText, telemetry, diff, rejectedEvents);
+    const fallback = fallbackNarration(playerText, telemetry, diff, rejectedEvents);
+    onNarrationDelta?.(fallback);
+    return fallback;
   }
 }
 
 export async function narrateOpening(params: NarratorOpeningParams): Promise<string> {
-  const { apiKey, model = 'gpt-5.2', style = 'cinematic', telemetry, llm, trace } = params;
+  const { apiKey, model = 'gpt-5.2', style = 'cinematic', telemetry, llm, onOpeningDelta, trace } = params;
   if (!apiKey) {
-    return telemetry.location.description || 'You find yourself in an unfamiliar place.';
+    const fallback = telemetry.location.description || 'You find yourself in an unfamiliar place.';
+    onOpeningDelta?.(fallback);
+    return fallback;
   }
   try {
     const response = await llm.responsesCreate({
       apiKey,
       model,
+      stream: true,
+      onOutputTextDelta: onOpeningDelta,
       instructions: 'Write the opening paragraph of a novel. Introduce the player to their surroundings using the provided info. Be cinematic: clear, visual, grounded.',
       input: JSON.stringify({ telemetry }),
       truncation: 'auto',
@@ -104,7 +120,11 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
       status: response.status,
       error: response.error ?? response.incomplete_details,
     });
-    return response.output_text?.trim() || telemetry.location.description || 'You find yourself in an unfamiliar place.';
+    const rendered = response.output_text?.trim() || telemetry.location.description || 'You find yourself in an unfamiliar place.';
+    if (!response.output_text?.trim()) {
+      onOpeningDelta?.(rendered);
+    }
+    return rendered;
   } catch (error) {
     pushLLMTrace(trace, {
       agent: 'narrator',
@@ -112,7 +132,9 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
       status: 'failed',
       error: classifyLLMError(error),
     });
-    return telemetry.location.description || 'You find yourself in an unfamiliar place.';
+    const fallback = telemetry.location.description || 'You find yourself in an unfamiliar place.';
+    onOpeningDelta?.(fallback);
+    return fallback;
   }
 }
 

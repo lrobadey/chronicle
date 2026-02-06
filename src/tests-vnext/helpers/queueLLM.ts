@@ -15,7 +15,7 @@ export class QueueLLM implements LLMClient {
     this.calls.push(params);
     const next = this.queue.shift();
     if (next) {
-      return {
+      const result = {
         id: next.id || `resp-${++this.idCounter}`,
         status: next.status || 'completed',
         output: next.output,
@@ -24,8 +24,22 @@ export class QueueLLM implements LLMClient {
         incomplete_details: next.incomplete_details,
         usage: next.usage,
       };
+      if (params.stream) {
+        params.onStreamEvent?.({ type: 'response.created' });
+        if (result.output_text) {
+          params.onOutputTextDelta?.(result.output_text);
+          params.onStreamEvent?.({ type: 'response.output_text.delta', delta: result.output_text });
+        }
+        params.onStreamEvent?.({ type: 'response.completed', response: result });
+      }
+      return result;
     }
 
-    return { id: `resp-${++this.idCounter}`, status: 'completed', output: [], output_text: '' };
+    const result = { id: `resp-${++this.idCounter}`, status: 'completed', output: [], output_text: '' };
+    if (params.stream) {
+      params.onStreamEvent?.({ type: 'response.created' });
+      params.onStreamEvent?.({ type: 'response.completed', response: result });
+    }
+    return result;
   }
 }

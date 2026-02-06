@@ -15,6 +15,9 @@ export interface ResponseCreateParams {
   apiKey?: string;
   model: string;
   input: string | ResponseInputItem[];
+  stream?: boolean;
+  onOutputTextDelta?: (delta: string) => void;
+  onStreamEvent?: (event: unknown) => void;
   previous_response_id?: string;
   conversation?: string;
   store?: boolean;

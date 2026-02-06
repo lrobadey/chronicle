@@ -35,6 +35,20 @@ function sendError(res: http.ServerResponse, status: number, code: string, messa
   sendJSON(res, status, { error: message, code, details });
 }
 
+function sendSSEHeaders(res: http.ServerResponse) {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  });
+}
+
+function writeSSE(res: http.ServerResponse, event: string, data: unknown) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
 function assertObject(value: unknown): asserts value is Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new InputValidationError('Request body must be a JSON object');
@@ -44,6 +58,12 @@ function assertObject(value: unknown): asserts value is Record<string, unknown> 
 function asOptionalString(value: unknown): string | undefined {
   if (value == null) return undefined;
   if (typeof value !== 'string') throw new InputValidationError('Expected string value');
+  return value;
+}
+
+function asOptionalBoolean(value: unknown): boolean | undefined {
+  if (value == null) return undefined;
+  if (typeof value !== 'boolean') throw new InputValidationError('Expected boolean value');
   return value;
 }
 
@@ -63,6 +83,22 @@ function asDebug(value: unknown): { includeTrace?: boolean } | undefined {
     throw new InputValidationError('debug.includeTrace must be a boolean');
   }
   return { includeTrace: includeTrace as boolean | undefined };
+}
+
+function normalizeError(err: unknown): { status: number; code: string; error: string; details?: unknown } {
+  if (isChronicleError(err)) {
+    return {
+      status: err.status,
+      code: err.code,
+      error: err.message,
+      details: err.details,
+    };
+  }
+  return {
+    status: 500,
+    code: 'internal_error',
+    error: err instanceof Error ? err.message : 'Internal error',
+  };
 }
 
 export function createChronicleServer(engine = new TurnEngine()) {
@@ -87,15 +123,45 @@ export function createChronicleServer(engine = new TurnEngine()) {
         assertObject(body);
         const sessionId = asOptionalString(body.sessionId);
         const apiKey = asOptionalString(body.apiKey);
+        const stream = asOptionalBoolean(body.stream) === true;
 
-        const result = await engine.initSession({ sessionId, apiKey: apiKey || process.env.OPENAI_API_KEY });
-        sendJSON(res, 200, {
+        if (!stream) {
+          const result = await engine.initSession({ sessionId, apiKey: apiKey || process.env.OPENAI_API_KEY });
+          sendJSON(res, 200, {
+            sessionId: result.sessionId,
+            created: result.created,
+            initialNarration: result.opening,
+            telemetry: result.telemetry,
+            runtime: 'vnext',
+          });
+          return;
+        }
+
+        sendSSEHeaders(res);
+        let connectionClosed = false;
+        req.on('close', () => {
+          connectionClosed = true;
+        });
+        writeSSE(res, 'init.started', { sessionId: sessionId || undefined });
+        const result = await engine.initSession({
+          sessionId,
+          apiKey: apiKey || process.env.OPENAI_API_KEY,
+          stream: {
+            onOpeningDelta: delta => {
+              if (!connectionClosed) {
+                writeSSE(res, 'opening.delta', { delta });
+              }
+            },
+          },
+        });
+        writeSSE(res, 'init.completed', {
           sessionId: result.sessionId,
           created: result.created,
           initialNarration: result.opening,
           telemetry: result.telemetry,
           runtime: 'vnext',
         });
+        res.end();
         return;
       }
 
@@ -105,9 +171,29 @@ export function createChronicleServer(engine = new TurnEngine()) {
 
         const sessionId = asOptionalString(body.sessionId);
         const playerText = asOptionalString(body.playerText);
+        const stream = asOptionalBoolean(body.stream) === true;
         if (!sessionId?.trim()) throw new InputValidationError('sessionId is required');
         if (!playerText?.trim()) throw new InputValidationError('playerText is required');
 
+        if (!stream) {
+          const result = await engine.runTurn({
+            sessionId,
+            playerId: 'player-1',
+            playerText,
+            apiKey: asOptionalString(body.apiKey) || process.env.OPENAI_API_KEY,
+            narratorStyle: asNarratorStyle(body.narratorStyle),
+            debug: asDebug(body.debug),
+          });
+          sendJSON(res, 200, result);
+          return;
+        }
+
+        sendSSEHeaders(res);
+        let connectionClosed = false;
+        req.on('close', () => {
+          connectionClosed = true;
+        });
+        writeSSE(res, 'turn.started', { sessionId });
         const result = await engine.runTurn({
           sessionId,
           playerId: 'player-1',
@@ -115,8 +201,16 @@ export function createChronicleServer(engine = new TurnEngine()) {
           apiKey: asOptionalString(body.apiKey) || process.env.OPENAI_API_KEY,
           narratorStyle: asNarratorStyle(body.narratorStyle),
           debug: asDebug(body.debug),
+          stream: {
+            onNarrationDelta: delta => {
+              if (!connectionClosed) {
+                writeSSE(res, 'narration.delta', { delta });
+              }
+            },
+          },
         });
-        sendJSON(res, 200, result);
+        writeSSE(res, 'turn.completed', result);
+        res.end();
         return;
       }
 
@@ -127,12 +221,20 @@ export function createChronicleServer(engine = new TurnEngine()) {
 
       sendError(res, 404, 'not_found', 'Not found');
     } catch (err) {
-      if (isChronicleError(err)) {
-        sendError(res, err.status, err.code, err.message, err.details);
+      const normalized = normalizeError(err);
+      if (res.getHeader('Content-Type') === 'text/event-stream') {
+        writeSSE(res, 'error', {
+          code: normalized.code,
+          error: normalized.error,
+          details: normalized.details,
+        });
+        res.end();
         return;
       }
-      console.error('Server error:', err);
-      sendError(res, 500, 'internal_error', err instanceof Error ? err.message : 'Internal error');
+      if (normalized.status === 500) {
+        console.error('Server error:', err);
+      }
+      sendError(res, normalized.status, normalized.code, normalized.error, normalized.details);
     }
   });
 }

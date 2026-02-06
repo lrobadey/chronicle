@@ -8,7 +8,7 @@ export class OpenAIClient implements LLMClient {
     }
 
     const client = new OpenAI({ apiKey: params.apiKey });
-    const response = await client.responses.create({
+    const payload = {
       model: params.model,
       input: params.input as any,
       previous_response_id: params.previous_response_id,
@@ -22,9 +22,37 @@ export class OpenAIClient implements LLMClient {
       reasoning: params.reasoning ?? { effort: 'medium' },
       tools: params.tools as any,
       tool_choice: (params.tool_choice ?? (params.tools?.length ? 'auto' : undefined)) as any,
-    } as any);
+    };
 
-    return {
+    if (params.stream) {
+      const stream = await client.responses.create({
+        ...payload,
+        stream: true,
+      } as any);
+      let completedResponse: any;
+      for await (const event of stream as any) {
+        params.onStreamEvent?.(event);
+        if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') {
+          params.onOutputTextDelta?.(event.delta);
+        }
+        if (event?.type === 'response.completed' && event.response) {
+          completedResponse = event.response;
+        }
+      }
+
+      if (!completedResponse) {
+        throw new Error('response_stream_incomplete');
+      }
+      return toResult(completedResponse);
+    }
+
+    const response = await client.responses.create(payload as any);
+    return toResult(response);
+  }
+}
+
+function toResult(response: any): ResponseCreateResult {
+  return {
       id: response.id,
       status: response.status ?? undefined,
       error: response.error ?? undefined,
@@ -32,6 +60,5 @@ export class OpenAIClient implements LLMClient {
       usage: response.usage as unknown as ResponseCreateResult['usage'],
       output: (response.output ?? []) as unknown as ResponseCreateResult['output'],
       output_text: response.output_text ?? '',
-    };
-  }
+  };
 }
