@@ -110,6 +110,66 @@ describe('TurnEngine', () => {
     }
   });
 
+  it('injects full player transcript into GM world context each turn', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-1',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'g1' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'Turn one narration',
+        },
+        {
+          id: 'gm-2',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'g2' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-2',
+          output: [],
+          output_text: 'Turn two narration',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+
+      await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'I sit',
+        apiKey: 'test-key',
+      });
+      await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'I stand',
+        apiKey: 'test-key',
+      });
+
+      const firstGMInput = llm.calls[0]?.input as Array<Record<string, unknown>>;
+      const secondGMInput = llm.calls[2]?.input as Array<Record<string, unknown>>;
+      const firstContext = JSON.parse(String(firstGMInput[0]?.content));
+      const secondContext = JSON.parse(String(secondGMInput[0]?.content));
+
+      assert.equal(firstGMInput[0]?.role, 'system');
+      assert.equal(secondGMInput[0]?.role, 'system');
+      assert.deepEqual(firstContext.world.playerTranscript, [
+        { turn: 1, playerId: 'player-1', playerText: 'I sit' },
+      ]);
+      assert.deepEqual(secondContext.world.playerTranscript, [
+        { turn: 1, playerId: 'player-1', playerText: 'I sit' },
+        { turn: 2, playerId: 'player-1', playerText: 'I stand' },
+      ]);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
   it('replays initial snapshot + JSONL log to current snapshot deterministically', async () => {
     const { rootDir, store } = await createStore();
     try {

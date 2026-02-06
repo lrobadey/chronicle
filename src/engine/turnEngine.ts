@@ -90,6 +90,7 @@ export class TurnEngine {
     if (!state) throw new SessionNotFoundError(sessionId);
     if (!state.actors[playerId]) throw new PlayerNotFoundError(playerId);
     assertNoInvariantIssues(state, 'Session world state is invalid before turn execution');
+    const turnHistory = await this.store.loadTurnLog(sessionId);
 
     let draft = deepClone(state);
     const nextTurn = draft.meta.turn + 1;
@@ -171,9 +172,22 @@ export class TurnEngine {
     };
 
     try {
+      const gmWorldContext = {
+        observation: buildObservation(draft, playerId),
+        telemetry: buildTelemetry(draft, playerId),
+        playerTranscript: [
+          ...turnHistory.map(turn => ({
+            turn: turn.turn,
+            playerId: turn.playerId,
+            playerText: turn.playerText,
+          })),
+          { turn: nextTurn, playerId, playerText },
+        ],
+      };
       await runGMAgent({
         apiKey,
         playerText,
+        worldContext: gmWorldContext,
         runtime,
         llm: this.llm,
         trace,
@@ -203,8 +217,10 @@ export class TurnEngine {
     const narration = await narrateTurn({
       apiKey,
       style: narratorStyle,
+      playerText,
       telemetry: afterTelemetry,
       diff,
+      rejectedEvents,
       llm: this.llm,
       trace,
     });

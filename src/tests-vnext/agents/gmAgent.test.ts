@@ -28,6 +28,7 @@ describe('GM agent loop', () => {
     const result = await runGMAgent({
       apiKey: 'test-key',
       playerText: 'advance',
+      worldContext: { turn: 3, weather: 'clear' },
       llm,
       runtime: {
         observe_world: async () => {
@@ -56,6 +57,14 @@ describe('GM agent loop', () => {
     const secondCall = llm.calls[1];
     assert.ok(firstCall);
     assert.ok(secondCall);
+    assert.equal(Array.isArray(firstCall.input), true);
+    const firstInput = firstCall.input as Array<Record<string, unknown>>;
+    assert.equal(firstInput.length, 2);
+    assert.equal(firstInput[0]?.role, 'system');
+    assert.equal(firstInput[1]?.role, 'user');
+    const firstSystemPayload = JSON.parse(String(firstInput[0]?.content));
+    assert.deepEqual(firstSystemPayload, { world: { turn: 3, weather: 'clear' } });
+    assert.equal(firstInput[1]?.content, 'advance');
     assert.equal(secondCall.previous_response_id, 'resp-first');
 
     const secondInput = secondCall.input;
@@ -65,24 +74,19 @@ describe('GM agent loop', () => {
     assert.equal((secondInput as Array<Record<string, unknown>>).every(item => item.type === 'function_call_output'), true);
   });
 
-  it('enforces observe_world before mutation tools', async () => {
+  it('allows propose_events without requiring observe_world first', async () => {
     let observeCalls = 0;
     let proposeCalls = 0;
     let finishCalls = 0;
 
     const llm = new QueueLLM([
       {
-        id: 'resp-a',
+        id: 'resp-first',
         output: [{ type: 'function_call', name: 'propose_events', arguments: '{"events":[]}', call_id: 'p1' }],
         output_text: '',
       },
       {
-        id: 'resp-b',
-        output: [{ type: 'function_call', name: 'observe_world', arguments: '{"perspective":"gm"}', call_id: 'o1' }],
-        output_text: '',
-      },
-      {
-        id: 'resp-c',
+        id: 'resp-second',
         output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'f1' }],
         output_text: '',
       },
@@ -111,16 +115,9 @@ describe('GM agent loop', () => {
     });
 
     assert.equal(result.finished, true);
-    assert.equal(observeCalls, 1);
-    assert.equal(proposeCalls, 0);
+    assert.equal(observeCalls, 0);
+    assert.equal(proposeCalls, 1);
     assert.equal(finishCalls, 1);
-
-    const secondInput = llm.calls[1]?.input;
-    assert.equal(Array.isArray(secondInput), true);
-    const firstOutput = (secondInput as Array<Record<string, unknown>>).find(item => item.type === 'function_call_output');
-    assert.ok(firstOutput);
-    const outputPayload = JSON.parse(String(firstOutput?.output));
-    assert.equal(outputPayload.error, 'observe_world_required');
   });
 
   it('handles malformed tool arguments and continues', async () => {

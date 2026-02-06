@@ -15,6 +15,7 @@ export interface GMAgentParams {
   apiKey?: string;
   model?: string;
   playerText: string;
+  worldContext?: unknown;
   runtime: GMToolRuntime;
   llm: LLMClient;
   maxIterations?: number;
@@ -35,11 +36,13 @@ export interface GMAgentParams {
 }
 
 export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boolean }> {
-  const { apiKey, model = 'gpt-5.2', playerText, runtime, llm, maxIterations = 8, trace } = params;
+  const { apiKey, model = 'gpt-5.2', playerText, worldContext, runtime, llm, maxIterations = 8, trace } = params;
 
   let previousResponseId: string | undefined;
-  let pendingInput: ResponseInputItem[] = [{ role: 'user', content: playerText }];
-  let hasObservedWorld = false;
+  let pendingInput: ResponseInputItem[] = [
+    { role: 'system', content: safeJSONStringify({ world: worldContext }) },
+    { role: 'user', content: playerText },
+  ];
 
   if (!apiKey) {
     await runtime.observe_world({ perspective: 'gm' });
@@ -112,24 +115,10 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       }
 
       const args = parsed.value;
-      if (call.name !== 'observe_world' && !hasObservedWorld) {
-        const output = {
-          error: 'observe_world_required',
-          details: 'observe_world must be called successfully before other GM tools',
-        };
-        trace?.toolCalls.push({ tool: call.name, input: args, output });
-        nextInput.push({
-          type: 'function_call_output',
-          call_id: callId,
-          output: safeJSONStringify(output),
-        });
-        continue;
-      }
 
       try {
         if (call.name === 'observe_world') {
           const output = await runtime.observe_world(args as { perspective: 'gm' | 'player' });
-          hasObservedWorld = true;
           trace?.toolCalls.push({ tool: call.name, input: args, output });
           nextInput.push({
             type: 'function_call_output',

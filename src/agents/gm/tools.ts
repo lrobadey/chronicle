@@ -173,7 +173,7 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
   {
     type: 'function',
     name: 'observe_world',
-    description: 'Get current world observation (player or GM view). Call this first.',
+    description: 'Get current world observation (player or GM view).',
     parameters: {
       type: 'object',
       properties: {

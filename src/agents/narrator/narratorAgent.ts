@@ -10,8 +10,10 @@ export interface NarratorParams {
   apiKey?: string;
   model?: string;
   style?: NarratorStyle;
+  playerText: string;
   telemetry: Telemetry;
   diff: TurnDiff;
+  rejectedEvents?: Array<{ reason: string; event?: unknown }>;
   llm: LLMClient;
   trace?: {
     llmCalls?: Array<{
@@ -38,16 +40,21 @@ export interface NarratorOpeningParams {
 }
 
 export async function narrateTurn(params: NarratorParams): Promise<string> {
-  const { apiKey, model = 'gpt-5.2', style = 'michener', telemetry, diff, llm, trace } = params;
+  const { apiKey, model = 'gpt-5.2', style = 'michener', playerText, telemetry, diff, rejectedEvents, llm, trace } = params;
   if (!apiKey) {
-    return fallbackNarration(telemetry, diff);
+    return fallbackNarration(playerText, telemetry, diff, rejectedEvents);
   }
   try {
     const response = await llm.responsesCreate({
       apiKey,
       model,
       instructions: NARRATOR_STYLE_PROMPTS[style],
-      input: JSON.stringify({ telemetry, diff }),
+      input: JSON.stringify({
+        attemptedAction: playerText,
+        telemetry,
+        diff,
+        rejectedEventReasons: (rejectedEvents || []).map(rejection => rejection.reason),
+      }),
       truncation: 'auto',
       store: true,
     });
@@ -61,7 +68,7 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
       status: response.status,
       error: response.error ?? response.incomplete_details,
     });
-    return response.output_text?.trim() || fallbackNarration(telemetry, diff);
+    return response.output_text?.trim() || fallbackNarration(playerText, telemetry, diff, rejectedEvents);
   } catch (error) {
     pushLLMTrace(trace, {
       agent: 'narrator',
@@ -69,7 +76,7 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
       status: 'failed',
       error: classifyLLMError(error),
     });
-    return fallbackNarration(telemetry, diff);
+    return fallbackNarration(playerText, telemetry, diff, rejectedEvents);
   }
 }
 
@@ -109,10 +116,28 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
   }
 }
 
-function fallbackNarration(telemetry: Telemetry, diff: TurnDiff): string {
+function fallbackNarration(
+  playerText: string,
+  telemetry: Telemetry,
+  diff: TurnDiff,
+  rejectedEvents?: Array<{ reason: string; event?: unknown }>,
+): string {
   if (diff.moved) return `You arrive at ${telemetry.location.name}. ${telemetry.location.description}`;
   if (diff.newItems.length) return `You now carry ${diff.newItems.join(', ')}. ${telemetry.location.description}`;
-  return telemetry.location.description || 'The moment stretches quietly.';
+  if (diff.timeDeltaMinutes > 0) return `${diff.timeDeltaMinutes} minutes pass. ${telemetry.location.description}`;
+  const attempted = formatAttemptedAction(playerText);
+  const rejectionSuffix = rejectedEvents?.length
+    ? ` (${rejectedEvents[0]?.reason || 'no_effect'})`
+    : '';
+  return `${attempted}, but nothing significant changes${rejectionSuffix}. ${telemetry.location.description || 'The moment stretches quietly.'}`;
+}
+
+function formatAttemptedAction(playerText: string): string {
+  const trimmed = playerText.trim();
+  if (!trimmed) return 'You pause';
+  if (/^i\s+/i.test(trimmed)) return `You ${trimmed.slice(2).trim()}`;
+  if (/^you\s+/i.test(trimmed)) return trimmed[0].toUpperCase() + trimmed.slice(1);
+  return `You try to ${trimmed}`;
 }
 
 function pushLLMTrace(
