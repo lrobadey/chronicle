@@ -57,6 +57,30 @@ export type WorldEvent =
     }
   | {
       meta?: EventMeta;
+      type: 'TravelToLocation';
+      actorId: ActorId;
+      locationId: string;
+      pace?: 'walk' | 'run';
+      confirmId?: string;
+      note?: string;
+    }
+  | {
+      meta?: EventMeta;
+      type: 'Explore';
+      actorId: ActorId;
+      area: 'shoreline' | 'docks' | 'under_ribs' | 'around_here';
+      direction?: 'east' | 'west' | 'north' | 'south';
+      note?: string;
+    }
+  | {
+      meta?: EventMeta;
+      type: 'Inspect';
+      actorId: ActorId;
+      subject: string;
+      note?: string;
+    }
+  | {
+      meta?: EventMeta;
       type: 'SetFlag';
       key: string;
       value: unknown;

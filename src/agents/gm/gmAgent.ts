@@ -3,12 +3,21 @@ import { classifyLLMError } from '../llm/errorUtils';
 import { GM_SYSTEM_PROMPT } from './prompts';
 import { GM_TOOL_DEFS } from './tools';
 import type { WorldEvent } from '../../sim/events';
+import type { PendingPrompt } from '../../sim/state';
+
+export interface GMFinishTurnInput {
+  summary: string;
+  playerPrompt?: {
+    pending?: PendingPrompt | null;
+    clear?: boolean | null;
+  } | null;
+}
 
 export interface GMToolRuntime {
   observe_world(input: { perspective: 'gm' | 'player' }): Promise<unknown>;
   consult_npc(input: { npcId: string; topic?: string }): Promise<unknown>;
   propose_events(input: { events: WorldEvent[] }): Promise<unknown>;
-  finish_turn(input: { summary: string }): Promise<unknown>;
+  finish_turn(input: GMFinishTurnInput): Promise<unknown>;
 }
 
 export interface GMAgentParams {
@@ -151,7 +160,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
         }
 
         if (call.name === 'finish_turn') {
-          const output = await runtime.finish_turn(args as { summary: string });
+          const output = await runtime.finish_turn(args as unknown as GMFinishTurnInput);
           trace?.toolCalls.push({ tool: call.name, input: args, output });
           nextInput.push({
             type: 'function_call_output',

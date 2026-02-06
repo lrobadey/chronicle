@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { narrateOpening, narrateTurn } from '../../agents/narrator/narratorAgent';
 import { QueueLLM } from '../helpers/queueLLM';
+import type { LLMClient } from '../../agents/llm/types';
 
 const telemetry = {
   location: { name: 'The Landing', description: 'Mist hangs over the stones.' },
@@ -70,5 +71,31 @@ describe('narrator streaming', () => {
 
     assert.equal(opening, 'Fog glows amber above the old pier.');
     assert.deepEqual(deltas, ['Fog glows amber above the old pier.']);
+  });
+
+  it('uses streamed deltas when streamed response output_text is empty', async () => {
+    const llm: LLMClient = {
+      async responsesCreate(params) {
+        params.onOutputTextDelta?.('A gull wheels above the bones.');
+        return {
+          id: 'streamed-empty-output-text',
+          status: 'completed',
+          output: [],
+          output_text: '',
+        };
+      },
+    };
+    const deltas: string[] = [];
+    const narration = await narrateTurn({
+      apiKey: 'test-key',
+      playerText: 'look up',
+      telemetry,
+      diff,
+      llm,
+      onNarrationDelta: delta => deltas.push(delta),
+    });
+
+    assert.equal(narration, 'A gull wheels above the bones.');
+    assert.deepEqual(deltas, ['A gull wheels above the bones.']);
   });
 });

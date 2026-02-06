@@ -11,6 +11,35 @@ const GRID_POS_SCHEMA = {
   additionalProperties: false,
 } as const;
 
+const PROMPT_OPTION_SCHEMA = {
+  type: 'object',
+  properties: {
+    key: { type: 'string' },
+    label: { type: 'string' },
+  },
+  required: ['key', 'label'],
+  additionalProperties: false,
+} as const;
+
+const PENDING_PROMPT_SCHEMA = {
+  oneOf: [
+    { type: 'null' },
+    {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        kind: { type: 'string', enum: ['confirm_travel', 'clarify_target', 'clarify_explore'] },
+        question: { type: 'string' },
+        options: { type: ['array', 'null'], items: PROMPT_OPTION_SCHEMA },
+        data: { type: ['object', 'null'], additionalProperties: true },
+        createdTurn: { type: 'number' },
+      },
+      required: ['id', 'kind', 'question', 'options', 'data', 'createdTurn'],
+      additionalProperties: false,
+    },
+  ],
+} as const;
+
 const EVENT_SCHEMAS = [
   {
     type: 'object',
@@ -167,6 +196,42 @@ const EVENT_SCHEMAS = [
     required: ['type', 'key', 'value', 'note'],
     additionalProperties: false,
   },
+  {
+    type: 'object',
+    properties: {
+      type: { type: 'string', enum: ['TravelToLocation'] },
+      actorId: { type: 'string' },
+      locationId: { type: 'string' },
+      pace: { type: ['string', 'null'], enum: ['walk', 'run', null] },
+      confirmId: { type: ['string', 'null'] },
+      note: { type: ['string', 'null'] },
+    },
+    required: ['type', 'actorId', 'locationId', 'pace', 'confirmId', 'note'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      type: { type: 'string', enum: ['Explore'] },
+      actorId: { type: 'string' },
+      area: { type: 'string', enum: ['shoreline', 'docks', 'under_ribs', 'around_here'] },
+      direction: { type: ['string', 'null'], enum: ['east', 'west', 'north', 'south', null] },
+      note: { type: ['string', 'null'] },
+    },
+    required: ['type', 'actorId', 'area', 'direction', 'note'],
+    additionalProperties: false,
+  },
+  {
+    type: 'object',
+    properties: {
+      type: { type: 'string', enum: ['Inspect'] },
+      actorId: { type: 'string' },
+      subject: { type: 'string' },
+      note: { type: ['string', 'null'] },
+    },
+    required: ['type', 'actorId', 'subject', 'note'],
+    additionalProperties: false,
+  },
 ] as const;
 
 export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
@@ -221,6 +286,15 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
       type: 'object',
       properties: {
         summary: { type: 'string' },
+        playerPrompt: {
+          type: ['object', 'null'],
+          properties: {
+            pending: PENDING_PROMPT_SCHEMA,
+            clear: { type: ['boolean', 'null'] },
+          },
+          required: ['pending', 'clear'],
+          additionalProperties: false,
+        },
       },
       required: ['summary'],
       additionalProperties: false,

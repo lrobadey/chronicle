@@ -10,6 +10,33 @@ const locations: Record<string, LocationPOI> = {
     terrain: 'beach',
     radiusCells: 80,
   },
+  'under-the-ribs': {
+    id: 'under-the-ribs',
+    name: 'Under the Ribs',
+    description: 'A wind-cut corridor beneath the nearest rib arches where shadow stripes the sand and broken shell.',
+    anchor: { x: 0, y: 180, z: 4 },
+    tideAccess: 'always',
+    terrain: 'path',
+    radiusCells: 70,
+  },
+  'dock-approach': {
+    id: 'dock-approach',
+    name: 'Dock Approach',
+    description: 'The foot of the weathered piers, where salt-stiff rope and driftwood collect against old timbers.',
+    anchor: { x: 35, y: 45, z: 0 },
+    tideAccess: 'always',
+    terrain: 'beach',
+    radiusCells: 40,
+  },
+  'jawline-walk': {
+    id: 'jawline-walk',
+    name: 'Jawline Walk',
+    description: 'A narrow run of dark sand tracing the fossilized lower jaw just above the wash of the tide.',
+    anchor: { x: -30, y: 95, z: 1 },
+    tideAccess: 'always',
+    terrain: 'beach',
+    radiusCells: 50,
+  },
   'the-rib-market': {
     id: 'the-rib-market',
     name: 'The Rib Market',
@@ -143,7 +170,7 @@ export function createIsleOfMarrowWorldVNext(): WorldState {
     meta: {
       worldId: 'isle-of-marrow',
       seed: 'isle-of-marrow-1825',
-      version: 'vnext-0.1',
+      version: 'vnext-0.2',
       turn: 0,
     },
     map: {

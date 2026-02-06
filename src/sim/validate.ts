@@ -3,6 +3,7 @@ import type { WorldState } from './state';
 import { deriveTide, isTideBlocked } from './systems/tide';
 import { deriveConstraints } from './systems/constraints';
 import { distance, findNearestLocation, getActor, isWithinBounds } from './utils';
+import { estimateTravel, LONG_TRAVEL_MINUTES } from './systems/travel';
 
 export interface ValidationResult {
   ok: boolean;
@@ -56,6 +57,28 @@ export function validateEvent(state: WorldState, event: WorldEvent): ValidationR
       if (event.minutes <= 0) return { ok: false, reason: 'invalid_minutes' };
       return { ok: true };
     }
+    case 'TravelToLocation': {
+      const actor = getActor(state, event.actorId);
+      if (!actor) return { ok: false, reason: 'actor_not_found' };
+      const location = state.locations[event.locationId];
+      if (!location) return { ok: false, reason: 'location_not_found' };
+      const estimate = estimateTravel(state, actor.pos, location.anchor, event.pace || 'walk');
+      if (estimate.minutes > LONG_TRAVEL_MINUTES && !hasMatchingTravelConfirmation(state, event.locationId, event.confirmId)) {
+        return { ok: false, reason: 'travel_requires_confirmation' };
+      }
+      return { ok: true };
+    }
+    case 'Explore': {
+      const actor = getActor(state, event.actorId);
+      if (!actor) return { ok: false, reason: 'actor_not_found' };
+      return { ok: true };
+    }
+    case 'Inspect': {
+      const actor = getActor(state, event.actorId);
+      if (!actor) return { ok: false, reason: 'actor_not_found' };
+      if (!event.subject?.trim()) return { ok: false, reason: 'inspect_subject_required' };
+      return { ok: true };
+    }
     case 'CreateEntity':
     case 'SetFlag':
       return { ok: true };
@@ -71,4 +94,12 @@ export function resolveMoveTarget(state: WorldState, event: Extract<WorldEvent, 
     return loc.anchor;
   }
   return event.to;
+}
+
+function hasMatchingTravelConfirmation(state: WorldState, locationId: string, confirmId: string | undefined) {
+  if (!confirmId) return false;
+  const pending = state.meta.pendingPrompt;
+  if (!pending || pending.kind !== 'confirm_travel' || pending.id !== confirmId) return false;
+  const pendingLocationId = pending.data?.locationId;
+  return typeof pendingLocationId === 'string' && pendingLocationId === locationId;
 }

@@ -1,8 +1,10 @@
 import type { WorldEvent } from './events';
 import type { KnowledgeState, WorldState } from './state';
-import { deriveWeather, weatherTravelMultiplier } from './systems/weather';
-import { distance, findNearestLocation, locationsWithinRadius } from './utils';
+import { deriveTide, isTideBlocked } from './systems/tide';
+import { deriveConstraints } from './systems/constraints';
+import { distance, locationsWithinRadius } from './utils';
 import { resolveMoveTarget } from './validate';
+import { estimateTravel, positionToward } from './systems/travel';
 
 const DEFAULT_VIS_RADIUS = 120;
 
@@ -10,6 +12,12 @@ export function applyEvent(state: WorldState, event: WorldEvent): WorldState {
   switch (event.type) {
     case 'MoveActor':
       return applyMoveActor(state, event);
+    case 'TravelToLocation':
+      return applyTravelToLocation(state, event);
+    case 'Explore':
+      return applyExplore(state, event);
+    case 'Inspect':
+      return applyInspect(state, event);
     case 'PickUpItem':
       return applyPickUpItem(state, event);
     case 'DropItem':
@@ -44,12 +52,9 @@ function applyMoveActor(state: WorldState, event: Extract<WorldEvent, { type: 'M
   const next = cloneState(state);
   next.actors[event.actorId] = { ...actor, pos: dest };
 
-  const distMeters = distance(actor.pos, dest) * state.map.cellSizeMeters;
-  const weather = deriveWeather(state);
-  const weatherMult = weatherTravelMultiplier(weather);
-  const terrainMult = getTerrainMultiplier(state, dest);
-  const baseSpeed = event.mode === 'run' ? 2.0 : 1.4;
-  const minutes = Math.max(1, Math.round((distMeters / baseSpeed / 60) * terrainMult * weatherMult));
+  const estimate = estimateTravel(state, actor.pos, dest, event.mode === 'run' ? 'run' : 'walk');
+  const minutes = estimate.minutes;
+  const distMeters = estimate.distanceMeters;
 
   next.systems.time.elapsedMinutes += minutes;
   addLedgerInPlace(next, event.note || `Traveled ${Math.round(distMeters)}m in ${minutes} min`);
@@ -58,6 +63,76 @@ function applyMoveActor(state: WorldState, event: Extract<WorldEvent, { type: 'M
     updateKnowledgeForActor(next, actor.id);
   }
 
+  return next;
+}
+
+function applyTravelToLocation(state: WorldState, event: Extract<WorldEvent, { type: 'TravelToLocation' }>): WorldState {
+  const actor = state.actors[event.actorId];
+  const location = state.locations[event.locationId];
+  if (!actor || !location) return state;
+
+  const next = cloneState(state);
+  const pace = event.pace === 'run' ? 'run' : 'walk';
+  const fullEstimate = estimateTravel(next, actor.pos, location.anchor, pace);
+  const arrivalElapsed = next.systems.time.elapsedMinutes + fullEstimate.minutes;
+  const tideBlocked = isLocationBlockedAtElapsed(next, location.id, arrivalElapsed);
+
+  let destination = location.anchor;
+  let note = event.note;
+
+  if (tideBlocked) {
+    const stopCells = (location.radiusCells ?? 20) + 1;
+    destination = positionToward(location.anchor, actor.pos, stopCells);
+    note = note || `Reached the edge of ${location.name}, but tide blocks entry`;
+  } else {
+    note = note || `Traveled to ${location.name}`;
+  }
+
+  const estimate = estimateTravel(next, actor.pos, destination, pace);
+  next.actors[event.actorId] = { ...actor, pos: destination };
+  next.systems.time.elapsedMinutes += estimate.minutes;
+  addLedgerInPlace(next, note);
+
+  if (actor.kind === 'player') {
+    updateKnowledgeForActor(next, actor.id);
+  }
+  return next;
+}
+
+function applyExplore(state: WorldState, event: Extract<WorldEvent, { type: 'Explore' }>): WorldState {
+  const actor = state.actors[event.actorId];
+  if (!actor) return state;
+
+  const next = cloneState(state);
+  const constraints = deriveConstraints(next);
+  const exploreMeters = Math.min(80, Math.max(20, Math.round(constraints.maxMoveMeters * 0.15)));
+  const exploreCells = exploreMeters / state.map.cellSizeMeters;
+  const vector = resolveExploreVector(event.area, event.direction);
+  const candidate = {
+    x: actor.pos.x + vector.x * exploreCells,
+    y: actor.pos.y + vector.y * exploreCells,
+    z: actor.pos.z ?? 0,
+  };
+  const destination = clampToBounds(next, candidate);
+
+  next.actors[event.actorId] = { ...actor, pos: destination };
+  next.systems.time.elapsedMinutes += 5;
+  addLedgerInPlace(next, event.note || `Explored ${event.area.replace('_', ' ')}`);
+  if (actor.kind === 'player') {
+    updateKnowledgeForActor(next, actor.id);
+  }
+  return next;
+}
+
+function applyInspect(state: WorldState, event: Extract<WorldEvent, { type: 'Inspect' }>): WorldState {
+  const actor = state.actors[event.actorId];
+  if (!actor) return state;
+  const next = cloneState(state);
+  next.systems.time.elapsedMinutes += 2;
+  addLedgerInPlace(next, event.note || `Inspected ${event.subject}`);
+  if (actor.kind === 'player') {
+    updateKnowledgeForActor(next, actor.id);
+  }
   return next;
 }
 
@@ -162,22 +237,34 @@ function updateKnowledgeForActor(state: WorldState, actorId: string) {
   state.knowledge[actorId] = knowledge;
 }
 
-function getTerrainMultiplier(state: WorldState, pos: { x: number; y: number; z?: number }): number {
-  const loc = findNearestLocation(state, pos);
-  const terrain = loc?.terrain ?? 'unknown';
-  switch (terrain) {
-    case 'road': return 0.8;
-    case 'path': return 1.0;
-    case 'beach': return 1.2;
-    case 'forest': return 1.5;
-    case 'mountain': return 2.5;
-    case 'water': return 3.0;
-    case 'interior': return 0.9;
-    case 'cavern': return 1.4;
-    case 'unknown': default: return 1.0;
-  }
-}
-
 function cloneState(state: WorldState): WorldState {
   return JSON.parse(JSON.stringify(state)) as WorldState;
+}
+
+function isLocationBlockedAtElapsed(state: WorldState, locationId: string, elapsedMinutes: number) {
+  const snapshot = cloneState(state);
+  snapshot.systems.time.elapsedMinutes = elapsedMinutes;
+  const location = snapshot.locations[locationId];
+  if (!location) return false;
+  return isTideBlocked(location, deriveTide(snapshot));
+}
+
+function resolveExploreVector(area: 'shoreline' | 'docks' | 'under_ribs' | 'around_here', direction?: 'east' | 'west' | 'north' | 'south') {
+  if (direction === 'east') return { x: 1, y: 0 };
+  if (direction === 'west') return { x: -1, y: 0 };
+  if (direction === 'north') return { x: 0, y: 1 };
+  if (direction === 'south') return { x: 0, y: -1 };
+  if (area === 'shoreline') return { x: 1, y: 0 };
+  if (area === 'docks') return { x: 0.5, y: 0.5 };
+  if (area === 'under_ribs') return { x: 0, y: 1 };
+  return { x: 0.7, y: 0.3 };
+}
+
+function clampToBounds(state: WorldState, pos: { x: number; y: number; z?: number }) {
+  const { minX, minY, maxX, maxY } = state.map;
+  return {
+    x: Math.max(minX, Math.min(maxX, pos.x)),
+    y: Math.max(minY, Math.min(maxY, pos.y)),
+    z: pos.z ?? 0,
+  };
 }

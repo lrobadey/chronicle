@@ -3,6 +3,7 @@ import { classifyLLMError } from '../llm/errorUtils';
 import { NARRATOR_STYLE_PROMPTS } from './prompts';
 import type { Telemetry } from '../../sim/views/telemetry';
 import type { TurnDiff } from '../../sim/views/diff';
+import type { PendingPrompt } from '../../sim/state';
 
 export type NarratorStyle = 'lyric' | 'cinematic' | 'michener';
 
@@ -13,6 +14,7 @@ export interface NarratorParams {
   playerText: string;
   telemetry: Telemetry;
   diff: TurnDiff;
+  pendingPrompt?: PendingPrompt | null;
   rejectedEvents?: Array<{ reason: string; event?: unknown }>;
   llm: LLMClient;
   onNarrationDelta?: (delta: string) => void;
@@ -42,18 +44,27 @@ export interface NarratorOpeningParams {
 }
 
 export async function narrateTurn(params: NarratorParams): Promise<string> {
-  const { apiKey, model = 'gpt-5.2', style = 'michener', playerText, telemetry, diff, rejectedEvents, llm, onNarrationDelta, trace } = params;
+  const { apiKey, model = 'gpt-5.2', style = 'michener', playerText, telemetry, diff, pendingPrompt, rejectedEvents, llm, onNarrationDelta, trace } = params;
+  if (pendingPrompt?.question?.trim()) {
+    const question = pendingPrompt.question.trim();
+    onNarrationDelta?.(question);
+    return question;
+  }
   if (!apiKey) {
     const fallback = fallbackNarration(playerText, telemetry, diff, rejectedEvents);
     onNarrationDelta?.(fallback);
     return fallback;
   }
   try {
+    let streamedText = '';
     const response = await llm.responsesCreate({
       apiKey,
       model,
       stream: true,
-      onOutputTextDelta: onNarrationDelta,
+      onOutputTextDelta: delta => {
+        streamedText += delta;
+        onNarrationDelta?.(delta);
+      },
       instructions: NARRATOR_STYLE_PROMPTS[style],
       input: JSON.stringify({
         attemptedAction: playerText,
@@ -74,8 +85,8 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
       status: response.status,
       error: response.error ?? response.incomplete_details,
     });
-    const rendered = response.output_text?.trim() || fallbackNarration(playerText, telemetry, diff, rejectedEvents);
-    if (!response.output_text?.trim()) {
+    const rendered = response.output_text?.trim() || streamedText.trim() || fallbackNarration(playerText, telemetry, diff, rejectedEvents);
+    if (!response.output_text?.trim() && !streamedText.trim()) {
       onNarrationDelta?.(rendered);
     }
     return rendered;
@@ -100,12 +111,17 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
     return fallback;
   }
   try {
+    let streamedText = '';
     const response = await llm.responsesCreate({
       apiKey,
       model,
       stream: true,
-      onOutputTextDelta: onOpeningDelta,
-      instructions: 'Write the opening paragraph of a novel. Introduce the player to their surroundings using the provided info. Be cinematic: clear, visual, grounded.',
+      onOutputTextDelta: delta => {
+        streamedText += delta;
+        onOpeningDelta?.(delta);
+      },
+      instructions:
+        'You are the Chronicle GM speaking directly to the player in a James Michener–inspired voice: grounded, observant, quietly vivid. Write the opening paragraph that introduces the player to their surroundings using the provided info. You may add non-critical atmosphere consistent with what is already known, but do not invent new game-relevant facts. Avoid generic abstractions; favor concrete nouns and verbs.',
       input: JSON.stringify({ telemetry }),
       truncation: 'auto',
       store: true,
@@ -120,8 +136,8 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
       status: response.status,
       error: response.error ?? response.incomplete_details,
     });
-    const rendered = response.output_text?.trim() || telemetry.location.description || 'You find yourself in an unfamiliar place.';
-    if (!response.output_text?.trim()) {
+    const rendered = response.output_text?.trim() || streamedText.trim() || telemetry.location.description || 'You find yourself in an unfamiliar place.';
+    if (!response.output_text?.trim() && !streamedText.trim()) {
       onOpeningDelta?.(rendered);
     }
     return rendered;

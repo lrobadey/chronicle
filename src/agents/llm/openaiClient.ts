@@ -30,9 +30,11 @@ export class OpenAIClient implements LLMClient {
         stream: true,
       } as any);
       let completedResponse: any;
+      let streamedText = '';
       for await (const event of stream as any) {
         params.onStreamEvent?.(event);
         if (event?.type === 'response.output_text.delta' && typeof event.delta === 'string') {
+          streamedText += event.delta;
           params.onOutputTextDelta?.(event.delta);
         }
         if (event?.type === 'response.completed' && event.response) {
@@ -42,6 +44,9 @@ export class OpenAIClient implements LLMClient {
 
       if (!completedResponse) {
         throw new Error('response_stream_incomplete');
+      }
+      if (!completedResponse.output_text && streamedText) {
+        completedResponse.output_text = streamedText;
       }
       return toResult(completedResponse);
     }

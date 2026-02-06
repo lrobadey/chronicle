@@ -177,6 +177,73 @@ describe('TurnEngine', () => {
     }
   });
 
+  it('persists pending GM prompts and injects them into next-turn context', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'finish_turn',
+              arguments:
+                '{"summary":"need confirmation","playerPrompt":{"pending":{"id":"confirm-rib-market","kind":"confirm_travel","question":"The Rib Market is a longer walk. Set out now?","options":[{"key":"yes","label":"Yes, go now"},{"key":"no","label":"Not yet"}],"data":{"locationId":"the-rib-market","estimatedMinutes":24},"createdTurn":1},"clear":false}}',
+              call_id: 'g1',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-2',
+          output: [
+            {
+              type: 'function_call',
+              name: 'finish_turn',
+              arguments: '{"summary":"confirmation received","playerPrompt":{"pending":null,"clear":true}}',
+              call_id: 'g2',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'narr-2',
+          output: [],
+          output_text: 'You set out north across the dark sand.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+
+      const turnOne = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'go to the rib market',
+        apiKey: 'test-key',
+      });
+
+      assert.equal(turnOne.narration, 'The Rib Market is a longer walk. Set out now?');
+      const afterTurnOne = await store.loadSession(init.sessionId);
+      assert.equal(afterTurnOne?.meta.pendingPrompt?.id, 'confirm-rib-market');
+
+      await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'yes',
+        apiKey: 'test-key',
+      });
+
+      const secondGMInput = llm.calls[1]?.input as Array<Record<string, unknown>>;
+      const secondContext = JSON.parse(String(secondGMInput[0]?.content));
+      assert.equal(secondContext.world.pendingPrompt?.id, 'confirm-rib-market');
+
+      const afterTurnTwo = await store.loadSession(init.sessionId);
+      assert.equal(afterTurnTwo?.meta.pendingPrompt, undefined);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
   it('replays initial snapshot + JSONL log to current snapshot deterministically', async () => {
     const { rootDir, store } = await createStore();
     try {

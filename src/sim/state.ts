@@ -108,6 +108,16 @@ export interface WorldMeta {
   seed: string;
   version: string;
   turn: number;
+  pendingPrompt?: PendingPrompt;
+}
+
+export interface PendingPrompt {
+  id: string;
+  kind: 'confirm_travel' | 'clarify_target' | 'clarify_explore';
+  question: string;
+  options?: Array<{ key: string; label: string }>;
+  data?: Record<string, unknown>;
+  createdTurn: number;
 }
 
 export interface KnowledgeState {
