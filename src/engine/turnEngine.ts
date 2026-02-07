@@ -45,7 +45,7 @@ export interface RunTurnInput {
   playerText: string;
   apiKey?: string;
   narratorStyle?: NarratorStyle;
-  debug?: { includeTrace?: boolean };
+  debug?: { includeTrace?: boolean; metaMode?: boolean };
   stream?: { onNarrationDelta?: (delta: string) => void };
 }
 
@@ -205,6 +205,7 @@ export class TurnEngine {
         runtime,
         llm: this.llm,
         trace,
+        debugMetaMode: debug?.metaMode === true,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown';

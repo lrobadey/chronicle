@@ -12,6 +12,7 @@ export interface CliState {
   narratorStyle: NarratorStyle;
   apiKey?: string;
   includeTrace: boolean;
+  debugMeta: boolean;
 }
 
 export interface CliEngine {
@@ -23,7 +24,7 @@ export interface CliEngine {
     playerText: string;
     apiKey?: string;
     narratorStyle?: NarratorStyle;
-    debug?: { includeTrace?: boolean };
+    debug?: { includeTrace?: boolean; metaMode?: boolean };
     stream?: { onNarrationDelta?: (delta: string) => void };
   }): Promise<RunTurnOutput>;
 }
@@ -66,6 +67,7 @@ export async function startCli(engine: TurnEngine): Promise<void> {
       write: ioWrite,
       narratorStyle: 'michener',
       includeTrace: false,
+      debugMeta: false,
     });
 
     ioWrite('Type /help for commands, or enter your action.\n\n');
@@ -93,9 +95,10 @@ export async function initCliSession(params: {
   apiKey?: string;
   narratorStyle: NarratorStyle;
   includeTrace: boolean;
+  debugMeta: boolean;
   write: (text: string) => void;
 }): Promise<CliState> {
-  const { engine, sessionId, apiKey, narratorStyle, includeTrace, write } = params;
+  const { engine, sessionId, apiKey, narratorStyle, includeTrace, debugMeta, write } = params;
   let openingStreamed = false;
   const { result, usedFallback } = await initWithFallback(engine, sessionId, apiKey, delta => {
     openingStreamed = true;
@@ -119,6 +122,7 @@ export async function initCliSession(params: {
     narratorStyle,
     apiKey: usedFallback ? undefined : apiKey,
     includeTrace,
+    debugMeta,
   };
 }
 
@@ -144,6 +148,7 @@ export async function handleCliLine(params: {
         write(`\nSession: ${state.sessionId}\n`);
         write(`Narrator style: ${state.narratorStyle}\n`);
         write(`Trace mode: ${state.includeTrace ? 'on' : 'off'}\n`);
+        write(`Debug meta mode: ${state.debugMeta ? 'on' : 'off'}\n`);
         write(`API mode: ${state.apiKey ? 'live' : 'fallback'}\n\n`);
         return { state, exit: false };
       case 'style': {
@@ -163,6 +168,13 @@ export async function handleCliLine(params: {
         write(`\nTrace mode: ${state.includeTrace ? 'on' : 'off'}\n\n`);
         return { state, exit: false };
       }
+      case 'debug': {
+        const token = parsed.args[0]?.toLowerCase();
+        const nextValue = parseToggle(token, !state.debugMeta);
+        state = { ...state, debugMeta: nextValue };
+        write(`\nDebug meta mode: ${state.debugMeta ? 'on' : 'off'}\n\n`);
+        return { state, exit: false };
+      }
       case 'state':
         try {
           const telemetry = await engine.getTelemetry(state.sessionId, state.playerId);
@@ -180,6 +192,7 @@ export async function handleCliLine(params: {
           write,
           narratorStyle: state.narratorStyle,
           includeTrace: state.includeTrace,
+          debugMeta: state.debugMeta,
         });
         return { state, exit: false };
       }
@@ -228,6 +241,7 @@ Commands:
   /session              Show session and mode info
   /style <name>         Set narrator style (lyric|cinematic|michener)
   /trace [on|off]       Toggle trace printing (default toggles)
+  /debug [on|off]       Toggle debug meta mode (default toggles)
   /new [sessionId]      Start or resume a session
   /exit                 Exit CLI
 `;
@@ -284,7 +298,7 @@ async function runTurnWithFallback(
     playerId: state.playerId,
     playerText,
     narratorStyle: state.narratorStyle,
-    debug: state.includeTrace ? { includeTrace: true } : undefined,
+    debug: state.includeTrace || state.debugMeta ? { includeTrace: state.includeTrace || undefined, metaMode: state.debugMeta || undefined } : undefined,
     stream: onNarrationDelta ? { onNarrationDelta } : undefined,
   };
 

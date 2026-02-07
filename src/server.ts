@@ -73,16 +73,20 @@ function asNarratorStyle(value: unknown): 'lyric' | 'cinematic' | 'michener' | u
   throw new InputValidationError('narratorStyle must be one of lyric|cinematic|michener');
 }
 
-function asDebug(value: unknown): { includeTrace?: boolean } | undefined {
+function asDebug(value: unknown): { includeTrace?: boolean; metaMode?: boolean } | undefined {
   if (value == null) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new InputValidationError('debug must be an object');
   }
   const includeTrace = (value as Record<string, unknown>).includeTrace;
+  const metaMode = (value as Record<string, unknown>).metaMode;
   if (includeTrace != null && typeof includeTrace !== 'boolean') {
     throw new InputValidationError('debug.includeTrace must be a boolean');
   }
-  return { includeTrace: includeTrace as boolean | undefined };
+  if (metaMode != null && typeof metaMode !== 'boolean') {
+    throw new InputValidationError('debug.metaMode must be a boolean');
+  }
+  return { includeTrace: includeTrace as boolean | undefined, metaMode: metaMode as boolean | undefined };
 }
 
 function normalizeError(err: unknown): { status: number; code: string; error: string; details?: unknown } {

@@ -5,7 +5,7 @@ import { handleCliLine, initCliSession, resolveApiKey } from '../../cli/app';
 
 class StubCliEngine implements CliEngine {
   readonly initCalls: Array<{ sessionId?: string; apiKey?: string; stream?: { onOpeningDelta?: (delta: string) => void } }> = [];
-  readonly turnCalls: Array<{ apiKey?: string; playerText: string; includeTrace?: boolean }> = [];
+  readonly turnCalls: Array<{ apiKey?: string; playerText: string; includeTrace?: boolean; metaMode?: boolean }> = [];
   initCounter = 0;
 
   async initSession(params: { sessionId?: string; apiKey?: string; stream?: { onOpeningDelta?: (delta: string) => void } }) {
@@ -52,13 +52,14 @@ class StubCliEngine implements CliEngine {
     playerText: string;
     apiKey?: string;
     narratorStyle?: 'lyric' | 'cinematic' | 'michener';
-    debug?: { includeTrace?: boolean };
+    debug?: { includeTrace?: boolean; metaMode?: boolean };
     stream?: { onNarrationDelta?: (delta: string) => void };
   }) {
     this.turnCalls.push({
       apiKey: input.apiKey,
       playerText: input.playerText,
       includeTrace: input.debug?.includeTrace,
+      metaMode: input.debug?.metaMode,
     });
     if (input.apiKey === 'bad-key') {
       throw { status: 429, code: 'insufficient_quota', name: 'RateLimitError' };
@@ -94,6 +95,7 @@ describe('CLI app', () => {
       apiKey: 'bad-key',
       narratorStyle: 'michener',
       includeTrace: false,
+      debugMeta: false,
       write: text => writes.push(text),
     });
 
@@ -114,6 +116,7 @@ describe('CLI app', () => {
       narratorStyle: 'michener',
       apiKey: 'bad-key',
       includeTrace: false,
+      debugMeta: false,
     };
 
     ({ state } = await handleCliLine({ state, line: '/trace on', engine, write: text => writes.push(text) }));
@@ -122,12 +125,16 @@ describe('CLI app', () => {
     ({ state } = await handleCliLine({ state, line: '/style lyric', engine, write: text => writes.push(text) }));
     assert.equal(state.narratorStyle, 'lyric');
 
+    ({ state } = await handleCliLine({ state, line: '/debug on', engine, write: text => writes.push(text) }));
+    assert.equal(state.debugMeta, true);
+
     ({ state } = await handleCliLine({ state, line: 'look around', engine, write: text => writes.push(text) }));
     assert.equal(state.apiKey, undefined);
     assert.equal(engine.turnCalls.length, 2);
     assert.equal(engine.turnCalls[0]?.apiKey, 'bad-key');
     assert.equal(engine.turnCalls[1]?.apiKey, undefined);
     assert.equal(engine.turnCalls[1]?.includeTrace, true);
+    assert.equal(engine.turnCalls[1]?.metaMode, true);
     assert.ok(writes.join('').includes('narration-look around'));
     assert.ok(writes.join('').includes('Trace: observe_world'));
   });
