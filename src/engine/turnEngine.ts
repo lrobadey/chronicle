@@ -102,6 +102,7 @@ export class TurnEngine {
     const rejectedEvents: Array<{ event: WorldEvent; reason: string }> = [];
     const npcOutputs: NpcAgentOutput[] = [];
     const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [], llmCalls: [] } : undefined;
+    let gmSummary: string | null = null;
     draft.meta.turn = nextTurn;
 
     const applyProposedEvents = (events: WorldEvent[]) => {
@@ -182,6 +183,10 @@ export class TurnEngine {
         if (clear) {
           delete draft.meta.pendingPrompt;
         }
+        const summaryText = input.summary?.trim();
+        if (summaryText) {
+          gmSummary = summaryText;
+        }
         const pending = normalizePendingPrompt(input.playerPrompt?.pending);
         if (pending) {
           draft.meta.pendingPrompt = pending;
@@ -229,18 +234,24 @@ export class TurnEngine {
     const beforeTelemetry = buildTelemetry(state, playerId);
     const afterTelemetry = buildTelemetry(draft, playerId);
     const diff = computeTurnDiff(beforeTelemetry, afterTelemetry, acceptedEvents);
-    const narration = await narrateTurn({
-      apiKey,
-      style: narratorStyle,
-      playerText,
-      telemetry: afterTelemetry,
-      diff,
-      pendingPrompt: draft.meta.pendingPrompt || null,
-      rejectedEvents,
-      llm: this.llm,
-      onNarrationDelta: stream?.onNarrationDelta,
-      trace,
-    });
+    const gmSummaryText = gmSummary?.trim();
+    const narration = debug?.metaMode && gmSummaryText
+      ? gmSummaryText
+      : await narrateTurn({
+          apiKey,
+          style: narratorStyle,
+          playerText,
+          telemetry: afterTelemetry,
+          diff,
+          pendingPrompt: draft.meta.pendingPrompt || null,
+          rejectedEvents,
+          llm: this.llm,
+          onNarrationDelta: stream?.onNarrationDelta,
+          trace,
+        });
+    if (debug?.metaMode && gmSummaryText) {
+      stream?.onNarrationDelta?.(gmSummaryText);
+    }
 
     const record: TurnRecord = {
       sessionId,
