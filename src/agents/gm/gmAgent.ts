@@ -1,6 +1,6 @@
 import type { LLMClient, ResponseInputItem, ResponseOutputItem } from '../llm/types';
 import { classifyLLMError } from '../llm/errorUtils';
-import { GM_SYSTEM_PROMPT } from './prompts';
+import { GM_DEBUG_META_PROMPT, GM_SYSTEM_PROMPT } from './prompts';
 import { GM_TOOL_DEFS } from './tools';
 import type { WorldEvent } from '../../sim/events';
 import type { PendingPrompt } from '../../sim/state';
@@ -28,6 +28,7 @@ export interface GMAgentParams {
   runtime: GMToolRuntime;
   llm: LLMClient;
   maxIterations?: number;
+  debugMetaMode?: boolean;
   trace?: {
     toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
     llmCalls?: Array<{
@@ -45,13 +46,14 @@ export interface GMAgentParams {
 }
 
 export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boolean }> {
-  const { apiKey, model = 'gpt-5.2', playerText, worldContext, runtime, llm, maxIterations = 8, trace } = params;
+  const { apiKey, model = 'gpt-5.2', playerText, worldContext, runtime, llm, maxIterations = 8, trace, debugMetaMode } = params;
 
   let previousResponseId: string | undefined;
   let pendingInput: ResponseInputItem[] = [
     { role: 'system', content: safeJSONStringify({ world: worldContext }) },
     { role: 'user', content: playerText },
   ];
+  const instructions = debugMetaMode ? `${GM_DEBUG_META_PROMPT}\n\n${GM_SYSTEM_PROMPT}` : GM_SYSTEM_PROMPT;
 
   if (!apiKey) {
     await runtime.observe_world({ perspective: 'gm' });
@@ -65,7 +67,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       response = await llm.responsesCreate({
         apiKey,
         model,
-        instructions: GM_SYSTEM_PROMPT,
+        instructions,
         input: pendingInput,
         previous_response_id: previousResponseId,
         tools: GM_TOOL_DEFS,
