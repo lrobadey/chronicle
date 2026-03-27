@@ -176,7 +176,7 @@ function applyCreateEntity(state: WorldState, event: Extract<WorldEvent, { type:
     next.items[event.entity.data.id] = {
       id: event.entity.data.id,
       name: event.entity.data.name,
-      description: event.entity.data.description,
+      description: event.entity.data.description ?? undefined,
       location: event.entity.data.location,
     };
   } else if (event.entity.kind === 'npc') {

@@ -1,103 +1,63 @@
 import type { ResponseToolDefinition } from '../llm/types';
 
-const GRID_POS_SCHEMA = {
-  type: 'object',
-  properties: {
+function strictObjectSchema<T extends Record<string, unknown>>(properties: T, options?: { nullable?: boolean }) {
+  return {
+    type: options?.nullable ? ['object', 'null'] : 'object',
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  } as const;
+}
+
+const GRID_POS_SCHEMA = strictObjectSchema({
+  x: { type: 'number' },
+  y: { type: 'number' },
+  z: { type: ['number', 'null'] },
+});
+
+const NULLABLE_GRID_POS_SCHEMA = strictObjectSchema(
+  {
     x: { type: 'number' },
     y: { type: 'number' },
     z: { type: ['number', 'null'] },
   },
-  required: ['x', 'y', 'z'],
-  additionalProperties: false,
-} as const;
+  { nullable: true },
+);
 
-const NULLABLE_GRID_POS_SCHEMA = {
-  type: ['object', 'null'],
-  properties: {
-    x: { type: 'number' },
-    y: { type: 'number' },
-    z: { type: ['number', 'null'] },
-  },
-  required: ['x', 'y', 'z'],
-  additionalProperties: false,
-} as const;
+const PROMPT_OPTION_SCHEMA = strictObjectSchema({
+  key: { type: 'string' },
+  label: { type: 'string' },
+});
 
-const PROMPT_OPTION_SCHEMA = {
-  type: 'object',
-  properties: {
-    key: { type: 'string' },
-    label: { type: 'string' },
-  },
-  required: ['key', 'label'],
-  additionalProperties: false,
-} as const;
+const GROUND_LOCATION_SCHEMA = strictObjectSchema({
+  kind: { type: 'string', enum: ['ground'] },
+  pos: GRID_POS_SCHEMA,
+});
 
-const CREATE_ITEM_DATA_SCHEMA = {
-  type: 'object',
-  properties: {
-    id: { type: 'string' },
-    name: { type: 'string' },
-    description: { type: ['string', 'null'] },
-    location: {
-      type: 'object',
-      properties: {
-        kind: { type: 'string', enum: ['ground'] },
-        pos: GRID_POS_SCHEMA,
-      },
-      required: ['kind', 'pos'],
-      additionalProperties: false,
-    },
-  },
-  required: ['id', 'name', 'location'],
-  additionalProperties: false,
-} as const;
+const CREATE_ENTITY_DATA_SCHEMA = strictObjectSchema({
+  id: { type: 'string' },
+  name: { type: 'string' },
+  description: { type: ['string', 'null'] },
+  location: { ...GROUND_LOCATION_SCHEMA, type: ['object', 'null'] },
+  pos: NULLABLE_GRID_POS_SCHEMA,
+  anchor: NULLABLE_GRID_POS_SCHEMA,
+});
 
-const CREATE_NPC_DATA_SCHEMA = {
-  type: 'object',
-  properties: {
-    id: { type: 'string' },
-    name: { type: 'string' },
-    pos: GRID_POS_SCHEMA,
-  },
-  required: ['id', 'name', 'pos'],
-  additionalProperties: false,
-} as const;
+const CREATE_ENTITY_SCHEMA = strictObjectSchema({
+  kind: { type: 'string', enum: ['item', 'npc', 'location'] },
+  data: CREATE_ENTITY_DATA_SCHEMA,
+});
 
-const CREATE_LOCATION_DATA_SCHEMA = {
-  type: 'object',
-  properties: {
-    id: { type: 'string' },
-    name: { type: 'string' },
-    description: { type: 'string' },
-    anchor: GRID_POS_SCHEMA,
-  },
-  required: ['id', 'name', 'description', 'anchor'],
-  additionalProperties: false,
-} as const;
-
-const CREATE_ENTITY_SCHEMA = {
-  type: 'object',
-  properties: {
-    kind: { type: 'string', enum: ['item', 'npc', 'location'] },
-    item: { ...CREATE_ITEM_DATA_SCHEMA, type: ['object', 'null'] },
-    npc: { ...CREATE_NPC_DATA_SCHEMA, type: ['object', 'null'] },
-    location: { ...CREATE_LOCATION_DATA_SCHEMA, type: ['object', 'null'] },
-  },
-  required: ['kind'],
-  additionalProperties: false,
-} as const;
-
-const PENDING_PROMPT_DATA_SCHEMA = {
-  type: ['object', 'null'],
-  properties: {
+const PENDING_PROMPT_DATA_SCHEMA = strictObjectSchema(
+  {
     locationId: { type: ['string', 'null'] },
     estimatedMinutes: { type: ['number', 'null'] },
     subject: { type: ['string', 'null'] },
     area: { type: ['string', 'null'], enum: ['shoreline', 'docks', 'under_ribs', 'around_here', null] },
     direction: { type: ['string', 'null'], enum: ['east', 'west', 'north', 'south', null] },
   },
-  additionalProperties: false,
-} as const;
+  { nullable: true },
+);
 
 const EVENT_ITEM_SCHEMA = {
   type: 'object',
@@ -117,27 +77,48 @@ const EVENT_ITEM_SCHEMA = {
         'Inspect',
       ],
     },
-    actorId: { type: 'string' },
-    to: GRID_POS_SCHEMA,
+    actorId: { type: ['string', 'null'] },
+    to: NULLABLE_GRID_POS_SCHEMA,
     toLocationId: { type: ['string', 'null'] },
     mode: { type: ['string', 'null'], enum: ['walk', 'run', null] },
-    itemId: { type: 'string' },
+    itemId: { type: ['string', 'null'] },
     at: NULLABLE_GRID_POS_SCHEMA,
-    text: { type: 'string' },
+    text: { type: ['string', 'null'] },
     toActorId: { type: ['string', 'null'] },
-    minutes: { type: 'number' },
-    entity: CREATE_ENTITY_SCHEMA,
-    key: { type: 'string' },
+    minutes: { type: ['number', 'null'] },
+    entity: { ...CREATE_ENTITY_SCHEMA, type: ['object', 'null'] },
+    key: { type: ['string', 'null'] },
     value: { type: ['string', 'number', 'boolean', 'null'] },
-    locationId: { type: 'string' },
+    locationId: { type: ['string', 'null'] },
     pace: { type: ['string', 'null'], enum: ['walk', 'run', null] },
     confirmId: { type: ['string', 'null'] },
-    area: { type: 'string', enum: ['shoreline', 'docks', 'under_ribs', 'around_here'] },
+    area: { type: ['string', 'null'], enum: ['shoreline', 'docks', 'under_ribs', 'around_here', null] },
     direction: { type: ['string', 'null'], enum: ['east', 'west', 'north', 'south', null] },
-    subject: { type: 'string' },
+    subject: { type: ['string', 'null'] },
     note: { type: ['string', 'null'] },
   },
-  required: ['type'],
+  required: [
+    'type',
+    'actorId',
+    'to',
+    'toLocationId',
+    'mode',
+    'itemId',
+    'at',
+    'text',
+    'toActorId',
+    'minutes',
+    'entity',
+    'key',
+    'value',
+    'locationId',
+    'pace',
+    'confirmId',
+    'area',
+    'direction',
+    'subject',
+    'note',
+  ],
   additionalProperties: false,
 } as const;
 
@@ -147,12 +128,9 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
     name: 'observe_world',
     description: 'Get current world observation (player or GM view).',
     parameters: {
-      type: 'object',
-      properties: {
+      ...strictObjectSchema({
         perspective: { type: 'string', enum: ['gm', 'player'] },
-      },
-      required: ['perspective'],
-      additionalProperties: false,
+      }),
     },
     strict: true,
   },
@@ -161,13 +139,10 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
     name: 'consult_npc',
     description: 'Ask a specific NPC for dialogue + intent.',
     parameters: {
-      type: 'object',
-      properties: {
+      ...strictObjectSchema({
         npcId: { type: 'string' },
         topic: { type: ['string', 'null'] },
-      },
-      required: ['npcId', 'topic'],
-      additionalProperties: false,
+      }),
     },
     strict: true,
   },
@@ -176,12 +151,9 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
     name: 'propose_events',
     description: 'Propose one or more domain events. The engine validates and applies them.',
     parameters: {
-      type: 'object',
-      properties: {
+      ...strictObjectSchema({
         events: { type: 'array', items: EVENT_ITEM_SCHEMA },
-      },
-      required: ['events'],
-      additionalProperties: false,
+      }),
     },
     strict: true,
   },
@@ -190,15 +162,12 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
     name: 'finish_turn',
     description: 'Finish the turn when done.',
     parameters: {
-      type: 'object',
-      properties: {
+      ...strictObjectSchema({
         summary: { type: 'string' },
-        playerPrompt: {
-          type: ['object', 'null'],
-          properties: {
-            pending: {
-              type: ['object', 'null'],
-              properties: {
+        playerPrompt: strictObjectSchema(
+          {
+            pending: strictObjectSchema(
+              {
                 id: { type: 'string' },
                 kind: { type: 'string', enum: ['confirm_travel', 'clarify_target', 'clarify_explore'] },
                 question: { type: 'string' },
@@ -206,15 +175,13 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
                 data: PENDING_PROMPT_DATA_SCHEMA,
                 createdTurn: { type: 'number' },
               },
-              additionalProperties: false,
-            },
+              { nullable: true },
+            ),
             clear: { type: ['boolean', 'null'] },
           },
-          additionalProperties: false,
-        },
-      },
-      required: ['summary'],
-      additionalProperties: false,
+          { nullable: true },
+        ),
+      }),
     },
     strict: true,
   },

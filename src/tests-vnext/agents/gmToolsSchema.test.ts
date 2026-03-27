@@ -31,6 +31,19 @@ function walkSchema(schema: unknown, path: string, issues: string[]) {
     }
     const properties = record.properties;
     if (properties && typeof properties === 'object' && !Array.isArray(properties)) {
+      const propertyKeys = Object.keys(properties);
+      const required = record.required;
+      if (!Array.isArray(required)) {
+        issues.push(`${path} must define required[] for all object properties`);
+      } else {
+        const missing = propertyKeys.filter(key => !required.includes(key));
+        const extra = required.filter(entry => typeof entry === 'string' && !propertyKeys.includes(entry));
+        if (missing.length || extra.length) {
+          issues.push(
+            `${path} required mismatch missing=[${missing.join(',')}] extra=[${extra.join(',')}]`,
+          );
+        }
+      }
       for (const [key, value] of Object.entries(properties)) {
         walkSchema(value, `${path}.properties.${key}`, issues);
       }
