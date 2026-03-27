@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import { DEFAULT_MODEL } from '../../agents/llm/defaults';
 import { narrateOpening, narrateTurn } from '../../agents/narrator/narratorAgent';
 import { QueueLLM } from '../helpers/queueLLM';
 import type { LLMClient } from '../../agents/llm/types';
+import type { DebugEvent } from '../../engine/debug';
 
 const telemetry = {
   location: { name: 'The Landing', description: 'Mist hangs over the stones.' },
@@ -23,6 +25,7 @@ describe('narrator streaming', () => {
       },
     ]);
     const deltas: string[] = [];
+    const debugEvents: DebugEvent[] = [];
 
     const narration = await narrateTurn({
       apiKey: 'test-key',
@@ -30,11 +33,14 @@ describe('narrator streaming', () => {
       telemetry,
       diff,
       llm,
+      debug: event => debugEvents.push(event),
       onNarrationDelta: delta => deltas.push(delta),
     });
 
     assert.equal(narration, 'The tide turns and the harbor lights wake.');
     assert.deepEqual(deltas, ['The tide turns and the harbor lights wake.']);
+    assert.equal(llm.calls[0]?.model, DEFAULT_MODEL);
+    assert.deepEqual(debugEvents.map(event => event.type), ['narrator.started', 'narrator.completed']);
   });
 
   it('emits a single fallback chunk with no api key', async () => {
@@ -71,6 +77,7 @@ describe('narrator streaming', () => {
 
     assert.equal(opening, 'Fog glows amber above the old pier.');
     assert.deepEqual(deltas, ['Fog glows amber above the old pier.']);
+    assert.equal(llm.calls[0]?.model, DEFAULT_MODEL);
   });
 
   it('uses streamed deltas when streamed response output_text is empty', async () => {

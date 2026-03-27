@@ -8,6 +8,7 @@ import { JsonlSessionStore } from '../../engine/session/jsonlStore';
 import { replayFromLog } from '../../engine/session/replay';
 import { QueueLLM } from '../helpers/queueLLM';
 import { IncompatibleSessionError } from '../../engine/errors';
+import type { DebugEvent } from '../../engine/debug';
 
 async function createStore() {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chronicle-vnext-'));
@@ -38,7 +39,9 @@ describe('TurnEngine', () => {
       ]);
       const engine = new TurnEngine({ store, llm });
       const openingDeltas: string[] = [];
+      const debugEvents: DebugEvent[] = [];
       const init = await engine.initSession({
+        debug: { onEvent: event => debugEvents.push(event) },
         stream: { onOpeningDelta: delta => openingDeltas.push(delta) },
       });
       assert.equal(openingDeltas.length > 0, true);
@@ -49,6 +52,7 @@ describe('TurnEngine', () => {
         playerId: 'player-1',
         playerText: 'Move east',
         apiKey: 'test-key',
+        debug: { onEvent: event => debugEvents.push(event) },
         stream: { onNarrationDelta: delta => narrationDeltas.push(delta) },
       });
 
@@ -57,6 +61,10 @@ describe('TurnEngine', () => {
       assert.equal(turn.acceptedEvents[0]?.meta?.turn, 1);
       assert.equal(turn.acceptedEvents[0]?.meta?.by, 'gm');
       assert.equal(narrationDeltas.length > 0, true);
+      assert.ok(debugEvents.some(event => event.type === 'init.started'));
+      assert.ok(debugEvents.some(event => event.type === 'turn.started'));
+      assert.ok(debugEvents.some(event => event.type === 'event.accepted'));
+      assert.ok(debugEvents.some(event => event.type === 'turn.persisted'));
 
       const persisted = await store.loadSession(init.sessionId);
       assert.equal(persisted?.meta.turn, 1);

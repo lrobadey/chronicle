@@ -1,0 +1,37 @@
+import type { WorldEvent } from '../sim/events';
+
+export type DebugSink = (event: DebugEvent) => void;
+
+export type DebugEvent =
+  | { type: 'init.started'; sessionId?: string }
+  | { type: 'init.session_ready'; sessionId: string; created: boolean }
+  | { type: 'turn.started'; sessionId: string; turn: number; playerText: string }
+  | { type: 'gm.iteration.started'; iteration: number }
+  | {
+      type: 'gm.response.received';
+      iteration: number;
+      toolCalls: number;
+      status?: string;
+      responseId?: string;
+      error?: unknown;
+    }
+  | { type: 'tool.called'; tool: string; input: unknown }
+  | { type: 'tool.result'; tool: string; output: unknown }
+  | { type: 'event.accepted'; event: WorldEvent }
+  | { type: 'event.rejected'; event: WorldEvent; reason: string }
+  | { type: 'event.rollback'; events: WorldEvent[]; reason: string }
+  | { type: 'npc.started'; npcId: string }
+  | { type: 'npc.completed'; npcId: string; output: unknown }
+  | { type: 'narrator.started'; phase: 'opening' | 'turn'; style?: string }
+  | { type: 'narrator.completed'; phase: 'opening' | 'turn'; text?: string }
+  | { type: 'turn.persisted'; sessionId: string; turn: number }
+  | { type: 'error'; stage: string; message: string };
+
+export function emitDebugEvent(sink: DebugSink | undefined, event: DebugEvent) {
+  if (!sink) return;
+  try {
+    sink(event);
+  } catch {
+    // Debug output must never affect runtime behavior.
+  }
+}

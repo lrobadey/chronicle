@@ -116,8 +116,16 @@ export interface PendingPrompt {
   kind: 'confirm_travel' | 'clarify_target' | 'clarify_explore';
   question: string;
   options?: Array<{ key: string; label: string }>;
-  data?: Record<string, unknown>;
+  data?: PendingPromptData;
   createdTurn: number;
+}
+
+export interface PendingPromptData {
+  locationId?: string;
+  estimatedMinutes?: number;
+  subject?: string;
+  area?: 'shoreline' | 'docks' | 'under_ribs' | 'around_here';
+  direction?: 'east' | 'west' | 'north' | 'south';
 }
 
 export interface KnowledgeState {

@@ -1,6 +1,9 @@
 import type { LLMClient, ResponseOutputItem, ResponseToolDefinition } from '../llm/types';
+import { DEFAULT_MODEL } from '../llm/defaults';
 import { classifyLLMError } from '../llm/errorUtils';
 import { NPC_SYSTEM_PROMPT } from './prompts';
+import type { DebugSink } from '../../engine/debug';
+import { emitDebugEvent } from '../../engine/debug';
 
 const NPC_OUTPUT_TOOL_NAME = 'emit_npc_turn';
 
@@ -36,6 +39,7 @@ export interface NpcAgentParams {
   observation: unknown;
   playerText: string;
   llm: LLMClient;
+  debug?: DebugSink;
   trace?: {
     llmCalls?: Array<{
       agent: 'gm' | 'npc' | 'narrator';
@@ -52,14 +56,17 @@ export interface NpcAgentParams {
 }
 
 export async function runNpcAgent(params: NpcAgentParams): Promise<NpcAgentOutput> {
-  const { apiKey, model = 'gpt-5.2', npcId, persona, observation, playerText, llm, trace } = params;
+  const { apiKey, model = DEFAULT_MODEL, npcId, persona, observation, playerText, llm, debug, trace } = params;
+  emitDebugEvent(debug, { type: 'npc.started', npcId });
 
   if (!apiKey) {
-    return {
+    const fallback = {
       npcId,
       publicUtterance: `${persona.name} nods, saying little.`,
       privateIntent: 'stay_guarded',
     };
+    emitDebugEvent(debug, { type: 'npc.completed', npcId, output: fallback });
+    return fallback;
   }
 
   let response;
@@ -81,11 +88,13 @@ export async function runNpcAgent(params: NpcAgentParams): Promise<NpcAgentOutpu
       status: 'failed',
       error: classifyLLMError(error),
     });
-    return {
+    const fallback = {
       npcId,
       publicUtterance: `${persona.name} says nothing.`,
       privateIntent: 'wait',
     };
+    emitDebugEvent(debug, { type: 'npc.completed', npcId, output: fallback });
+    return fallback;
   }
 
   const functionCalls = response.output.filter(isFunctionCallItem);
@@ -102,28 +111,34 @@ export async function runNpcAgent(params: NpcAgentParams): Promise<NpcAgentOutpu
   });
 
   if (!resultCall) {
-    return {
+    const fallback = {
       npcId,
       publicUtterance: `${persona.name} says nothing.`,
       privateIntent: 'wait',
     };
+    emitDebugEvent(debug, { type: 'npc.completed', npcId, output: fallback });
+    return fallback;
   }
 
   const parsed = parseNpcOutput(resultCall.arguments);
   if (!parsed) {
-    return {
+    const fallback = {
       npcId,
       publicUtterance: `${persona.name} says nothing.`,
       privateIntent: 'wait',
     };
+    emitDebugEvent(debug, { type: 'npc.completed', npcId, output: fallback });
+    return fallback;
   }
 
-  return {
+  const output = {
     npcId,
     publicUtterance: parsed.publicUtterance || `${persona.name} says nothing.`,
     privateIntent: parsed.privateIntent || 'wait',
     emotionalTone: parsed.emotionalTone || undefined,
   };
+  emitDebugEvent(debug, { type: 'npc.completed', npcId, output });
+  return output;
 }
 
 function parseNpcOutput(argumentsJSON: string): { publicUtterance: string; privateIntent: string; emotionalTone: string | null } | null {

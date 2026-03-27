@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { runNpcAgent } from '../../agents/npc/npcAgent';
+import { DEFAULT_MODEL } from '../../agents/llm/defaults';
 import { QueueLLM } from '../helpers/queueLLM';
+import type { DebugEvent } from '../../engine/debug';
 
 describe('NPC agent', () => {
   it('uses strict function-call payload for NPC output', async () => {
@@ -19,6 +21,7 @@ describe('NPC agent', () => {
         output_text: '',
       },
     ]);
+    const debugEvents: DebugEvent[] = [];
 
     const trace = { llmCalls: [] as Array<{ agent: 'gm' | 'npc' | 'narrator'; [key: string]: unknown }> };
     const result = await runNpcAgent({
@@ -28,6 +31,7 @@ describe('NPC agent', () => {
       observation: { nearbyActors: [] },
       playerText: 'What do you see?',
       llm,
+      debug: event => debugEvents.push(event),
       trace,
     });
 
@@ -36,6 +40,8 @@ describe('NPC agent', () => {
     assert.equal(result.privateIntent, 'warn_player');
     assert.equal(result.emotionalTone, 'grim');
     assert.equal(trace.llmCalls.length, 1);
+    assert.equal(llm.calls[0]?.model, DEFAULT_MODEL);
+    assert.deepEqual(debugEvents.map(event => event.type), ['npc.started', 'npc.completed']);
   });
 
   it('falls back deterministically when function-call payload is missing', async () => {

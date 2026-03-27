@@ -1,9 +1,12 @@
 import type { LLMClient } from '../llm/types';
+import { DEFAULT_MODEL } from '../llm/defaults';
 import { classifyLLMError } from '../llm/errorUtils';
 import { NARRATOR_STYLE_PROMPTS } from './prompts';
 import type { Telemetry } from '../../sim/views/telemetry';
 import type { TurnDiff } from '../../sim/views/diff';
 import type { PendingPrompt } from '../../sim/state';
+import type { DebugSink } from '../../engine/debug';
+import { emitDebugEvent } from '../../engine/debug';
 
 export type NarratorStyle = 'lyric' | 'cinematic' | 'michener';
 
@@ -18,6 +21,7 @@ export interface NarratorParams {
   rejectedEvents?: Array<{ reason: string; event?: unknown }>;
   llm: LLMClient;
   onNarrationDelta?: (delta: string) => void;
+  debug?: DebugSink;
   trace?: {
     llmCalls?: Array<{
       agent: 'gm' | 'npc' | 'narrator';
@@ -40,19 +44,23 @@ export interface NarratorOpeningParams {
   telemetry: Telemetry;
   llm: LLMClient;
   onOpeningDelta?: (delta: string) => void;
+  debug?: DebugSink;
   trace?: NarratorParams['trace'];
 }
 
 export async function narrateTurn(params: NarratorParams): Promise<string> {
-  const { apiKey, model = 'gpt-5.2', style = 'michener', playerText, telemetry, diff, pendingPrompt, rejectedEvents, llm, onNarrationDelta, trace } = params;
+  const { apiKey, model = DEFAULT_MODEL, style = 'michener', playerText, telemetry, diff, pendingPrompt, rejectedEvents, llm, onNarrationDelta, debug, trace } = params;
+  emitDebugEvent(debug, { type: 'narrator.started', phase: 'turn', style });
   if (pendingPrompt?.question?.trim()) {
     const question = pendingPrompt.question.trim();
     onNarrationDelta?.(question);
+    emitDebugEvent(debug, { type: 'narrator.completed', phase: 'turn', text: question });
     return question;
   }
   if (!apiKey) {
     const fallback = fallbackNarration(playerText, telemetry, diff, rejectedEvents);
     onNarrationDelta?.(fallback);
+    emitDebugEvent(debug, { type: 'narrator.completed', phase: 'turn', text: fallback });
     return fallback;
   }
   try {
@@ -89,6 +97,7 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
     if (!response.output_text?.trim() && !streamedText.trim()) {
       onNarrationDelta?.(rendered);
     }
+    emitDebugEvent(debug, { type: 'narrator.completed', phase: 'turn', text: rendered });
     return rendered;
   } catch (error) {
     pushLLMTrace(trace, {
@@ -99,15 +108,18 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
     });
     const fallback = fallbackNarration(playerText, telemetry, diff, rejectedEvents);
     onNarrationDelta?.(fallback);
+    emitDebugEvent(debug, { type: 'narrator.completed', phase: 'turn', text: fallback });
     return fallback;
   }
 }
 
 export async function narrateOpening(params: NarratorOpeningParams): Promise<string> {
-  const { apiKey, model = 'gpt-5.2', style = 'cinematic', telemetry, llm, onOpeningDelta, trace } = params;
+  const { apiKey, model = DEFAULT_MODEL, style = 'cinematic', telemetry, llm, onOpeningDelta, debug, trace } = params;
+  emitDebugEvent(debug, { type: 'narrator.started', phase: 'opening', style });
   if (!apiKey) {
     const fallback = telemetry.location.description || 'You find yourself in an unfamiliar place.';
     onOpeningDelta?.(fallback);
+    emitDebugEvent(debug, { type: 'narrator.completed', phase: 'opening', text: fallback });
     return fallback;
   }
   try {
@@ -140,6 +152,7 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
     if (!response.output_text?.trim() && !streamedText.trim()) {
       onOpeningDelta?.(rendered);
     }
+    emitDebugEvent(debug, { type: 'narrator.completed', phase: 'opening', text: rendered });
     return rendered;
   } catch (error) {
     pushLLMTrace(trace, {
@@ -150,6 +163,7 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
     });
     const fallback = telemetry.location.description || 'You find yourself in an unfamiliar place.';
     onOpeningDelta?.(fallback);
+    emitDebugEvent(debug, { type: 'narrator.completed', phase: 'opening', text: fallback });
     return fallback;
   }
 }

@@ -3,19 +3,29 @@ import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import type { TurnEngine } from '../engine/turnEngine';
 import type { InitResult, RunTurnOutput } from '../engine/turnEngine';
+import type { DebugEvent, DebugSink } from '../engine/debug';
 import { isChronicleError } from '../engine/errors';
 import type { NarratorStyle } from '../agents/narrator/narratorAgent';
+import type { WorldEvent } from '../sim/events';
+
+export type DebugDetail = 'summary' | 'raw';
 
 export interface CliState {
   sessionId: string;
   playerId: string;
   narratorStyle: NarratorStyle;
   apiKey?: string;
-  includeTrace: boolean;
+  debugEnabled: boolean;
+  debugDetail: DebugDetail;
 }
 
 export interface CliEngine {
-  initSession(params: { sessionId?: string; apiKey?: string; stream?: { onOpeningDelta?: (delta: string) => void } }): Promise<InitResult>;
+  initSession(params: {
+    sessionId?: string;
+    apiKey?: string;
+    debug?: { onEvent?: DebugSink };
+    stream?: { onOpeningDelta?: (delta: string) => void };
+  }): Promise<InitResult>;
   getTelemetry(sessionId: string, playerId: string): Promise<RunTurnOutput['telemetry']>;
   runTurn(input: {
     sessionId: string;
@@ -23,7 +33,7 @@ export interface CliEngine {
     playerText: string;
     apiKey?: string;
     narratorStyle?: NarratorStyle;
-    debug?: { includeTrace?: boolean };
+    debug?: { includeTrace?: boolean; onEvent?: DebugSink };
     stream?: { onNarrationDelta?: (delta: string) => void };
   }): Promise<RunTurnOutput>;
 }
@@ -65,7 +75,8 @@ export async function startCli(engine: TurnEngine): Promise<void> {
       apiKey: resolveApiKey(process.env),
       write: ioWrite,
       narratorStyle: 'michener',
-      includeTrace: false,
+      debugEnabled: true,
+      debugDetail: 'summary',
     });
 
     ioWrite('Type /help for commands, or enter your action.\n\n');
@@ -92,15 +103,29 @@ export async function initCliSession(params: {
   sessionId?: string;
   apiKey?: string;
   narratorStyle: NarratorStyle;
-  includeTrace: boolean;
+  debugEnabled: boolean;
+  debugDetail: DebugDetail;
   write: (text: string) => void;
 }): Promise<CliState> {
-  const { engine, sessionId, apiKey, narratorStyle, includeTrace, write } = params;
+  const { engine, sessionId, apiKey, narratorStyle, debugEnabled, debugDetail, write } = params;
+  const debugSink = debugEnabled ? createDebugWriter(write, debugDetail) : undefined;
+  const openingChunks: string[] = [];
   let openingStreamed = false;
-  const { result, usedFallback } = await initWithFallback(engine, sessionId, apiKey, delta => {
-    openingStreamed = true;
-    write(delta);
-  });
+
+  const { result, usedFallback } = await initWithFallback(
+    engine,
+    sessionId,
+    apiKey,
+    delta => {
+      if (debugEnabled) {
+        openingChunks.push(delta);
+        return;
+      }
+      openingStreamed = true;
+      write(delta);
+    },
+    debugSink,
+  );
 
   if (!apiKey) {
     write('(No API key - running in deterministic fallback mode)\n\n');
@@ -108,17 +133,22 @@ export async function initCliSession(params: {
     write('(API unavailable - switched to deterministic fallback mode)\n\n');
   }
 
-  if (openingStreamed) {
+  if (debugEnabled) {
+    const openingText = openingChunks.join('') || result.opening;
+    write(`Opening:\n${openingText}\n\n`);
+  } else if (openingStreamed) {
     write('\n\n');
   } else {
     write(`${result.opening}\n\n`);
   }
+
   return {
     sessionId: result.sessionId,
     playerId: 'player-1',
     narratorStyle,
     apiKey: usedFallback ? undefined : apiKey,
-    includeTrace,
+    debugEnabled,
+    debugDetail,
   };
 }
 
@@ -143,7 +173,8 @@ export async function handleCliLine(params: {
       case 'session':
         write(`\nSession: ${state.sessionId}\n`);
         write(`Narrator style: ${state.narratorStyle}\n`);
-        write(`Trace mode: ${state.includeTrace ? 'on' : 'off'}\n`);
+        write(`Debug mode: ${state.debugEnabled ? 'on' : 'off'}\n`);
+        write(`Debug detail: ${state.debugDetail}\n`);
         write(`API mode: ${state.apiKey ? 'live' : 'fallback'}\n\n`);
         return { state, exit: false };
       case 'style': {
@@ -156,11 +187,22 @@ export async function handleCliLine(params: {
         write(`\nNarrator style: ${next}\n\n`);
         return { state, exit: false };
       }
-      case 'trace': {
+      case 'trace':
+      case 'debug': {
         const token = parsed.args[0]?.toLowerCase();
-        const nextValue = parseToggle(token, !state.includeTrace);
-        state = { ...state, includeTrace: nextValue };
-        write(`\nTrace mode: ${state.includeTrace ? 'on' : 'off'}\n\n`);
+        const nextValue = parseToggle(token, !state.debugEnabled);
+        state = { ...state, debugEnabled: nextValue };
+        write(`\nDebug mode: ${state.debugEnabled ? 'on' : 'off'}\n\n`);
+        return { state, exit: false };
+      }
+      case 'detail': {
+        const next = parsed.args[0]?.toLowerCase();
+        if (!isDebugDetail(next)) {
+          write('\nUsage: /detail <summary|raw>\n\n');
+          return { state, exit: false };
+        }
+        state = { ...state, debugDetail: next };
+        write(`\nDebug detail: ${next}\n\n`);
         return { state, exit: false };
       }
       case 'state':
@@ -179,7 +221,8 @@ export async function handleCliLine(params: {
           apiKey: state.apiKey,
           write,
           narratorStyle: state.narratorStyle,
-          includeTrace: state.includeTrace,
+          debugEnabled: state.debugEnabled,
+          debugDetail: state.debugDetail,
         });
         return { state, exit: false };
       }
@@ -189,29 +232,38 @@ export async function handleCliLine(params: {
     }
   }
 
+  const narrationChunks: string[] = [];
+  const debugSink = state.debugEnabled ? createDebugWriter(write, state.debugDetail) : undefined;
   let narrationStreamed = false;
-  const turn = await runTurnWithFallback(engine, state, line, delta => {
-    narrationStreamed = true;
-    write(delta);
-  });
+  const turn = await runTurnWithFallback(
+    engine,
+    state,
+    line,
+    delta => {
+      if (state.debugEnabled) {
+        narrationChunks.push(delta);
+        return;
+      }
+      narrationStreamed = true;
+      write(delta);
+    },
+    debugSink,
+  );
   if (turn.usedFallback) {
     state = { ...state, apiKey: undefined };
     write('\n(API request failed - switched to deterministic fallback mode)\n');
   }
 
   state = { ...state, sessionId: turn.result.sessionId };
-  if (narrationStreamed) {
-    write('\n');
+  if (state.debugEnabled) {
+    const narration = narrationChunks.join('') || turn.result.narration;
+    write(`\nNarration:\n${narration}\n\n`);
+  } else if (narrationStreamed) {
+    write('\n\n');
   } else {
-    write(`\n${turn.result.narration}\n`);
+    write(`\n${turn.result.narration}\n\n`);
   }
 
-  if (state.includeTrace) {
-    const tools = turn.result.trace?.toolCalls?.map(call => call.tool) ?? [];
-    write(`\nTrace: ${tools.length ? tools.join(', ') : '(no tool calls)'}\n`);
-  }
-
-  write('\n');
   return { state, exit: false };
 }
 
@@ -227,7 +279,9 @@ Commands:
   /state                Show current state snapshot
   /session              Show session and mode info
   /style <name>         Set narrator style (lyric|cinematic|michener)
-  /trace [on|off]       Toggle trace printing (default toggles)
+  /debug [on|off]       Toggle live debug timeline (default toggles)
+  /trace [on|off]       Alias for /debug
+  /detail <mode>        Set debug detail (summary|raw)
   /new [sessionId]      Start or resume a session
   /exit                 Exit CLI
 `;
@@ -244,6 +298,10 @@ function isNarratorStyle(value: string | undefined): value is NarratorStyle {
   return value === 'lyric' || value === 'cinematic' || value === 'michener';
 }
 
+function isDebugDetail(value: string | undefined): value is DebugDetail {
+  return value === 'summary' || value === 'raw';
+}
+
 export function formatTelemetry(telemetry: RunTurnOutput['telemetry']): string {
   const inventory = telemetry.player.inventory.map(item => item.name).join(', ') || '(empty)';
   return `
@@ -256,20 +314,224 @@ Turn: ${telemetry.turn}
 `.trimEnd();
 }
 
+function createDebugWriter(write: (text: string) => void, detail: DebugDetail): DebugSink {
+  return event => {
+    write(renderDebugEvent(event, detail));
+  };
+}
+
+export function renderDebugEvent(event: DebugEvent, detail: DebugDetail): string {
+  const summary = renderDebugSummary(event);
+  if (!summary) return '';
+  if (detail === 'summary') return `${summary}\n`;
+
+  const payload = extractDebugPayload(event);
+  if (payload == null) return `${summary}\n`;
+  return `${summary}\n${formatRawPayload(payload)}\n`;
+}
+
+function renderDebugSummary(event: DebugEvent): string {
+  switch (event.type) {
+    case 'init.started':
+      return '[init] starting';
+    case 'init.session_ready':
+      return `[init] session ${event.sessionId} ${event.created ? 'created' : 'resumed'}`;
+    case 'turn.started':
+      return `[turn] #${event.turn} ${JSON.stringify(event.playerText)}`;
+    case 'gm.iteration.started':
+      return `[gm] iteration ${event.iteration}`;
+    case 'gm.response.received':
+      return `[gm] iteration ${event.iteration} received ${event.toolCalls} tool call(s)`;
+    case 'tool.called':
+      return `[tool] ${event.tool} ${summarizeToolInput(event.tool, event.input)}`.trimEnd();
+    case 'tool.result':
+      return `[tool] result ${event.tool} ${summarizeToolOutput(event.tool, event.output)}`.trimEnd();
+    case 'event.accepted':
+      return `[event] accepted ${summarizeWorldEvent(event.event)}`;
+    case 'event.rejected':
+      return `[event] rejected ${summarizeWorldEvent(event.event)} reason=${event.reason}`;
+    case 'event.rollback':
+      return `[event] rollback ${event.events.length} event(s) reason=${event.reason}`;
+    case 'npc.started':
+      return `[npc] ${event.npcId} consulting`;
+    case 'npc.completed':
+      return `[npc] ${event.npcId} responded`;
+    case 'narrator.started':
+      return `[narrator] ${event.phase === 'opening' ? 'opening' : 'rendering'}`;
+    case 'narrator.completed':
+      return '';
+    case 'turn.persisted':
+      return `[persist] turn ${event.turn} saved`;
+    case 'error':
+      return `[error] ${event.stage} ${event.message}`;
+    default:
+      return '';
+  }
+}
+
+function extractDebugPayload(event: DebugEvent): unknown {
+  switch (event.type) {
+    case 'gm.response.received':
+      return {
+        responseId: event.responseId,
+        status: event.status,
+        toolCalls: event.toolCalls,
+        error: event.error,
+      };
+    case 'tool.called':
+      return event.input;
+    case 'tool.result':
+      return event.output;
+    case 'event.accepted':
+      return event.event;
+    case 'event.rejected':
+      return { event: event.event, reason: event.reason };
+    case 'event.rollback':
+      return { events: event.events, reason: event.reason };
+    case 'npc.completed':
+      return event.output;
+    case 'narrator.completed':
+      return { phase: event.phase, text: event.text };
+    case 'error':
+      return { stage: event.stage, message: event.message };
+    default:
+      return null;
+  }
+}
+
+function summarizeToolInput(tool: string, input: unknown): string {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
+  const record = input as Record<string, unknown>;
+  if (tool === 'observe_world' && typeof record.perspective === 'string') {
+    return `perspective=${record.perspective}`;
+  }
+  if (tool === 'consult_npc' && typeof record.npcId === 'string') {
+    return `npc=${record.npcId}`;
+  }
+  if (tool === 'propose_events' && Array.isArray(record.events)) {
+    return `${record.events.length} event(s)`;
+  }
+  if (tool === 'finish_turn') {
+    const pending = record.playerPrompt && typeof record.playerPrompt === 'object'
+      ? (record.playerPrompt as Record<string, unknown>).pending
+      : undefined;
+    if (pending && typeof pending === 'object') {
+      const kind = typeof (pending as Record<string, unknown>).kind === 'string'
+        ? String((pending as Record<string, unknown>).kind)
+        : 'pending';
+      return `pending=${kind}`;
+    }
+    if (record.playerPrompt && typeof record.playerPrompt === 'object' && (record.playerPrompt as Record<string, unknown>).clear === true) {
+      return 'clear_prompt=true';
+    }
+  }
+  return '';
+}
+
+function summarizeToolOutput(tool: string, output: unknown): string {
+  if (!output || typeof output !== 'object' || Array.isArray(output)) return '';
+  const record = output as Record<string, unknown>;
+  if (typeof record.error === 'string') {
+    return `error=${record.error}`;
+  }
+  if (tool === 'propose_events') {
+    const accepted = typeof record.accepted === 'number' ? record.accepted : 0;
+    const rejected = typeof record.rejected === 'number' ? record.rejected : 0;
+    return `accepted=${accepted} rejected=${rejected}`;
+  }
+  if (typeof record.ok === 'boolean') {
+    return record.ok ? 'ok' : 'failed';
+  }
+  return '';
+}
+
+function summarizeWorldEvent(event: WorldEvent): string {
+  switch (event.type) {
+    case 'MoveActor':
+      return `MoveActor to=${formatGridPos(event.to)}`;
+    case 'TravelToLocation':
+      return `TravelToLocation location=${event.locationId}`;
+    case 'PickUpItem':
+      return `PickUpItem item=${event.itemId}`;
+    case 'DropItem':
+      return `DropItem item=${event.itemId}`;
+    case 'Speak':
+      return `Speak actor=${event.actorId}`;
+    case 'AdvanceTime':
+      return `AdvanceTime minutes=${event.minutes}`;
+    case 'CreateEntity':
+      return `CreateEntity kind=${event.entity.kind}`;
+    case 'SetFlag':
+      return `SetFlag key=${event.key}`;
+    case 'Explore':
+      return `Explore area=${event.area}`;
+    case 'Inspect':
+      return `Inspect subject=${event.subject}`;
+  }
+}
+
+function formatGridPos(pos: { x: number; y: number; z?: number }) {
+  return `(${pos.x},${pos.y},${pos.z ?? 0})`;
+}
+
+function formatRawPayload(value: unknown): string {
+  const raw = safeJSONStringify(value);
+  const truncated = raw.length > 2400 ? `${raw.slice(0, 2400)}\n... truncated` : raw;
+  return `${indentBlock(truncated)}`;
+}
+
+function safeJSONStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return JSON.stringify({ error: 'non_serializable_payload' }, null, 2);
+  }
+}
+
+function indentBlock(text: string): string {
+  return text
+    .split('\n')
+    .map(line => `  ${line}`)
+    .join('\n');
+}
+
 async function initWithFallback(
   engine: CliEngine,
   sessionId: string | undefined,
   apiKey: string | undefined,
   onOpeningDelta?: (delta: string) => void,
+  onDebugEvent?: DebugSink,
 ) {
   if (!apiKey) {
-    return { result: await engine.initSession({ sessionId, stream: onOpeningDelta ? { onOpeningDelta } : undefined }), usedFallback: false };
+    return {
+      result: await engine.initSession({
+        sessionId,
+        debug: onDebugEvent ? { onEvent: onDebugEvent } : undefined,
+        stream: onOpeningDelta ? { onOpeningDelta } : undefined,
+      }),
+      usedFallback: false,
+    };
   }
   try {
-    return { result: await engine.initSession({ sessionId, apiKey, stream: onOpeningDelta ? { onOpeningDelta } : undefined }), usedFallback: false };
+    return {
+      result: await engine.initSession({
+        sessionId,
+        apiKey,
+        debug: onDebugEvent ? { onEvent: onDebugEvent } : undefined,
+        stream: onOpeningDelta ? { onOpeningDelta } : undefined,
+      }),
+      usedFallback: false,
+    };
   } catch (error) {
     if (!isRecoverableLLMError(error)) throw error;
-    return { result: await engine.initSession({ sessionId, stream: onOpeningDelta ? { onOpeningDelta } : undefined }), usedFallback: true };
+    return {
+      result: await engine.initSession({
+        sessionId,
+        debug: onDebugEvent ? { onEvent: onDebugEvent } : undefined,
+        stream: onOpeningDelta ? { onOpeningDelta } : undefined,
+      }),
+      usedFallback: true,
+    };
   }
 }
 
@@ -278,13 +540,16 @@ async function runTurnWithFallback(
   state: CliState,
   playerText: string,
   onNarrationDelta?: (delta: string) => void,
+  onDebugEvent?: DebugSink,
 ) {
   const payload = {
     sessionId: state.sessionId,
     playerId: state.playerId,
     playerText,
     narratorStyle: state.narratorStyle,
-    debug: state.includeTrace ? { includeTrace: true } : undefined,
+    debug: (state.debugEnabled || onDebugEvent)
+      ? { includeTrace: state.debugEnabled, onEvent: onDebugEvent }
+      : undefined,
     stream: onNarrationDelta ? { onNarrationDelta } : undefined,
   };
 

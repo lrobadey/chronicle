@@ -2,7 +2,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { JsonlSessionStore } from './session/jsonlStore';
 import type { SessionStore, TurnRecord, TurnTrace } from './session/types';
-import type { PendingPrompt, WorldState } from '../sim/state';
+import type { PendingPrompt, PendingPromptData, WorldState } from '../sim/state';
 import type { WorldEvent } from '../sim/events';
 import { checkInvariants } from '../sim/invariants';
 import { validateEvent } from '../sim/validate';
@@ -19,6 +19,8 @@ import { runGMAgent, type GMFinishTurnInput } from '../agents/gm/gmAgent';
 import { runNpcAgent, type NpcAgentOutput } from '../agents/npc/npcAgent';
 import { narrateOpening, narrateTurn, type NarratorStyle } from '../agents/narrator/narratorAgent';
 import { createIsleOfMarrowWorldVNext } from '../worlds/isle-of-marrow.vnext';
+import type { DebugSink } from './debug';
+import { emitDebugEvent } from './debug';
 import {
   InvariantViolationError,
   PlayerNotFoundError,
@@ -45,7 +47,7 @@ export interface RunTurnInput {
   playerText: string;
   apiKey?: string;
   narratorStyle?: NarratorStyle;
-  debug?: { includeTrace?: boolean };
+  debug?: { includeTrace?: boolean; onEvent?: DebugSink };
   stream?: { onNarrationDelta?: (delta: string) => void };
 }
 
@@ -70,13 +72,32 @@ export class TurnEngine {
     this.worldFactory = config.worldFactory || (() => createIsleOfMarrowWorldVNext());
   }
 
-  async initSession(params: { sessionId?: string; apiKey?: string; stream?: { onOpeningDelta?: (delta: string) => void } }): Promise<InitResult> {
-    const { sessionId, apiKey, stream } = params;
-    const ensured = await this.store.ensureSession(sessionId, this.worldFactory);
-    assertNoInvariantIssues(ensured.state, 'Session initialized with invalid world state');
-    const telemetry = buildTelemetry(ensured.state, 'player-1');
-    const opening = await narrateOpening({ apiKey, telemetry, llm: this.llm, onOpeningDelta: stream?.onOpeningDelta });
-    return { sessionId: ensured.sessionId, created: ensured.created, telemetry, opening };
+  async initSession(params: {
+    sessionId?: string;
+    apiKey?: string;
+    debug?: { onEvent?: DebugSink };
+    stream?: { onOpeningDelta?: (delta: string) => void };
+  }): Promise<InitResult> {
+    const { sessionId, apiKey, debug, stream } = params;
+    const emit = debug?.onEvent;
+    emitDebugEvent(emit, { type: 'init.started', sessionId });
+    try {
+      const ensured = await this.store.ensureSession(sessionId, this.worldFactory);
+      emitDebugEvent(emit, { type: 'init.session_ready', sessionId: ensured.sessionId, created: ensured.created });
+      assertNoInvariantIssues(ensured.state, 'Session initialized with invalid world state');
+      const telemetry = buildTelemetry(ensured.state, 'player-1');
+      const opening = await narrateOpening({
+        apiKey,
+        telemetry,
+        llm: this.llm,
+        debug: emit,
+        onOpeningDelta: stream?.onOpeningDelta,
+      });
+      return { sessionId: ensured.sessionId, created: ensured.created, telemetry, opening };
+    } catch (error) {
+      emitDebugEvent(emit, { type: 'error', stage: 'init', message: error instanceof Error ? error.message : 'unknown' });
+      throw error;
+    }
   }
 
   async getTelemetry(sessionId: string, playerId: string) {
@@ -88,6 +109,7 @@ export class TurnEngine {
 
   async runTurn(input: RunTurnInput): Promise<RunTurnOutput> {
     const { sessionId, playerId, playerText, apiKey, narratorStyle, debug, stream } = input;
+    const emit = debug?.onEvent;
     if (!playerText?.trim()) throw new InputValidationError('playerText is required');
 
     const state = await this.store.loadSession(sessionId);
@@ -103,6 +125,7 @@ export class TurnEngine {
     const npcOutputs: NpcAgentOutput[] = [];
     const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [], llmCalls: [] } : undefined;
     draft.meta.turn = nextTurn;
+    emitDebugEvent(emit, { type: 'turn.started', sessionId, turn: nextTurn, playerText });
 
     const applyProposedEvents = (events: WorldEvent[]) => {
       const batch = Array.isArray(events) ? events : [];
@@ -116,7 +139,9 @@ export class TurnEngine {
       for (const event of batch) {
         const validation = validateEvent(stagedState, event);
         if (!validation.ok) {
-          rejectedEvents.push({ event, reason: validation.reason || 'invalid' });
+          const reason = validation.reason || 'invalid';
+          rejectedEvents.push({ event, reason });
+          emitDebugEvent(emit, { type: 'event.rejected', event, reason });
           continue;
         }
 
@@ -139,12 +164,17 @@ export class TurnEngine {
       const issues = checkInvariants(stagedState);
       if (issues.length) {
         for (const event of stagedAccepted) {
-          rejectedEvents.push({ event, reason: `invariant_violation:${issues[0].message}` });
+          const reason = `invariant_violation:${issues[0].message}`;
+          rejectedEvents.push({ event, reason });
+          emitDebugEvent(emit, { type: 'event.rejected', event, reason });
         }
         return { ok: false, accepted: acceptedEvents.length, rejected: rejectedEvents.length };
       }
 
       acceptedEvents.push(...stagedAccepted);
+      for (const event of stagedAccepted) {
+        emitDebugEvent(emit, { type: 'event.accepted', event });
+      }
       draft = stagedState;
       return { ok: true, accepted: acceptedEvents.length, rejected: rejectedEvents.length };
     };
@@ -168,6 +198,7 @@ export class TurnEngine {
           observation,
           playerText,
           llm: this.llm,
+          debug: emit,
           trace,
         });
         npcOutputs.push(output);
@@ -203,11 +234,13 @@ export class TurnEngine {
         playerText,
         worldContext: gmWorldContext,
         runtime,
+        debug: emit,
         llm: this.llm,
         trace,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown';
+      emitDebugEvent(emit, { type: 'error', stage: 'gm', message });
       trace?.toolCalls.push({
         tool: 'gm_agent_error',
         input: { playerText },
@@ -215,6 +248,9 @@ export class TurnEngine {
       });
 
       const rolledBackAccepted = acceptedEvents.splice(0, acceptedEvents.length);
+      if (rolledBackAccepted.length) {
+        emitDebugEvent(emit, { type: 'event.rollback', events: rolledBackAccepted, reason: 'agent_failure_rollback' });
+      }
       for (const event of rolledBackAccepted) {
         rejectedEvents.push({ event, reason: 'agent_failure_rollback' });
       }
@@ -237,6 +273,7 @@ export class TurnEngine {
       pendingPrompt: draft.meta.pendingPrompt || null,
       rejectedEvents,
       llm: this.llm,
+      debug: emit,
       onNarrationDelta: stream?.onNarrationDelta,
       trace,
     });
@@ -257,6 +294,7 @@ export class TurnEngine {
 
     await this.store.appendTurn(sessionId, record);
     await this.store.saveSnapshot(sessionId, draft);
+    emitDebugEvent(emit, { type: 'turn.persisted', sessionId, turn: nextTurn });
 
     return {
       sessionId,
@@ -314,10 +352,42 @@ function normalizePendingPrompt(value: unknown): PendingPrompt | null {
         })
         .filter(option => option.key && option.label)
     : undefined;
-  const data = record.data && typeof record.data === 'object' && !Array.isArray(record.data)
-    ? record.data as Record<string, unknown>
-    : undefined;
+  const data = normalizePendingPromptData(record.data);
   return { id, kind, question, options, data, createdTurn };
+}
+
+function normalizePendingPromptData(value: unknown): PendingPromptData | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const data: PendingPromptData = {};
+
+  if (typeof record.locationId === 'string') {
+    data.locationId = record.locationId;
+  }
+  if (typeof record.estimatedMinutes === 'number' && Number.isFinite(record.estimatedMinutes)) {
+    data.estimatedMinutes = record.estimatedMinutes;
+  }
+  if (typeof record.subject === 'string') {
+    data.subject = record.subject;
+  }
+  if (
+    record.area === 'shoreline' ||
+    record.area === 'docks' ||
+    record.area === 'under_ribs' ||
+    record.area === 'around_here'
+  ) {
+    data.area = record.area;
+  }
+  if (
+    record.direction === 'east' ||
+    record.direction === 'west' ||
+    record.direction === 'north' ||
+    record.direction === 'south'
+  ) {
+    data.direction = record.direction;
+  }
+
+  return Object.keys(data).length ? data : undefined;
 }
 
 function buildGMWorldContext(params: {

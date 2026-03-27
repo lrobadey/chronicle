@@ -2,20 +2,44 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { CliEngine, CliState } from '../../cli/app';
 import { handleCliLine, initCliSession, resolveApiKey } from '../../cli/app';
+import type { DebugSink } from '../../engine/debug';
 
 class StubCliEngine implements CliEngine {
-  readonly initCalls: Array<{ sessionId?: string; apiKey?: string; stream?: { onOpeningDelta?: (delta: string) => void } }> = [];
-  readonly turnCalls: Array<{ apiKey?: string; playerText: string; includeTrace?: boolean }> = [];
+  readonly initCalls: Array<{
+    sessionId?: string;
+    apiKey?: string;
+    debugEnabled?: boolean;
+    stream?: { onOpeningDelta?: (delta: string) => void };
+  }> = [];
+  readonly turnCalls: Array<{ apiKey?: string; playerText: string; includeTrace?: boolean; debugEnabled?: boolean }> = [];
   initCounter = 0;
 
-  async initSession(params: { sessionId?: string; apiKey?: string; stream?: { onOpeningDelta?: (delta: string) => void } }) {
-    this.initCalls.push(params);
+  async initSession(params: {
+    sessionId?: string;
+    apiKey?: string;
+    debug?: { onEvent?: DebugSink };
+    stream?: { onOpeningDelta?: (delta: string) => void };
+  }) {
+    this.initCalls.push({
+      sessionId: params.sessionId,
+      apiKey: params.apiKey,
+      debugEnabled: Boolean(params.debug?.onEvent),
+      stream: params.stream,
+    });
     if (params.apiKey === 'bad-key') {
       throw { status: 429, code: 'insufficient_quota', name: 'RateLimitError' };
     }
     this.initCounter += 1;
     const opening = `opening-${params.sessionId || `session-${this.initCounter}`}`;
+    params.debug?.onEvent?.({ type: 'init.started', sessionId: params.sessionId });
+    params.debug?.onEvent?.({
+      type: 'init.session_ready',
+      sessionId: params.sessionId || `session-${this.initCounter}`,
+      created: true,
+    });
+    params.debug?.onEvent?.({ type: 'narrator.started', phase: 'opening', style: 'cinematic' });
     params.stream?.onOpeningDelta?.(opening);
+    params.debug?.onEvent?.({ type: 'narrator.completed', phase: 'opening', text: opening });
     return {
       sessionId: params.sessionId || `session-${this.initCounter}`,
       created: true,
@@ -52,19 +76,27 @@ class StubCliEngine implements CliEngine {
     playerText: string;
     apiKey?: string;
     narratorStyle?: 'lyric' | 'cinematic' | 'michener';
-    debug?: { includeTrace?: boolean };
+    debug?: { includeTrace?: boolean; onEvent?: DebugSink };
     stream?: { onNarrationDelta?: (delta: string) => void };
   }) {
     this.turnCalls.push({
       apiKey: input.apiKey,
       playerText: input.playerText,
       includeTrace: input.debug?.includeTrace,
+      debugEnabled: Boolean(input.debug?.onEvent),
     });
     if (input.apiKey === 'bad-key') {
       throw { status: 429, code: 'insufficient_quota', name: 'RateLimitError' };
     }
     const narration = `narration-${input.playerText}`;
+    input.debug?.onEvent?.({ type: 'turn.started', sessionId: input.sessionId, turn: 1, playerText: input.playerText });
+    input.debug?.onEvent?.({ type: 'gm.iteration.started', iteration: 1 });
+    input.debug?.onEvent?.({ type: 'tool.called', tool: 'observe_world', input: { perspective: 'player' } });
+    input.debug?.onEvent?.({ type: 'tool.result', tool: 'observe_world', output: { ok: true } });
+    input.debug?.onEvent?.({ type: 'narrator.started', phase: 'turn', style: input.narratorStyle });
     input.stream?.onNarrationDelta?.(narration);
+    input.debug?.onEvent?.({ type: 'narrator.completed', phase: 'turn', text: narration });
+    input.debug?.onEvent?.({ type: 'turn.persisted', sessionId: input.sessionId, turn: 1 });
     return {
       sessionId: input.sessionId,
       turn: 1,
@@ -93,7 +125,8 @@ describe('CLI app', () => {
       sessionId: undefined,
       apiKey: 'bad-key',
       narratorStyle: 'michener',
-      includeTrace: false,
+      debugEnabled: true,
+      debugDetail: 'summary',
       write: text => writes.push(text),
     });
 
@@ -102,10 +135,11 @@ describe('CLI app', () => {
     assert.equal(engine.initCalls[0]?.apiKey, 'bad-key');
     assert.equal(engine.initCalls[1]?.apiKey, undefined);
     assert.ok(writes.join('').includes('switched to deterministic fallback mode'));
-    assert.ok(writes.join('').includes('opening-session-1'));
+    assert.ok(writes.join('').includes('[init] starting'));
+    assert.ok(writes.join('').includes('Opening:\nopening-session-1'));
   });
 
-  it('handles trace, style, and turn fallback robustly', async () => {
+  it('defaults to debug-first output and buffers narration after live steps', async () => {
     const engine = new StubCliEngine();
     const writes: string[] = [];
     let state: CliState = {
@@ -113,11 +147,9 @@ describe('CLI app', () => {
       playerId: 'player-1',
       narratorStyle: 'michener',
       apiKey: 'bad-key',
-      includeTrace: false,
+      debugEnabled: true,
+      debugDetail: 'summary',
     };
-
-    ({ state } = await handleCliLine({ state, line: '/trace on', engine, write: text => writes.push(text) }));
-    assert.equal(state.includeTrace, true);
 
     ({ state } = await handleCliLine({ state, line: '/style lyric', engine, write: text => writes.push(text) }));
     assert.equal(state.narratorStyle, 'lyric');
@@ -128,7 +160,38 @@ describe('CLI app', () => {
     assert.equal(engine.turnCalls[0]?.apiKey, 'bad-key');
     assert.equal(engine.turnCalls[1]?.apiKey, undefined);
     assert.equal(engine.turnCalls[1]?.includeTrace, true);
-    assert.ok(writes.join('').includes('narration-look around'));
-    assert.ok(writes.join('').includes('Trace: observe_world'));
+    assert.equal(engine.turnCalls[1]?.debugEnabled, true);
+    const output = writes.join('');
+    assert.ok(output.includes('[turn] #1 "look around"'));
+    assert.ok(output.includes('[tool] observe_world perspective=player'));
+    assert.ok(output.includes('Narration:\nnarration-look around'));
+    assert.ok(output.indexOf('[tool] observe_world perspective=player') < output.indexOf('Narration:\nnarration-look around'));
+  });
+
+  it('supports debug toggles, raw detail, and /trace alias', async () => {
+    const engine = new StubCliEngine();
+    const writes: string[] = [];
+    let state: CliState = {
+      sessionId: 'session-1',
+      playerId: 'player-1',
+      narratorStyle: 'michener',
+      apiKey: 'test-key',
+      debugEnabled: true,
+      debugDetail: 'summary',
+    };
+
+    ({ state } = await handleCliLine({ state, line: '/trace off', engine, write: text => writes.push(text) }));
+    assert.equal(state.debugEnabled, false);
+
+    ({ state } = await handleCliLine({ state, line: '/debug on', engine, write: text => writes.push(text) }));
+    assert.equal(state.debugEnabled, true);
+
+    ({ state } = await handleCliLine({ state, line: '/detail raw', engine, write: text => writes.push(text) }));
+    assert.equal(state.debugDetail, 'raw');
+
+    ({ state } = await handleCliLine({ state, line: '/session', engine, write: text => writes.push(text) }));
+    const output = writes.join('');
+    assert.ok(output.includes('Debug mode: on'));
+    assert.ok(output.includes('Debug detail: raw'));
   });
 });

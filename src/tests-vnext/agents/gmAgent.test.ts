@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { runGMAgent } from '../../agents/gm/gmAgent';
+import { DEFAULT_MODEL } from '../../agents/llm/defaults';
 import { QueueLLM } from '../helpers/queueLLM';
+import type { DebugEvent } from '../../engine/debug';
 
 describe('GM agent loop', () => {
   it('chains calls with previous_response_id and sends only function outputs to follow-up calls', async () => {
@@ -24,6 +26,7 @@ describe('GM agent loop', () => {
         output_text: '',
       },
     ]);
+    const debugEvents: DebugEvent[] = [];
 
     const result = await runGMAgent({
       apiKey: 'test-key',
@@ -45,6 +48,7 @@ describe('GM agent loop', () => {
           return { ok: true };
         },
       },
+      debug: event => debugEvents.push(event),
       trace: { toolCalls: [], llmCalls: [] },
     });
 
@@ -65,6 +69,7 @@ describe('GM agent loop', () => {
     const firstSystemPayload = JSON.parse(String(firstInput[0]?.content));
     assert.deepEqual(firstSystemPayload, { world: { turn: 3, weather: 'clear' } });
     assert.equal(firstInput[1]?.content, 'advance');
+    assert.equal(firstCall.model, DEFAULT_MODEL);
     assert.equal(secondCall.previous_response_id, 'resp-first');
 
     const secondInput = secondCall.input;
@@ -72,6 +77,10 @@ describe('GM agent loop', () => {
     const outputItems = (secondInput as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output');
     assert.equal(outputItems.length, 2);
     assert.equal((secondInput as Array<Record<string, unknown>>).every(item => item.type === 'function_call_output'), true);
+    assert.equal(debugEvents[0]?.type, 'gm.iteration.started');
+    assert.equal(debugEvents[1]?.type, 'gm.response.received');
+    assert.equal(debugEvents[2]?.type, 'tool.called');
+    assert.equal(debugEvents[3]?.type, 'tool.result');
   });
 
   it('allows propose_events without requiring observe_world first', async () => {
