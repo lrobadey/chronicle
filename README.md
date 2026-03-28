@@ -1,33 +1,98 @@
-# Chronicle vNext (Backend + CLI)
+# Chronicle vNext
 
-Chronicle vNext is a deterministic, event-driven simulation runtime with an agentic GM layer on top of the OpenAI Responses API. The active runtime is vNext only.
+Chronicle vNext is the active Chronicle runtime: a deterministic simulation core with an agentic GM layer, a small HTTP API, and an interactive CLI. The default world is **Isle of Marrow**.
 
-## Runtime Requirements
+## What's In This Repo
 
-- Node.js 20 LTS (`.nvmrc` is pinned to `20`)
+- `src/sim/*`: world state, events, reducers, validation, invariants, systems, and telemetry/observation views.
+- `src/engine/*`: turn orchestration, persistence, replay, and debug plumbing.
+- `src/agents/*`: OpenAI-powered GM, NPC, and narrator agents plus the shared LLM client.
+- `src/server.ts`: HTTP API for session initialization and turns.
+- `src/cli.ts` and `src/cli/app.ts`: interactive command-line play loop.
+- `deprecated/*`: legacy source snapshots kept for reference only.
+
+## Requirements
+
+- Node.js 20.x
 - npm
-- Optional: `OPENAI_API_KEY` (without a key, the runtime uses deterministic fallback behavior)
+- Optional: `OPENAI_API_KEY`
+- Optional: `VITE_OPENAI_API_KEY` for CLI startup
 
-## Active Architecture
+If no API key is available, Chronicle runs in deterministic fallback mode.
 
-- `src/sim/*`: deterministic world model, event validation, reducers, invariants, systems (time/tide/weather), and views.
-- `src/engine/*`: turn orchestration, event commit path, JSONL session persistence, replay utilities.
-- `src/agents/*`: GM, NPC, and narrator agents using the Responses API client.
-- `src/server.ts`: preserved HTTP contract routes (`/api/init`, `/api/turn`).
-- `src/cli.ts`: interactive CLI loop for init + turn execution.
+## Getting Started
 
-Legacy runtime code was moved out of active source to `deprecated/legacy-v4/src`.
+Install dependencies:
 
-## API Contract (Preserved Routes)
+```bash
+npm install
+```
+
+Run the CLI:
+
+```bash
+npm run cli
+```
+
+Run the HTTP server:
+
+```bash
+npm run server
+```
+
+By default the server listens on `http://localhost:3001` or the `PORT` environment variable if set.
+
+## Commands
+
+- `npm run cli`: start the interactive CLI.
+- `npm run server`: start the HTTP API server.
+- `npm test`: run the active vNext test suite.
+- `npm run test:vnext`: same test suite, explicitly named.
+- `npm run typecheck`: run TypeScript type checking.
+- `npm run lint`: typecheck-backed local lint gate.
+- `npm run lint:eslint`: run ESLint across `src`.
+
+## CLI
+
+The CLI starts a session, prints the opening narration, and then accepts player actions or slash commands.
+
+Available commands:
+
+- `/help`: show command help.
+- `/state`: print the current telemetry snapshot.
+- `/session`: show session and mode information.
+- `/style <lyric|cinematic|michener>`: change narrator style.
+- `/debug [on|off]`: toggle the live debug timeline.
+- `/trace [on|off]`: alias for `/debug`.
+- `/detail <summary|raw>`: change debug verbosity.
+- `/new [sessionId]`: start or resume a session.
+- `/exit`: leave the CLI.
+
+CLI environment variables:
+
+- `CHRONICLE_API_MODE`: `auto`, `fallback`, or `live`.
+- `CHRONICLE_SESSION_ROOT`: override the session storage directory.
+- `CHRONICLE_ALLOW_NON_TTY`: set to `1`, `true`, `yes`, or `on` to allow non-interactive runs.
+- `CHRONICLE_CLI_TRANSCRIPT`: write a JSONL transcript of prompts, inputs, and outputs to this path.
+
+## HTTP API
+
+The server exposes a small compatibility API:
+
+- `POST /api/init`
+- `POST /api/turn`
+- `GET /health`
 
 ### `POST /api/init`
 
-Input:
+Request body:
+
 ```json
 { "sessionId": "optional", "apiKey": "optional", "stream": true }
 ```
 
-Output:
+Response:
+
 ```json
 {
   "sessionId": "string",
@@ -40,7 +105,8 @@ Output:
 
 ### `POST /api/turn`
 
-Input:
+Request body:
+
 ```json
 {
   "sessionId": "string",
@@ -52,7 +118,8 @@ Input:
 }
 ```
 
-Output (additive vNext fields):
+Response:
+
 ```json
 {
   "sessionId": "string",
@@ -65,51 +132,34 @@ Output (additive vNext fields):
 }
 ```
 
-Streaming mode:
-- `POST /api/init` and `POST /api/turn` accept `"stream": true`.
-- When enabled, the server responds with `text/event-stream` domain events.
+### Streaming
 
-SSE events:
-- Init: `init.started`, `opening.delta`, `init.completed`, `error`
-- Turn: `turn.started`, `narration.delta`, `turn.completed`, `error`
+If `"stream": true`, both endpoints return `text/event-stream` responses.
 
-`init.completed` and `turn.completed` carry the same payload shape as non-stream JSON responses.
+- `POST /api/init`: `init.started`, `opening.delta`, `init.completed`, `error`
+- `POST /api/turn`: `turn.started`, `narration.delta`, `turn.completed`, `error`
 
-Error shape:
+The completed SSE event carries the same payload shape as the non-streaming response.
+
+### Error Shape
+
 ```json
 { "error": "message", "code": "error_code", "details": {} }
 ```
 
-## Session Persistence Format
+## Session Storage
 
-Sessions are stored under `data/sessions/<sessionId>/`:
+Sessions are stored under `data/sessions/<sessionId>/` by default:
 
-- `initial.json`: immutable vNext initial state.
-- `snapshot.json`: latest committed state.
+- `initial.json`: the immutable initial world state.
+- `snapshot.json`: the latest committed state.
 - `events.jsonl`: append-only turn records.
 
-Replay determinism target is state equivalence: `replay(initial + events.jsonl) == snapshot`.
+Replay is intended to be deterministic from `initial.json` plus `events.jsonl`.
 
-## Commands
+## Development Notes
 
-- `npm run server`: start HTTP API server on port `3001` (or `PORT` env var).
-- `npm run cli`: start interactive CLI.
-- `npm test`: run active vNext test suite.
-- `npm run test:vnext`: run vNext tests explicitly.
-- `npm run typecheck`: TypeScript type check (`tsc --noEmit`).
-- `npm run lint`: current local lint gate (typecheck-backed).
-- `npm run lint:eslint`: ESLint over active source (requires installed ESLint deps).
-
-## Troubleshooting
-
-- If dependencies are stale after Node version changes:
-  1. `rm -rf node_modules package-lock.json`
-  2. `npm install`
-- Ensure `node -v` reports Node 20.x.
-- If OpenAI calls fail, verify `OPENAI_API_KEY` is present; runtime fallback still allows deterministic turns.
-
-## Migration Notes
-
-- v4 runtime is no longer exported from `src/index.ts`.
-- v4 code is retained only in `deprecated/legacy-v4/src`.
-- Existing non-vNext session snapshots are rejected (no automatic migration in this phase).
+- `src/index.ts` exports the active vNext surface.
+- The current world seed is `isle-of-marrow`.
+- The API server uses `OPENAI_API_KEY` if present, but requests may also pass `apiKey` in the body.
+- In `auto` mode, the CLI can fall back to deterministic behavior if the live OpenAI request fails.

@@ -1,126 +1,29 @@
 import type { ResponseToolDefinition } from '../llm/types';
+import {
+  EVENT_ITEM_SCHEMA,
+  PENDING_PROMPT_DATA_SCHEMA,
+  PROMPT_OPTION_SCHEMA,
+  strictObjectSchema,
+} from '../sharedSchemas';
 
-function strictObjectSchema<T extends Record<string, unknown>>(properties: T, options?: { nullable?: boolean }) {
-  return {
-    type: options?.nullable ? ['object', 'null'] : 'object',
-    properties,
-    required: Object.keys(properties),
-    additionalProperties: false,
-  } as const;
-}
-
-const GRID_POS_SCHEMA = strictObjectSchema({
-  x: { type: 'number' },
-  y: { type: 'number' },
-  z: { type: ['number', 'null'] },
-});
-
-const NULLABLE_GRID_POS_SCHEMA = strictObjectSchema(
+const SCENE_AGENDA_UPDATE_SCHEMA = strictObjectSchema(
   {
-    x: { type: 'number' },
-    y: { type: 'number' },
-    z: { type: ['number', 'null'] },
+    currentFocus: { type: ['string', 'null'] },
+    pressures: { type: 'array', items: { type: 'string' } },
+    unresolvedBeats: { type: 'array', items: { type: 'string' } },
+    immediateTensions: { type: 'array', items: { type: 'string' } },
   },
   { nullable: true },
 );
 
-const PROMPT_OPTION_SCHEMA = strictObjectSchema({
-  key: { type: 'string' },
-  label: { type: 'string' },
-});
-
-const GROUND_LOCATION_SCHEMA = strictObjectSchema({
-  kind: { type: 'string', enum: ['ground'] },
-  pos: GRID_POS_SCHEMA,
-});
-
-const CREATE_ENTITY_DATA_SCHEMA = strictObjectSchema({
-  id: { type: 'string' },
-  name: { type: 'string' },
-  description: { type: ['string', 'null'] },
-  location: { ...GROUND_LOCATION_SCHEMA, type: ['object', 'null'] },
-  pos: NULLABLE_GRID_POS_SCHEMA,
-  anchor: NULLABLE_GRID_POS_SCHEMA,
-});
-
-const CREATE_ENTITY_SCHEMA = strictObjectSchema({
-  kind: { type: 'string', enum: ['item', 'npc', 'location'] },
-  data: CREATE_ENTITY_DATA_SCHEMA,
-});
-
-const PENDING_PROMPT_DATA_SCHEMA = strictObjectSchema(
+const WORLD_AGENDA_UPDATE_SCHEMA = strictObjectSchema(
   {
-    locationId: { type: ['string', 'null'] },
-    estimatedMinutes: { type: ['number', 'null'] },
-    subject: { type: ['string', 'null'] },
-    area: { type: ['string', 'null'], enum: ['shoreline', 'docks', 'under_ribs', 'around_here', null] },
-    direction: { type: ['string', 'null'], enum: ['east', 'west', 'north', 'south', null] },
+    activeThreads: { type: 'array', items: { type: 'string' } },
+    introductionOpportunities: { type: 'array', items: { type: 'string' } },
+    escalationHooks: { type: 'array', items: { type: 'string' } },
   },
   { nullable: true },
 );
-
-const EVENT_ITEM_SCHEMA = {
-  type: 'object',
-  properties: {
-    type: {
-      type: 'string',
-      enum: [
-        'MoveActor',
-        'PickUpItem',
-        'DropItem',
-        'Speak',
-        'AdvanceTime',
-        'CreateEntity',
-        'SetFlag',
-        'TravelToLocation',
-        'Explore',
-        'Inspect',
-      ],
-    },
-    actorId: { type: ['string', 'null'] },
-    to: NULLABLE_GRID_POS_SCHEMA,
-    toLocationId: { type: ['string', 'null'] },
-    mode: { type: ['string', 'null'], enum: ['walk', 'run', null] },
-    itemId: { type: ['string', 'null'] },
-    at: NULLABLE_GRID_POS_SCHEMA,
-    text: { type: ['string', 'null'] },
-    toActorId: { type: ['string', 'null'] },
-    minutes: { type: ['number', 'null'] },
-    entity: { ...CREATE_ENTITY_SCHEMA, type: ['object', 'null'] },
-    key: { type: ['string', 'null'] },
-    value: { type: ['string', 'number', 'boolean', 'null'] },
-    locationId: { type: ['string', 'null'] },
-    pace: { type: ['string', 'null'], enum: ['walk', 'run', null] },
-    confirmId: { type: ['string', 'null'] },
-    area: { type: ['string', 'null'], enum: ['shoreline', 'docks', 'under_ribs', 'around_here', null] },
-    direction: { type: ['string', 'null'], enum: ['east', 'west', 'north', 'south', null] },
-    subject: { type: ['string', 'null'] },
-    note: { type: ['string', 'null'] },
-  },
-  required: [
-    'type',
-    'actorId',
-    'to',
-    'toLocationId',
-    'mode',
-    'itemId',
-    'at',
-    'text',
-    'toActorId',
-    'minutes',
-    'entity',
-    'key',
-    'value',
-    'locationId',
-    'pace',
-    'confirmId',
-    'area',
-    'direction',
-    'subject',
-    'note',
-  ],
-  additionalProperties: false,
-} as const;
 
 export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
   {
@@ -142,6 +45,19 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
       ...strictObjectSchema({
         npcId: { type: 'string' },
         topic: { type: ['string', 'null'] },
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'consult_specialist',
+    description: 'Ask a bounded specialist advisor for structured guidance before deciding on world mutations.',
+    parameters: {
+      ...strictObjectSchema({
+        specialistType: { type: 'string', enum: ['scene', 'world'] },
+        question: { type: 'string' },
+        focus: { type: ['string', 'null'] },
       }),
     },
     strict: true,
@@ -178,6 +94,13 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
               { nullable: true },
             ),
             clear: { type: ['boolean', 'null'] },
+          },
+          { nullable: true },
+        ),
+        agendaUpdates: strictObjectSchema(
+          {
+            scene: SCENE_AGENDA_UPDATE_SCHEMA,
+            world: WORLD_AGENDA_UPDATE_SCHEMA,
           },
           { nullable: true },
         ),

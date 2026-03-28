@@ -2,6 +2,7 @@ import type { WorldState } from '../../sim/state';
 import type { WorldEvent } from '../../sim/events';
 import type { Telemetry } from '../../sim/views/telemetry';
 import type { NpcAgentOutput } from '../../agents/npc/npcAgent';
+import type { SpecialistConsultation, SpecialistType } from '../../agents/specialists';
 
 export interface TurnRecord {
   sessionId: string;
@@ -12,6 +13,7 @@ export interface TurnRecord {
   acceptedEvents: WorldEvent[];
   rejectedEvents: Array<{ event: WorldEvent; reason: string }>;
   npcOutputs?: NpcAgentOutput[];
+  specialistOutputs?: SpecialistConsultation[];
   narration?: string;
   telemetry?: Telemetry;
   trace?: TurnTrace;
@@ -19,8 +21,9 @@ export interface TurnRecord {
 
 export interface TurnTrace {
   toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
+  specialistOutputs?: SpecialistConsultation[];
   llmCalls?: Array<{
-    agent: 'gm' | 'npc' | 'narrator';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;
@@ -29,6 +32,7 @@ export interface TurnTrace {
     usage?: unknown;
     status?: string;
     error?: unknown;
+    specialistType?: SpecialistType;
   }>;
   llmMessages?: Array<{ role: string; content?: string }>;
 }

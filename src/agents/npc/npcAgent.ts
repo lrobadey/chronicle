@@ -4,6 +4,7 @@ import { classifyLLMError } from '../llm/errorUtils';
 import { NPC_SYSTEM_PROMPT } from './prompts';
 import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
+import type { SpecialistType } from '../specialists';
 
 const NPC_OUTPUT_TOOL_NAME = 'emit_npc_turn';
 
@@ -42,7 +43,7 @@ export interface NpcAgentParams {
   debug?: DebugSink;
   trace?: {
     llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator';
+      agent: 'gm' | 'npc' | 'narrator' | 'specialist';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -51,6 +52,7 @@ export interface NpcAgentParams {
       usage?: unknown;
       status?: string;
       error?: unknown;
+      specialistType?: SpecialistType;
     }>;
   };
 }
@@ -170,7 +172,7 @@ function isFunctionCallItem(item: ResponseOutputItem): item is {
 function pushLLMTrace(
   trace: NpcAgentParams['trace'] | undefined,
   entry: {
-    agent: 'gm' | 'npc' | 'narrator';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;
@@ -179,6 +181,7 @@ function pushLLMTrace(
     usage?: unknown;
     status?: string;
     error?: unknown;
+    specialistType?: SpecialistType;
   },
 ) {
   if (!trace) return;

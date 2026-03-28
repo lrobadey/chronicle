@@ -1,5 +1,6 @@
 export * from './state';
 export * from './events';
+export * from './spine';
 export * from './validate';
 export * from './reducer';
 export * from './invariants';

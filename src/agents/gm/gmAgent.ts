@@ -4,9 +4,15 @@ import { classifyLLMError } from '../llm/errorUtils';
 import { GM_SYSTEM_PROMPT } from './prompts';
 import { GM_TOOL_DEFS } from './tools';
 import type { WorldEvent } from '../../sim/events';
-import type { PendingPrompt } from '../../sim/state';
+import type { PendingPrompt, SceneAgenda, WorldAgenda } from '../../sim/state';
 import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
+import type { SpecialistType } from '../specialists';
+
+export interface GMAgendaUpdates {
+  scene?: SceneAgenda | null;
+  world?: WorldAgenda | null;
+}
 
 export interface GMFinishTurnInput {
   summary: string;
@@ -14,11 +20,13 @@ export interface GMFinishTurnInput {
     pending?: PendingPrompt | null;
     clear?: boolean | null;
   } | null;
+  agendaUpdates?: GMAgendaUpdates | null;
 }
 
 export interface GMToolRuntime {
   observe_world(input: { perspective: 'gm' | 'player' }): Promise<unknown>;
   consult_npc(input: { npcId: string; topic?: string }): Promise<unknown>;
+  consult_specialist(input: { specialistType: SpecialistType; question: string; focus?: string | null }): Promise<unknown>;
   propose_events(input: { events: WorldEvent[] }): Promise<unknown>;
   finish_turn(input: GMFinishTurnInput): Promise<unknown>;
 }
@@ -35,7 +43,7 @@ export interface GMAgentParams {
   trace?: {
     toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
     llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator';
+      agent: 'gm' | 'npc' | 'narrator' | 'specialist';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -44,6 +52,7 @@ export interface GMAgentParams {
       usage?: unknown;
       status?: string;
       error?: unknown;
+      specialistType?: SpecialistType;
     }>;
   };
 }
@@ -175,6 +184,18 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
           continue;
         }
 
+        if (call.name === 'consult_specialist') {
+          const output = await runtime.consult_specialist(args as { specialistType: SpecialistType; question: string; focus?: string | null });
+          trace?.toolCalls.push({ tool: call.name, input: args, output });
+          emitDebugEvent(debug, { type: 'tool.result', tool: call.name, output });
+          nextInput.push({
+            type: 'function_call_output',
+            call_id: callId,
+            output: safeJSONStringify(output),
+          });
+          continue;
+        }
+
         if (call.name === 'propose_events') {
           const output = await runtime.propose_events(args as { events: WorldEvent[] });
           trace?.toolCalls.push({ tool: call.name, input: args, output });
@@ -262,7 +283,7 @@ function isFunctionCallItem(item: ResponseOutputItem): item is {
 function pushLLMTrace(
   trace: GMAgentParams['trace'] | undefined,
   entry: {
-    agent: 'gm' | 'npc' | 'narrator';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;
@@ -271,6 +292,7 @@ function pushLLMTrace(
     usage?: unknown;
     status?: string;
     error?: unknown;
+    specialistType?: SpecialistType;
   },
 ) {
   if (!trace) return;

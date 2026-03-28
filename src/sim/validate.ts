@@ -1,5 +1,6 @@
 import type { WorldEvent } from './events';
 import type { WorldState } from './state';
+import { getItemPlacement } from './spine';
 import { deriveTide, isTideBlocked } from './systems/tide';
 import { deriveConstraints } from './systems/constraints';
 import { distance, findNearestLocation, getActor, isWithinBounds } from './utils';
@@ -38,14 +39,22 @@ export function validateEvent(state: WorldState, event: WorldEvent): ValidationR
       if (!actor) return { ok: false, reason: 'actor_not_found' };
       const item = state.items[event.itemId];
       if (!item) return { ok: false, reason: 'item_not_found' };
-      if (item.location.kind !== 'ground') return { ok: false, reason: 'item_not_on_ground' };
-      if (distance(actor.pos, item.location.pos) > 2) return { ok: false, reason: 'item_too_far' };
+      const placement = getItemPlacement(state.spine, event.itemId);
+      if (!placement || placement.type !== 'located_in') return { ok: false, reason: 'item_not_on_ground' };
+      if (distance(actor.pos, placement.anchor) > 2) return { ok: false, reason: 'item_too_far' };
       return { ok: true };
     }
     case 'DropItem': {
       const actor = getActor(state, event.actorId);
       if (!actor) return { ok: false, reason: 'actor_not_found' };
-      if (!actor.inventory.includes(event.itemId)) return { ok: false, reason: 'item_not_in_inventory' };
+      const placement = getItemPlacement(state.spine, event.itemId);
+      if (
+        !placement
+        || (placement.type !== 'carried_by' && placement.type !== 'worn_by')
+        || placement.actorId !== actor.id
+      ) {
+        return { ok: false, reason: 'item_not_in_inventory' };
+      }
       return { ok: true };
     }
     case 'Speak': {
@@ -80,6 +89,7 @@ export function validateEvent(state: WorldState, event: WorldEvent): ValidationR
       return { ok: true };
     }
     case 'CreateEntity':
+      return validateCreateEntity(state, event);
     case 'SetFlag':
       return { ok: true };
     default:
@@ -102,4 +112,59 @@ function hasMatchingTravelConfirmation(state: WorldState, locationId: string, co
   if (!pending || pending.kind !== 'confirm_travel' || pending.id !== confirmId) return false;
   const pendingLocationId = pending.data?.locationId;
   return typeof pendingLocationId === 'string' && pendingLocationId === locationId;
+}
+
+function validateCreateEntity(state: WorldState, event: Extract<WorldEvent, { type: 'CreateEntity' }>): ValidationResult {
+  if (event.entity.kind === 'item') {
+    const { data } = event.entity;
+    if (typeof data.id !== 'string' || typeof data.name !== 'string' || !data.location) return { ok: false, reason: 'invalid_item_payload' };
+    if (state.items[data.id]) return { ok: false, reason: 'item_already_exists' };
+    if (!data.name.trim()) return { ok: false, reason: 'item_name_required' };
+    if (data.location.kind === 'ground') {
+      if (!isWithinBounds(state, data.location.pos)) return { ok: false, reason: 'item_location_out_of_bounds' };
+    }
+    if (data.location.kind === 'inventory') {
+      const owner = state.actors[data.location.actorId];
+      if (!owner) return { ok: false, reason: 'item_inventory_owner_not_found' };
+    }
+    return { ok: true };
+  }
+
+  if (event.entity.kind === 'npc') {
+    const { data } = event.entity;
+    if (typeof data.id !== 'string' || typeof data.name !== 'string' || !data.pos) return { ok: false, reason: 'invalid_npc_payload' };
+    if (state.actors[data.id]) return { ok: false, reason: 'actor_already_exists' };
+    if (!data.name.trim()) return { ok: false, reason: 'npc_name_required' };
+    if (!isWithinBounds(state, data.pos)) return { ok: false, reason: 'npc_position_out_of_bounds' };
+    if (data.persona) {
+      if (!Array.isArray(data.persona.goals)) return { ok: false, reason: 'npc_persona_goals_invalid' };
+      if (!data.persona.tagline.trim() || !data.persona.background.trim() || !data.persona.voice.trim()) {
+        return { ok: false, reason: 'npc_persona_incomplete' };
+      }
+      if (!data.persona.goals.every(goal => typeof goal === 'string' && goal.trim())) {
+        return { ok: false, reason: 'npc_persona_goals_invalid' };
+      }
+    }
+    if (data.inventory) {
+      for (const itemId of data.inventory) {
+        if (!state.items[itemId]) return { ok: false, reason: 'npc_inventory_item_not_found' };
+      }
+    }
+    if (data.relationships) {
+      for (const relatedActorId of Object.keys(data.relationships)) {
+        if (!state.actors[relatedActorId]) return { ok: false, reason: 'npc_relationship_target_not_found' };
+      }
+    }
+    return { ok: true };
+  }
+
+  const { data } = event.entity;
+  if (typeof data.id !== 'string' || typeof data.name !== 'string' || typeof data.description !== 'string' || !data.anchor) {
+    return { ok: false, reason: 'invalid_location_payload' };
+  }
+  if (state.locations[data.id]) return { ok: false, reason: 'location_already_exists' };
+  if (!data.name.trim()) return { ok: false, reason: 'location_name_required' };
+  if (!data.description.trim()) return { ok: false, reason: 'location_description_required' };
+  if (!isWithinBounds(state, data.anchor)) return { ok: false, reason: 'location_anchor_out_of_bounds' };
+  return { ok: true };
 }

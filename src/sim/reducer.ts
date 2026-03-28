@@ -1,5 +1,6 @@
 import type { WorldEvent } from './events';
 import type { KnowledgeState, WorldState } from './state';
+import { setItemPlacement, syncWorldSpine } from './spine';
 import { deriveTide, isTideBlocked } from './systems/tide';
 import { deriveConstraints } from './systems/constraints';
 import { distance, locationsWithinRadius } from './utils';
@@ -9,6 +10,18 @@ import { estimateTravel, positionToward } from './systems/travel';
 const DEFAULT_VIS_RADIUS = 120;
 
 export function applyEvent(state: WorldState, event: WorldEvent): WorldState {
+  return applyEvents(state, [event]);
+}
+
+export function applyEvents(state: WorldState, events: WorldEvent[]): WorldState {
+  let next = state;
+  for (const event of events) {
+    next = syncWorldSpine(applyEventBase(next, event));
+  }
+  return next;
+}
+
+function applyEventBase(state: WorldState, event: WorldEvent): WorldState {
   switch (event.type) {
     case 'MoveActor':
       return applyMoveActor(state, event);
@@ -33,14 +46,6 @@ export function applyEvent(state: WorldState, event: WorldEvent): WorldState {
     default:
       return state;
   }
-}
-
-export function applyEvents(state: WorldState, events: WorldEvent[]): WorldState {
-  let next = state;
-  for (const event of events) {
-    next = applyEvent(next, event);
-  }
-  return next;
 }
 
 function applyMoveActor(state: WorldState, event: Extract<WorldEvent, { type: 'MoveActor' }>): WorldState {
@@ -151,9 +156,9 @@ function applyPickUpItem(state: WorldState, event: Extract<WorldEvent, { type: '
   if (!actor || !item) return state;
 
   const next = cloneState(state);
-  next.actors[event.actorId] = { ...actor, inventory: [...actor.inventory, item.id] };
-  next.items[item.id] = { ...item, location: { kind: 'inventory', actorId: actor.id } };
+  setItemPlacement(next.spine, item.id, { type: 'carried_by', actorId: actor.id }, next.locations);
 
+  syncWorldSpine(next);
   addLedgerInPlace(next, event.note || `Picked up ${item.name}`);
   if (actor.kind === 'player') updateKnowledgeForActor(next, actor.id);
   return next;
@@ -165,8 +170,12 @@ function applyDropItem(state: WorldState, event: Extract<WorldEvent, { type: 'Dr
   if (!actor || !item) return state;
 
   const next = cloneState(state);
-  next.actors[event.actorId] = { ...actor, inventory: actor.inventory.filter(i => i !== item.id) };
-  next.items[item.id] = { ...item, location: { kind: 'ground', pos: event.at || actor.pos } };
+  const anchor = event.at || actor.pos;
+  const locationId = resolvePlacementLocationId(next, anchor);
+  if (!locationId) return state;
+
+  setItemPlacement(next.spine, item.id, { type: 'located_in', locationId, anchor }, next.locations);
+  syncWorldSpine(next);
   addLedgerInPlace(next, event.note || `Dropped ${item.name}`);
   if (actor.kind === 'player') updateKnowledgeForActor(next, actor.id);
   return next;
@@ -187,21 +196,62 @@ function applyCreateEntity(state: WorldState, event: Extract<WorldEvent, { type:
       name: event.entity.data.name,
       description: event.entity.data.description ?? undefined,
       location: event.entity.data.location,
+      tags: event.entity.data.tags,
     };
+    if (event.entity.data.location.kind === 'inventory') {
+      setItemPlacement(
+        next.spine,
+        event.entity.data.id,
+        { type: 'carried_by', actorId: event.entity.data.location.actorId },
+        next.locations,
+      );
+    } else if (event.entity.data.location.kind === 'container') {
+      setItemPlacement(
+        next.spine,
+        event.entity.data.id,
+        { type: 'inside', containerId: event.entity.data.location.containerId },
+        next.locations,
+      );
+    } else {
+      const locationId = resolvePlacementLocationId(next, event.entity.data.location.pos);
+      if (locationId) {
+        setItemPlacement(
+          next.spine,
+          event.entity.data.id,
+          { type: 'located_in', locationId, anchor: event.entity.data.location.pos },
+          next.locations,
+        );
+      }
+    }
   } else if (event.entity.kind === 'npc') {
+    const inventory = Array.from(new Set(event.entity.data.inventory || []));
     next.actors[event.entity.data.id] = {
       id: event.entity.data.id,
       kind: 'npc',
       name: event.entity.data.name,
       pos: event.entity.data.pos,
-      inventory: [],
+      facing: event.entity.data.facing,
+      inventory,
+      stats: event.entity.data.stats,
+      tags: event.entity.data.tags,
+      persona: event.entity.data.persona,
+      relationships: event.entity.data.relationships,
     };
+    for (const itemId of inventory) {
+      if (next.items[itemId]) {
+        setItemPlacement(next.spine, itemId, { type: 'carried_by', actorId: event.entity.data.id }, next.locations);
+      }
+    }
   } else if (event.entity.kind === 'location') {
     next.locations[event.entity.data.id] = {
       id: event.entity.data.id,
       name: event.entity.data.name,
       description: event.entity.data.description,
       anchor: event.entity.data.anchor,
+      radiusCells: event.entity.data.radiusCells,
+      tideAccess: event.entity.data.tideAccess,
+      terrain: event.entity.data.terrain,
+      tags: event.entity.data.tags,
     };
   }
   addLedgerInPlace(next, event.note || `Created ${event.entity.kind} ${event.entity.data.id}`);
@@ -276,4 +326,15 @@ function clampToBounds(state: WorldState, pos: { x: number; y: number; z?: numbe
     y: Math.max(minY, Math.min(maxY, pos.y)),
     z: pos.z ?? 0,
   };
+}
+
+function resolvePlacementLocationId(state: WorldState, pos: { x: number; y: number; z?: number }) {
+  const containing = Object.values(state.locations)
+    .filter(location => distance(pos, location.anchor) <= (location.radiusCells ?? 0))
+    .sort((a, b) => distance(pos, a.anchor) - distance(pos, b.anchor));
+  if (containing[0]) return containing[0].id;
+
+  const nearest = Object.values(state.locations)
+    .sort((a, b) => distance(pos, a.anchor) - distance(pos, b.anchor))[0];
+  return nearest?.id || null;
 }

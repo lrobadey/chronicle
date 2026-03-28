@@ -23,7 +23,7 @@ describe('NPC agent', () => {
     ]);
     const debugEvents: DebugEvent[] = [];
 
-    const trace = { llmCalls: [] as Array<{ agent: 'gm' | 'npc' | 'narrator'; [key: string]: unknown }> };
+    const trace = { llmCalls: [] as Array<{ agent: 'gm' | 'npc' | 'narrator' | 'specialist'; [key: string]: unknown }> };
     const result = await runNpcAgent({
       apiKey: 'test-key',
       npcId: 'mira-salt',

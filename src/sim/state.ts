@@ -1,3 +1,5 @@
+import type { SpineState } from './spine';
+
 export type GridPos = { x: number; y: number; z?: number };
 
 export type Facing = 'north' | 'south' | 'east' | 'west';
@@ -135,13 +137,33 @@ export interface KnowledgeState {
   notes: string[];
 }
 
+export interface SceneAgenda {
+  currentFocus?: string;
+  pressures: string[];
+  unresolvedBeats: string[];
+  immediateTensions: string[];
+}
+
+export interface WorldAgenda {
+  activeThreads: string[];
+  introductionOpportunities: string[];
+  escalationHooks: string[];
+}
+
+export interface WorldAgendas {
+  scene: SceneAgenda;
+  world: WorldAgenda;
+}
+
 export interface WorldState {
   meta: WorldMeta;
   map: GridMap;
   actors: Record<ActorId, Actor>;
   items: Record<ItemId, Item>;
   locations: Record<LocationId, LocationPOI>;
+  spine: SpineState;
   systems: SystemsState;
+  agendas: WorldAgendas;
   ledger: Array<{ turn: number; text: string; tags?: string[] }>;
   knowledge: Record<ActorId, KnowledgeState>;
 }

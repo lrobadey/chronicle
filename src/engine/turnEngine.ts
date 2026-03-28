@@ -2,8 +2,14 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { JsonlSessionStore } from './session/jsonlStore';
 import type { SessionStore, TurnRecord, TurnTrace } from './session/types';
-import type { PendingPrompt, PendingPromptData, WorldState } from '../sim/state';
-import type { WorldEvent } from '../sim/events';
+import type {
+  PendingPrompt,
+  PendingPromptData,
+  SceneAgenda,
+  WorldAgenda,
+  WorldState,
+} from '../sim/state';
+import { normalizeWorldEvent, type WorldEvent } from '../sim/events';
 import { checkInvariants } from '../sim/invariants';
 import { validateEvent } from '../sim/validate';
 import { applyEvents } from '../sim/reducer';
@@ -18,6 +24,12 @@ import type { LLMClient } from '../agents/llm/types';
 import { runGMAgent, type GMFinishTurnInput } from '../agents/gm/gmAgent';
 import { runNpcAgent, type NpcAgentOutput } from '../agents/npc/npcAgent';
 import { narrateOpening, narrateTurn, type NarratorStyle } from '../agents/narrator/narratorAgent';
+import {
+  finalizeSpecialistConsultations,
+  runSpecialistAgent,
+  type SpecialistConsultation,
+  type SpecialistType,
+} from '../agents/specialists';
 import { createIsleOfMarrowWorldVNext } from '../worlds/isle-of-marrow.vnext';
 import type { DebugSink } from './debug';
 import { emitDebugEvent } from './debug';
@@ -132,12 +144,13 @@ export class TurnEngine {
     const acceptedEvents: WorldEvent[] = [];
     const rejectedEvents: Array<{ event: WorldEvent; reason: string }> = [];
     const npcOutputs: NpcAgentOutput[] = [];
+    const specialistOutputs: Array<Omit<SpecialistConsultation, 'usedSuggestion' | 'usedCandidateEvents'>> = [];
     const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [], llmCalls: [] } : undefined;
     draft.meta.turn = nextTurn;
     emitDebugEvent(emit, { type: 'turn.started', sessionId, turn: nextTurn, playerText });
 
     const applyProposedEvents = (events: WorldEvent[]) => {
-      const batch = Array.isArray(events) ? events : [];
+      const batch = Array.isArray(events) ? events.map(event => normalizeWorldEvent(event)) : [];
       if (!batch.length) {
         return { ok: true, accepted: acceptedEvents.length, rejected: rejectedEvents.length };
       }
@@ -213,6 +226,33 @@ export class TurnEngine {
         npcOutputs.push(output);
         return output;
       },
+      consult_specialist: async (input: { specialistType: SpecialistType; question: string; focus?: string | null }) => {
+        const context = buildSpecialistContext({
+          state: draft,
+          playerId,
+          playerText,
+          nextTurn,
+          turnHistory,
+          specialistType: input.specialistType,
+        });
+        const output = await runSpecialistAgent({
+          apiKey,
+          specialistType: input.specialistType,
+          question: input.question,
+          focus: input.focus || undefined,
+          context,
+          llm: this.llm,
+          debug: emit,
+          trace,
+        });
+        specialistOutputs.push({
+          specialistType: input.specialistType,
+          question: input.question,
+          focus: input.focus || undefined,
+          output,
+        });
+        return output;
+      },
       propose_events: async (input: { events: WorldEvent[] }) => {
         const result = applyProposedEvents(input.events || []);
         return { ok: true, ...result };
@@ -226,6 +266,7 @@ export class TurnEngine {
         if (pending) {
           draft.meta.pendingPrompt = pending;
         }
+        applyAgendaUpdates(draft, input.agendaUpdates);
         return { ok: true };
       },
     };
@@ -288,6 +329,11 @@ export class TurnEngine {
       trace,
     });
 
+    const finalizedSpecialistOutputs = finalizeSpecialistConsultations(specialistOutputs, acceptedEvents);
+    if (trace) {
+      trace.specialistOutputs = finalizedSpecialistOutputs;
+    }
+
     const record: TurnRecord = {
       sessionId,
       turn: nextTurn,
@@ -297,6 +343,7 @@ export class TurnEngine {
       acceptedEvents,
       rejectedEvents,
       npcOutputs,
+      specialistOutputs: finalizedSpecialistOutputs,
       narration,
       telemetry: afterTelemetry,
       trace,
@@ -400,6 +447,56 @@ function normalizePendingPromptData(value: unknown): PendingPromptData | undefin
   return Object.keys(data).length ? data : undefined;
 }
 
+function applyAgendaUpdates(state: WorldState, updates: GMFinishTurnInput['agendaUpdates']) {
+  if (!updates || typeof updates !== 'object') return;
+  const scene = normalizeSceneAgenda(updates.scene);
+  if (scene) {
+    state.agendas.scene = scene;
+  }
+  const world = normalizeWorldAgenda(updates.world);
+  if (world) {
+    state.agendas.world = world;
+  }
+}
+
+function normalizeSceneAgenda(value: unknown): SceneAgenda | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const pressures = normalizeStringArray(record.pressures);
+  const unresolvedBeats = normalizeStringArray(record.unresolvedBeats);
+  const immediateTensions = normalizeStringArray(record.immediateTensions);
+  if (!pressures || !unresolvedBeats || !immediateTensions) return null;
+  return {
+    currentFocus: typeof record.currentFocus === 'string' && record.currentFocus.trim() ? record.currentFocus.trim() : undefined,
+    pressures,
+    unresolvedBeats,
+    immediateTensions,
+  };
+}
+
+function normalizeWorldAgenda(value: unknown): WorldAgenda | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const activeThreads = normalizeStringArray(record.activeThreads);
+  const introductionOpportunities = normalizeStringArray(record.introductionOpportunities);
+  const escalationHooks = normalizeStringArray(record.escalationHooks);
+  if (!activeThreads || !introductionOpportunities || !escalationHooks) return null;
+  return {
+    activeThreads,
+    introductionOpportunities,
+    escalationHooks,
+  };
+}
+
+function normalizeStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const normalized = value
+    .filter(item => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean);
+  return normalized;
+}
+
 function buildGMWorldContext(params: {
   state: WorldState;
   playerId: string;
@@ -458,6 +555,7 @@ function buildGMWorldContext(params: {
   return {
     observation,
     telemetry,
+    agendas: state.agendas,
     pendingPrompt: state.meta.pendingPrompt || null,
     landmarks,
     nearby: {
@@ -465,13 +563,57 @@ function buildGMWorldContext(params: {
       itemsOnGround: nearbyItemsOnGround,
     },
     map: state.map,
-    playerTranscript: [
-      ...turnHistory.map(turn => ({
-        turn: turn.turn,
-        playerId: turn.playerId,
-        playerText: turn.playerText,
-      })),
-      { turn: nextTurn, playerId, playerText },
-    ],
+    playerTranscript: buildPlayerTranscript(turnHistory, nextTurn, playerId, playerText),
   };
+}
+
+function buildSpecialistContext(params: {
+  state: WorldState;
+  playerId: string;
+  playerText: string;
+  nextTurn: number;
+  turnHistory: TurnRecord[];
+  specialistType: SpecialistType;
+}) {
+  const { state, playerId, playerText, nextTurn, turnHistory, specialistType } = params;
+  const telemetry = buildTelemetry(state, playerId);
+  const observation = buildObservation(state, playerId);
+  const transcriptTail = buildPlayerTranscript(turnHistory, nextTurn, playerId, playerText).slice(-8);
+
+  if (specialistType === 'scene') {
+    return {
+      agendas: state.agendas.scene,
+      pendingPrompt: state.meta.pendingPrompt || null,
+      telemetry,
+      observation,
+      playerText,
+      transcriptTail,
+    };
+  }
+
+  return {
+    agendas: state.agendas.world,
+    pendingPrompt: state.meta.pendingPrompt || null,
+    telemetry,
+    worldSnapshot: buildGMWorldContext({
+      state,
+      playerId,
+      playerText,
+      nextTurn,
+      turnHistory,
+    }),
+    playerText,
+    transcriptTail,
+  };
+}
+
+function buildPlayerTranscript(turnHistory: TurnRecord[], nextTurn: number, playerId: string, playerText: string) {
+  return [
+    ...turnHistory.map(turn => ({
+      turn: turn.turn,
+      playerId: turn.playerId,
+      playerText: turn.playerText,
+    })),
+    { turn: nextTurn, playerId, playerText },
+  ];
 }

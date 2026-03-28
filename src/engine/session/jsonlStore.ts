@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { SessionStore, TurnRecord } from './types';
 import type { WorldState } from '../../sim/state';
+import { syncWorldSpine } from '../../sim/spine';
 import { IncompatibleSessionError } from '../errors';
 
 const SNAPSHOT_FILE = 'snapshot.json';
@@ -87,14 +88,14 @@ export class JsonlSessionStore implements SessionStore {
   private async readState(p: string): Promise<WorldState | null> {
     try {
       const raw = await fs.readFile(p, 'utf-8');
-      return JSON.parse(raw) as WorldState;
+      return normalizeLoadedState(JSON.parse(raw) as WorldState);
     } catch {
       return null;
     }
   }
 
   private async writeState(p: string, state: WorldState) {
-    await fs.writeFile(p, JSON.stringify(state, null, 2));
+    await fs.writeFile(p, JSON.stringify(normalizeLoadedState(state), null, 2));
   }
 
   private assertCompatibleState(sessionId: string, state: WorldState) {
@@ -113,3 +114,36 @@ export class JsonlSessionStore implements SessionStore {
     }
   }
 }
+
+function normalizeLoadedState(state: WorldState): WorldState {
+  if (!state.agendas) {
+    state.agendas = {
+      scene: {
+        pressures: [],
+        unresolvedBeats: [],
+        immediateTensions: [],
+      },
+      world: {
+        activeThreads: [],
+        introductionOpportunities: [],
+        escalationHooks: [],
+      },
+    };
+  }
+
+  state.agendas.scene = {
+    currentFocus: state.agendas.scene?.currentFocus,
+    pressures: Array.isArray(state.agendas.scene?.pressures) ? state.agendas.scene.pressures : [],
+    unresolvedBeats: Array.isArray(state.agendas.scene?.unresolvedBeats) ? state.agendas.scene.unresolvedBeats : [],
+    immediateTensions: Array.isArray(state.agendas.scene?.immediateTensions) ? state.agendas.scene.immediateTensions : [],
+  };
+  state.agendas.world = {
+    activeThreads: Array.isArray(state.agendas.world?.activeThreads) ? state.agendas.world.activeThreads : [],
+    introductionOpportunities: Array.isArray(state.agendas.world?.introductionOpportunities) ? state.agendas.world.introductionOpportunities : [],
+    escalationHooks: Array.isArray(state.agendas.world?.escalationHooks) ? state.agendas.world.escalationHooks : [],
+  };
+
+  return syncWorldSpine(state);
+}
+
+export { normalizeLoadedState };

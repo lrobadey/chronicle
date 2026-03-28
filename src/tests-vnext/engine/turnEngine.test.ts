@@ -9,6 +9,8 @@ import { replayFromLog } from '../../engine/session/replay';
 import { QueueLLM } from '../helpers/queueLLM';
 import { IncompatibleSessionError } from '../../engine/errors';
 import type { DebugEvent } from '../../engine/debug';
+import { buildSpineFromLegacyWorld } from '../../sim/spine';
+import { createIsleOfMarrowWorldVNext } from '../../worlds/isle-of-marrow.vnext';
 
 async function createStore() {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chronicle-vnext-'));
@@ -17,6 +19,59 @@ async function createStore() {
 
 async function removeDir(rootDir: string) {
   await fs.rm(rootDir, { recursive: true, force: true });
+}
+
+function createSpineAuthoritativePlacementWorld() {
+  const world = createIsleOfMarrowWorldVNext({ anchorIso: '2025-01-01T14:00:00Z' });
+  const baseSpine = buildSpineFromLegacyWorld(world);
+  const carriedId = 'carried_by:heartwater-jar:player-1';
+
+  world.items['heartwater-jar'] = {
+    ...world.items['heartwater-jar'],
+    location: { kind: 'ground', pos: { x: 0, y: 1200, z: 15 } },
+  };
+  world.actors['player-1'] = {
+    ...world.actors['player-1'],
+    inventory: [],
+  };
+  world.spine = {
+    ...baseSpine,
+    entities: {
+      ...baseSpine.entities,
+      'heartwater-jar': {
+        ...baseSpine.entities['heartwater-jar']!,
+        components: {
+          ...baseSpine.entities['heartwater-jar']!.components,
+          location: undefined,
+        },
+      },
+    },
+    relations: {
+      [carriedId]: {
+        id: carriedId,
+        type: 'carried_by',
+        from: 'heartwater-jar',
+        to: 'player-1',
+      },
+    },
+    indexes: {
+      ...baseSpine.indexes,
+      byFrom: {
+        ...baseSpine.indexes.byFrom,
+        'heartwater-jar': [carriedId],
+      },
+      byTo: {
+        ...baseSpine.indexes.byTo,
+        'player-1': [carriedId],
+      },
+      byRelationType: {
+        ...baseSpine.indexes.byRelationType,
+        carried_by: [carriedId],
+      },
+    },
+  };
+
+  return world;
 }
 
 describe('TurnEngine', () => {
@@ -120,6 +175,98 @@ describe('TurnEngine', () => {
       assert.equal(log.length, 1);
       assert.equal(log[0]?.npcOutputs?.[0]?.npcId, 'mira-salt');
       assert.equal(log[0]?.npcOutputs?.[0]?.privateIntent, 'warn_player');
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('persists specialist consultations, agenda updates, and rich entity creation', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'consult_specialist',
+              arguments:
+                '{"specialistType":"scene","question":"Who should notice the player?","focus":"the landing"}',
+              call_id: 'gm-specialist',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'specialist-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_specialist_advice',
+              arguments:
+                '{"summary":"Introduce a dock witness.","recommendations":["Add one local witness with a concrete voice."],"candidateEvents":[{"type":"CreateEntity","actorId":null,"to":null,"toLocationId":null,"mode":null,"itemId":null,"at":null,"text":null,"toActorId":null,"minutes":null,"entity":{"kind":"npc","data":{"id":"dock-eye","name":"Dock Eye","description":null,"location":null,"pos":{"x":3,"y":0,"z":0},"anchor":null,"facing":"west","inventory":null,"stats":{"caution":3},"tags":["dockworker","witness"],"persona":{"tagline":"A dockworker with a long memory.","background":"Keeps tally on who comes and goes at the Landing.","voice":"Dry and suspicious.","goals":["stay employed","avoid smugglers"]},"relationships":{"player-1":{"trust":0,"fear":1,"affinity":0}},"radiusCells":null,"tideAccess":null,"terrain":null}},"key":null,"value":null,"locationId":null,"pace":null,"confirmId":null,"area":null,"direction":null,"subject":null,"note":"A dockworker notices the new arrival."}],"creationIntent":{"kind":"npc","purpose":"Introduce a witness who can react to the player later."},"risks":["Too many introductions would dilute the opening."]}',
+              call_id: 'specialist-call',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-2',
+          output: [
+            {
+              type: 'function_call',
+              name: 'propose_events',
+              arguments:
+                '{"events":[{"type":"CreateEntity","actorId":null,"to":null,"toLocationId":null,"mode":null,"itemId":null,"at":null,"text":null,"toActorId":null,"minutes":null,"entity":{"kind":"npc","data":{"id":"dock-eye","name":"Dock Eye","description":null,"location":null,"pos":{"x":3,"y":0,"z":0},"anchor":null,"facing":"west","inventory":null,"stats":{"caution":3},"tags":["dockworker","witness"],"persona":{"tagline":"A dockworker with a long memory.","background":"Keeps tally on who comes and goes at the Landing.","voice":"Dry and suspicious.","goals":["stay employed","avoid smugglers"]},"relationships":{"player-1":{"trust":0,"fear":1,"affinity":0}},"radiusCells":null,"tideAccess":null,"terrain":null}},"key":null,"value":null,"locationId":null,"pace":null,"confirmId":null,"area":null,"direction":null,"subject":null,"note":"A dockworker notices the new arrival."}]}',
+              call_id: 'gm-propose',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-3',
+          output: [
+            {
+              type: 'function_call',
+              name: 'finish_turn',
+              arguments:
+                '{"summary":"done","agendaUpdates":{"scene":{"currentFocus":"A new witness at the Landing","pressures":["A dockworker now watches the player closely."],"unresolvedBeats":["Decide whether to engage Dock Eye."],"immediateTensions":["The player is no longer unnoticed."]},"world":{"activeThreads":["New arrivals are noticed and remembered at the Landing."],"introductionOpportunities":["Dock Eye can connect the player to local rumors."],"escalationHooks":["Suspicion at the docks may spread if the player draws attention."]}}}',
+              call_id: 'gm-finish',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'A dockworker narrows his eyes and quietly marks your arrival.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'look around carefully',
+        apiKey: 'test-key',
+        debug: { includeTrace: true },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 1);
+      assert.equal(turn.acceptedEvents[0]?.type, 'CreateEntity');
+      assert.equal(turn.trace?.specialistOutputs?.length, 1);
+      assert.equal(turn.trace?.specialistOutputs?.[0]?.usedSuggestion, true);
+
+      const state = await store.loadSession(init.sessionId);
+      assert.equal(state?.actors['dock-eye']?.persona?.voice, 'Dry and suspicious.');
+      assert.deepEqual(state?.actors['dock-eye']?.tags, ['dockworker', 'witness']);
+      assert.equal(state?.agendas.scene.currentFocus, 'A new witness at the Landing');
+      assert.equal(state?.agendas.world.activeThreads[0], 'New arrivals are noticed and remembered at the Landing.');
+
+      const log = await store.loadTurnLog(init.sessionId);
+      assert.equal(log[0]?.specialistOutputs?.length, 1);
+      assert.equal(log[0]?.specialistOutputs?.[0]?.usedSuggestion, true);
     } finally {
       await removeDir(rootDir);
     }
@@ -311,6 +458,43 @@ describe('TurnEngine', () => {
       const snapshot = await store.loadSession(init.sessionId);
 
       assert.equal(JSON.stringify(replayed), JSON.stringify(snapshot));
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('derives legacy placement from spine-authoritative snapshots and replay state', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const sessionId = 'spine-authoritative-session';
+      const sessionDir = path.join(rootDir, sessionId);
+      await fs.mkdir(sessionDir, { recursive: true });
+
+      const world = createSpineAuthoritativePlacementWorld();
+      await fs.writeFile(path.join(sessionDir, 'snapshot.json'), JSON.stringify(world, null, 2));
+      await fs.writeFile(path.join(sessionDir, 'initial.json'), JSON.stringify(world, null, 2));
+
+      const loaded = await store.loadSession(sessionId);
+      assert.deepEqual(loaded?.items['heartwater-jar']?.location, {
+        kind: 'inventory',
+        actorId: 'player-1',
+      });
+      assert.ok(loaded?.actors['player-1']?.inventory.includes('heartwater-jar'));
+      assert.equal(loaded?.spine.relations['carried_by:heartwater-jar:player-1']?.type, 'carried_by');
+
+      const replayed = replayFromLog(world, [
+        JSON.stringify({
+          turn: 1,
+          acceptedEvents: [{ type: 'AdvanceTime', minutes: 1 }],
+        }),
+      ]);
+
+      assert.deepEqual(replayed.items['heartwater-jar']?.location, {
+        kind: 'inventory',
+        actorId: 'player-1',
+      });
+      assert.ok(replayed.actors['player-1']?.inventory.includes('heartwater-jar'));
+      assert.equal(replayed.spine.relations['carried_by:heartwater-jar:player-1']?.type, 'carried_by');
     } finally {
       await removeDir(rootDir);
     }

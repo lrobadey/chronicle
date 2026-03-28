@@ -7,6 +7,7 @@ import type { TurnDiff } from '../../sim/views/diff';
 import type { PendingPrompt } from '../../sim/state';
 import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
+import type { SpecialistType } from '../specialists';
 
 export type NarratorStyle = 'lyric' | 'cinematic' | 'michener';
 
@@ -24,7 +25,7 @@ export interface NarratorParams {
   debug?: DebugSink;
   trace?: {
     llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator';
+      agent: 'gm' | 'npc' | 'narrator' | 'specialist';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -33,6 +34,7 @@ export interface NarratorParams {
       usage?: unknown;
       status?: string;
       error?: unknown;
+      specialistType?: SpecialistType;
     }>;
   };
 }
@@ -195,7 +197,7 @@ function formatAttemptedAction(playerText: string): string {
 function pushLLMTrace(
   trace: NarratorParams['trace'] | undefined,
   entry: {
-    agent: 'gm' | 'npc' | 'narrator';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;
@@ -204,6 +206,7 @@ function pushLLMTrace(
     usage?: unknown;
     status?: string;
     error?: unknown;
+    specialistType?: SpecialistType;
   },
 ) {
   if (!trace) return;

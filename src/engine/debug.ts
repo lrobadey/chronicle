@@ -22,6 +22,8 @@ export type DebugEvent =
   | { type: 'event.rollback'; events: WorldEvent[]; reason: string }
   | { type: 'npc.started'; npcId: string }
   | { type: 'npc.completed'; npcId: string; output: unknown }
+  | { type: 'specialist.started'; specialistType: 'scene' | 'world'; question: string; focus?: string }
+  | { type: 'specialist.completed'; specialistType: 'scene' | 'world'; output: unknown }
   | { type: 'narrator.started'; phase: 'opening' | 'turn'; style?: string }
   | { type: 'narrator.completed'; phase: 'opening' | 'turn'; text?: string }
   | { type: 'turn.persisted'; sessionId: string; turn: number }

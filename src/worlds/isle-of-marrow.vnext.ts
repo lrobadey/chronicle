@@ -1,4 +1,5 @@
 import type { WorldState, LocationPOI, Actor, Item, KnowledgeState } from '../sim/state';
+import { buildSpineFromLegacyWorld } from '../sim/spine';
 
 export interface CreateWorldOptions {
   anchorIso?: string;
@@ -171,7 +172,7 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
     },
   };
 
-  return {
+  const world: WorldState = {
     meta: {
       worldId: 'isle-of-marrow',
       seed: 'isle-of-marrow-1825',
@@ -188,6 +189,17 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
     actors,
     items,
     locations,
+    spine: {
+      entities: {},
+      relations: {},
+      indexes: {
+        byType: {},
+        byFrom: {},
+        byTo: {},
+        byRelationType: {},
+      },
+      schedules: {},
+    },
     systems: {
       time: { elapsedMinutes: 0 },
       timeConfig: { anchorIso: startedAt, startHour: startedDate.getUTCHours() },
@@ -197,6 +209,19 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
         goods: { salt_fish: 'abundant', silver: 'abundant', heartwater: 'scarce' },
       },
     },
+    agendas: {
+      scene: {
+        currentFocus: 'Arrival at the Landing',
+        pressures: ['The tide is high and cuts off the Maw.'],
+        unresolvedBeats: ['Learn what the island wants from you.'],
+        immediateTensions: ['The island is unfamiliar and larger than it first appears.'],
+      },
+      world: {
+        activeThreads: ['Life continues around the leviathan bones.'],
+        introductionOpportunities: ['A local with useful knowledge could notice the player.'],
+        escalationHooks: ['Travel inland reveals how much larger the Isle of Marrow is than the shoreline suggests.'],
+      },
+    },
     ledger: [
       { turn: 0, text: 'Isle of Marrow initialized' },
       { turn: 0, text: 'You arrive at the Landing, where dark sand meets ancient bone.' },
@@ -204,4 +229,7 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
     ],
     knowledge,
   };
+
+  world.spine = buildSpineFromLegacyWorld(world);
+  return world;
 }

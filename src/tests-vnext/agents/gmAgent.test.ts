@@ -39,6 +39,7 @@ describe('GM agent loop', () => {
           return { ok: true };
         },
         consult_npc: async () => ({ ok: true }),
+        consult_specialist: async () => ({ ok: true }),
         propose_events: async () => {
           proposeCalls += 1;
           return { ok: true, accepted: 0, rejected: 0 };
@@ -111,6 +112,7 @@ describe('GM agent loop', () => {
           return { ok: true };
         },
         consult_npc: async () => ({ ok: true }),
+        consult_specialist: async () => ({ ok: true }),
         propose_events: async () => {
           proposeCalls += 1;
           return { ok: true, accepted: 0, rejected: 0 };
@@ -127,6 +129,60 @@ describe('GM agent loop', () => {
     assert.equal(observeCalls, 0);
     assert.equal(proposeCalls, 1);
     assert.equal(finishCalls, 1);
+  });
+
+  it('can consult a specialist before proposing events', async () => {
+    let specialistCalls = 0;
+    let proposeCalls = 0;
+
+    const llm = new QueueLLM([
+      {
+        id: 'resp-first',
+        output: [{ type: 'function_call', name: 'consult_specialist', arguments: '{"specialistType":"scene","question":"What should complicate this scene?","focus":"the landing"}', call_id: 's1' }],
+        output_text: '',
+      },
+      {
+        id: 'resp-second',
+        output: [{ type: 'function_call', name: 'propose_events', arguments: '{"events":[]}', call_id: 'p1' }],
+        output_text: '',
+      },
+      {
+        id: 'resp-third',
+        output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'f1' }],
+        output_text: '',
+      },
+    ]);
+
+    const result = await runGMAgent({
+      apiKey: 'test-key',
+      playerText: 'look around',
+      llm,
+      runtime: {
+        observe_world: async () => ({ ok: true }),
+        consult_npc: async () => ({ ok: true }),
+        consult_specialist: async input => {
+          specialistCalls += 1;
+          assert.equal(input.specialistType, 'scene');
+          return {
+            summary: 'Raise the local pressure.',
+            recommendations: ['Introduce a witness.'],
+            candidateEvents: [],
+            creationIntent: { kind: 'npc', purpose: 'Introduce a local witness.' },
+            risks: [],
+          };
+        },
+        propose_events: async () => {
+          proposeCalls += 1;
+          return { ok: true, accepted: 0, rejected: 0 };
+        },
+        finish_turn: async () => ({ ok: true }),
+      },
+      trace: { toolCalls: [], llmCalls: [] },
+    });
+
+    assert.equal(result.finished, true);
+    assert.equal(specialistCalls, 1);
+    assert.equal(proposeCalls, 1);
   });
 
   it('handles malformed tool arguments and continues', async () => {
@@ -161,6 +217,7 @@ describe('GM agent loop', () => {
           return { ok: true };
         },
         consult_npc: async () => ({ ok: true }),
+        consult_specialist: async () => ({ ok: true }),
         propose_events: async () => ({ ok: true }),
         finish_turn: async () => {
           finishCalls += 1;

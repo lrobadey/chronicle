@@ -1,6 +1,7 @@
 import type { WorldState } from '../../sim/state';
 import type { WorldEvent } from '../../sim/events';
 import { applyEvents } from '../../sim/reducer';
+import { normalizeLoadedState } from './jsonlStore';
 
 export function replayFromLog(base: WorldState | null, lines: string[]): WorldState {
   if (!base) throw new Error('Missing base state for replay');
@@ -14,5 +15,5 @@ export function replayFromLog(base: WorldState | null, lines: string[]): WorldSt
       state = applyEvents(state, record.acceptedEvents);
     }
   }
-  return state;
+  return normalizeLoadedState(state);
 }
