@@ -7,10 +7,12 @@ import { validateEvent } from '../../sim/validate';
 import { applyEvent } from '../../sim/reducer';
 import { distance } from '../../sim/utils';
 
+const FIXED_ANCHOR = '2025-01-01T14:00:00Z';
+
 describe('sim determinism', () => {
   it('derives weather/time deterministically from state seed and elapsed minutes', () => {
-    const worldA = createIsleOfMarrowWorldVNext();
-    const worldB = createIsleOfMarrowWorldVNext();
+    const worldA = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    const worldB = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
     worldA.systems.time.elapsedMinutes = 180;
     worldB.systems.time.elapsedMinutes = 180;
 
@@ -19,7 +21,7 @@ describe('sim determinism', () => {
   });
 
   it('rejects movement into tide-blocked location', () => {
-    const world = createIsleOfMarrowWorldVNext();
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
     const result = validateEvent(world, {
       type: 'MoveActor',
       actorId: 'player-1',
@@ -32,7 +34,7 @@ describe('sim determinism', () => {
   });
 
   it('requires confirmation for long TravelToLocation intents', () => {
-    const world = createIsleOfMarrowWorldVNext();
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
     const noConfirm = validateEvent(world, {
       type: 'TravelToLocation',
       actorId: 'player-1',
@@ -60,7 +62,7 @@ describe('sim determinism', () => {
   });
 
   it('moves to the edge when destination is tide-blocked at arrival', () => {
-    const world = createIsleOfMarrowWorldVNext();
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
     const result = applyEvent(world, {
       type: 'TravelToLocation',
       actorId: 'player-1',
@@ -78,7 +80,7 @@ describe('sim determinism', () => {
   });
 
   it('applies deterministic Explore and Inspect changes', () => {
-    const world = createIsleOfMarrowWorldVNext();
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
     const explored = applyEvent(world, {
       type: 'Explore',
       actorId: 'player-1',

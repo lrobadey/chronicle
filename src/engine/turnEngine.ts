@@ -31,6 +31,7 @@ import {
 export interface TurnEngineConfig {
   store?: SessionStore;
   llm?: LLMClient;
+  clock?: () => Date;
   worldFactory?: (worldId?: string) => WorldState;
 }
 
@@ -48,7 +49,10 @@ export interface RunTurnInput {
   apiKey?: string;
   narratorStyle?: NarratorStyle;
   debug?: { includeTrace?: boolean; onEvent?: DebugSink };
-  stream?: { onNarrationDelta?: (delta: string) => void };
+  stream?: {
+    onNarrationStart?: (telemetry: ReturnType<typeof buildTelemetry>) => void;
+    onNarrationDelta?: (delta: string) => void;
+  };
 }
 
 export interface RunTurnOutput {
@@ -69,14 +73,18 @@ export class TurnEngine {
   constructor(config: TurnEngineConfig = {}) {
     this.store = config.store || new JsonlSessionStore(path.resolve(process.cwd(), 'data/sessions'));
     this.llm = config.llm || new OpenAIClient();
-    this.worldFactory = config.worldFactory || (() => createIsleOfMarrowWorldVNext());
+    const clock = config.clock || (() => new Date());
+    this.worldFactory = config.worldFactory || (() => createIsleOfMarrowWorldVNext({ anchorIso: clock().toISOString() }));
   }
 
   async initSession(params: {
     sessionId?: string;
     apiKey?: string;
     debug?: { onEvent?: DebugSink };
-    stream?: { onOpeningDelta?: (delta: string) => void };
+    stream?: {
+      onOpeningStart?: (telemetry: ReturnType<typeof buildTelemetry>) => void;
+      onOpeningDelta?: (delta: string) => void;
+    };
   }): Promise<InitResult> {
     const { sessionId, apiKey, debug, stream } = params;
     const emit = debug?.onEvent;
@@ -86,6 +94,7 @@ export class TurnEngine {
       emitDebugEvent(emit, { type: 'init.session_ready', sessionId: ensured.sessionId, created: ensured.created });
       assertNoInvariantIssues(ensured.state, 'Session initialized with invalid world state');
       const telemetry = buildTelemetry(ensured.state, 'player-1');
+      stream?.onOpeningStart?.(telemetry);
       const opening = await narrateOpening({
         apiKey,
         telemetry,
@@ -264,6 +273,7 @@ export class TurnEngine {
     const beforeTelemetry = buildTelemetry(state, playerId);
     const afterTelemetry = buildTelemetry(draft, playerId);
     const diff = computeTurnDiff(beforeTelemetry, afterTelemetry, acceptedEvents);
+    stream?.onNarrationStart?.(afterTelemetry);
     const narration = await narrateTurn({
       apiKey,
       style: narratorStyle,

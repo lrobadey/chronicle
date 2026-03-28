@@ -9,6 +9,7 @@ import type { NarratorStyle } from '../agents/narrator/narratorAgent';
 import type { WorldEvent } from '../sim/events';
 
 export type DebugDetail = 'summary' | 'raw';
+export type CliApiMode = 'auto' | 'fallback' | 'live';
 
 export interface CliState {
   sessionId: string;
@@ -17,6 +18,7 @@ export interface CliState {
   apiKey?: string;
   debugEnabled: boolean;
   debugDetail: DebugDetail;
+  apiMode: CliApiMode;
 }
 
 export interface CliEngine {
@@ -24,7 +26,10 @@ export interface CliEngine {
     sessionId?: string;
     apiKey?: string;
     debug?: { onEvent?: DebugSink };
-    stream?: { onOpeningDelta?: (delta: string) => void };
+    stream?: {
+      onOpeningStart?: (telemetry: InitResult['telemetry']) => void;
+      onOpeningDelta?: (delta: string) => void;
+    };
   }): Promise<InitResult>;
   getTelemetry(sessionId: string, playerId: string): Promise<RunTurnOutput['telemetry']>;
   runTurn(input: {
@@ -34,16 +39,36 @@ export interface CliEngine {
     apiKey?: string;
     narratorStyle?: NarratorStyle;
     debug?: { includeTrace?: boolean; onEvent?: DebugSink };
-    stream?: { onNarrationDelta?: (delta: string) => void };
+    stream?: {
+      onNarrationStart?: (telemetry: RunTurnOutput['telemetry']) => void;
+      onNarrationDelta?: (delta: string) => void;
+    };
   }): Promise<RunTurnOutput>;
+}
+
+export interface CliTerminal {
+  isTTY(): boolean;
+  write(text: string): void;
+  readLine(prompt: string): Promise<string | null>;
+  close(): void;
+}
+
+export interface CliTranscriptEvent {
+  type: 'prompt' | 'input' | 'output';
+  text: string;
 }
 
 export interface CliOptions {
   engine: CliEngine;
-  write?: (text: string) => void;
-  readLine?: (prompt: string) => Promise<string>;
-  close?: () => void;
-  isTTY?: boolean;
+  terminal: CliTerminal;
+  sessionId?: string;
+  narratorStyle?: NarratorStyle;
+  debugEnabled?: boolean;
+  debugDetail?: DebugDetail;
+  apiMode?: CliApiMode;
+  allowNonTty?: boolean;
+  env?: NodeJS.ProcessEnv;
+  transcript?: (event: CliTranscriptEvent) => void;
 }
 
 export interface CliStepResult {
@@ -51,51 +76,108 @@ export interface CliStepResult {
   exit: boolean;
 }
 
+export interface CliRunResult {
+  exitCode: number;
+  finalState?: CliState;
+}
+
 export function resolveApiKey(env: NodeJS.ProcessEnv): string | undefined {
   return env.OPENAI_API_KEY || env.VITE_OPENAI_API_KEY || undefined;
 }
 
-export async function startCli(engine: TurnEngine): Promise<void> {
-  const ioWrite = (text: string) => output.write(text);
+export function resolveCliApiMode(raw: string | undefined): CliApiMode {
+  if (!raw) return 'auto';
+  const normalized = raw.toLowerCase();
+  if (normalized === 'auto' || normalized === 'fallback' || normalized === 'live') return normalized;
+  throw new Error('CHRONICLE_API_MODE must be one of auto|fallback|live');
+}
 
-  if (!input.isTTY) {
-    ioWrite('Error: CLI requires an interactive terminal.\n');
-    process.exit(1);
-  }
+export async function runCli(options: CliOptions): Promise<CliRunResult> {
+  const {
+    engine,
+    terminal,
+    sessionId,
+    transcript,
+    env = process.env,
+    narratorStyle = 'michener',
+    debugEnabled = true,
+    debugDetail = 'summary',
+    apiMode = 'auto',
+    allowNonTty = false,
+  } = options;
+  let finalState: CliState | undefined;
+  let shouldPrintGoodbye = false;
 
-  const rl = readline.createInterface({ input, output });
-  const readLine = async (prompt: string) => rl.question(prompt);
+  const write = (text: string) => {
+    transcript?.({ type: 'output', text });
+    terminal.write(text);
+  };
 
-  ioWrite('\n=== Chronicle vNext - Isle of Marrow ===\n\n');
+  const readLine = async (prompt: string) => {
+    transcript?.({ type: 'prompt', text: prompt });
+    const line = await terminal.readLine(prompt);
+    if (line != null) {
+      transcript?.({ type: 'input', text: line });
+    }
+    return line;
+  };
 
   try {
-    let state = await initCliSession({
+    if (!allowNonTty && !terminal.isTTY()) {
+      write('Error: CLI requires an interactive terminal.\n');
+      return { exitCode: 1 };
+    }
+
+    shouldPrintGoodbye = true;
+    write('\n=== Chronicle vNext - Isle of Marrow ===\n\n');
+
+    const resolvedApiKey = resolveStartupApiKey(apiMode, env);
+    finalState = await initCliSession({
       engine,
-      sessionId: undefined,
-      apiKey: resolveApiKey(process.env),
-      write: ioWrite,
-      narratorStyle: 'michener',
-      debugEnabled: true,
-      debugDetail: 'summary',
+      sessionId,
+      apiKey: resolvedApiKey,
+      narratorStyle,
+      debugEnabled,
+      debugDetail,
+      apiMode,
+      write,
     });
 
-    ioWrite('Type /help for commands, or enter your action.\n\n');
+    write('Type /help for commands, or enter your action.\n\n');
 
     while (true) {
-      const line = (await readLine('> ')).trim();
+      const line = await readLine('> ');
+      if (line == null) {
+        return { exitCode: 0, finalState };
+      }
       const step = await handleCliLine({
-        state,
-        line,
+        state: finalState,
+        line: line.trim(),
         engine,
-        write: ioWrite,
+        write,
       });
-      state = step.state;
-      if (step.exit) break;
+      finalState = step.state;
+      if (step.exit) {
+        return { exitCode: 0, finalState };
+      }
     }
+  } catch (error) {
+    write(`${formatError(error)}\n`);
+    return { exitCode: 1, finalState };
   } finally {
-    rl.close();
-    ioWrite('Goodbye!\n');
+    if (shouldPrintGoodbye) {
+      write('Goodbye!\n');
+    }
+    terminal.close();
   }
+}
+
+export async function startCli(
+  engine: TurnEngine,
+  options: Omit<CliOptions, 'engine' | 'terminal'> = {},
+): Promise<CliRunResult> {
+  const terminal = createReadlineTerminal();
+  return runCli({ ...options, engine, terminal });
 }
 
 export async function initCliSession(params: {
@@ -105,17 +187,25 @@ export async function initCliSession(params: {
   narratorStyle: NarratorStyle;
   debugEnabled: boolean;
   debugDetail: DebugDetail;
+  apiMode: CliApiMode;
   write: (text: string) => void;
 }): Promise<CliState> {
-  const { engine, sessionId, apiKey, narratorStyle, debugEnabled, debugDetail, write } = params;
+  const { engine, sessionId, apiKey, narratorStyle, debugEnabled, debugDetail, apiMode, write } = params;
   const debugSink = debugEnabled ? createDebugWriter(write, debugDetail) : undefined;
   const openingChunks: string[] = [];
   let openingStreamed = false;
+  let openingPrefixWritten = false;
 
   const { result, usedFallback } = await initWithFallback(
     engine,
     sessionId,
     apiKey,
+    apiMode,
+    telemetry => {
+      if (debugEnabled || openingPrefixWritten) return;
+      write(`${formatNarrationTimestamp(telemetry)} `);
+      openingPrefixWritten = true;
+    },
     delta => {
       if (debugEnabled) {
         openingChunks.push(delta);
@@ -127,7 +217,9 @@ export async function initCliSession(params: {
     debugSink,
   );
 
-  if (!apiKey) {
+  if (apiMode === 'fallback') {
+    write('(Fallback mode - deterministic runtime)\n\n');
+  } else if (!apiKey) {
     write('(No API key - running in deterministic fallback mode)\n\n');
   } else if (usedFallback) {
     write('(API unavailable - switched to deterministic fallback mode)\n\n');
@@ -135,11 +227,11 @@ export async function initCliSession(params: {
 
   if (debugEnabled) {
     const openingText = openingChunks.join('') || result.opening;
-    write(`Opening:\n${openingText}\n\n`);
+    write(`Opening:\n${prefixNarration(openingText, result.telemetry)}\n\n`);
   } else if (openingStreamed) {
     write('\n\n');
   } else {
-    write(`${result.opening}\n\n`);
+    write(`${prefixNarration(result.opening, result.telemetry)}\n\n`);
   }
 
   return {
@@ -149,6 +241,7 @@ export async function initCliSession(params: {
     apiKey: usedFallback ? undefined : apiKey,
     debugEnabled,
     debugDetail,
+    apiMode: usedFallback ? 'fallback' : apiMode,
   };
 }
 
@@ -223,6 +316,7 @@ export async function handleCliLine(params: {
           narratorStyle: state.narratorStyle,
           debugEnabled: state.debugEnabled,
           debugDetail: state.debugDetail,
+          apiMode: state.apiMode,
         });
         return { state, exit: false };
       }
@@ -235,10 +329,16 @@ export async function handleCliLine(params: {
   const narrationChunks: string[] = [];
   const debugSink = state.debugEnabled ? createDebugWriter(write, state.debugDetail) : undefined;
   let narrationStreamed = false;
+  let narrationPrefixWritten = false;
   const turn = await runTurnWithFallback(
     engine,
     state,
     line,
+    telemetry => {
+      if (state.debugEnabled || narrationPrefixWritten) return;
+      write(`\n${formatNarrationTimestamp(telemetry)} `);
+      narrationPrefixWritten = true;
+    },
     delta => {
       if (state.debugEnabled) {
         narrationChunks.push(delta);
@@ -250,21 +350,78 @@ export async function handleCliLine(params: {
     debugSink,
   );
   if (turn.usedFallback) {
-    state = { ...state, apiKey: undefined };
+    state = { ...state, apiKey: undefined, apiMode: 'fallback' };
     write('\n(API request failed - switched to deterministic fallback mode)\n');
   }
 
   state = { ...state, sessionId: turn.result.sessionId };
   if (state.debugEnabled) {
     const narration = narrationChunks.join('') || turn.result.narration;
-    write(`\nNarration:\n${narration}\n\n`);
+    write(`\nNarration:\n${prefixNarration(narration, turn.result.telemetry)}\n\n`);
   } else if (narrationStreamed) {
     write('\n\n');
   } else {
-    write(`\n${turn.result.narration}\n\n`);
+    write(`\n${prefixNarration(turn.result.narration, turn.result.telemetry)}\n\n`);
   }
 
   return { state, exit: false };
+}
+
+function createReadlineTerminal(): CliTerminal {
+  const rl = readline.createInterface({ input, output });
+  const queuedLines: string[] = [];
+  let pendingResolve: ((line: string | null) => void) | undefined;
+  let closed = false;
+
+  rl.on('line', line => {
+    if (pendingResolve) {
+      const resolve = pendingResolve;
+      pendingResolve = undefined;
+      resolve(line);
+      return;
+    }
+    queuedLines.push(line);
+  });
+
+  rl.on('close', () => {
+    closed = true;
+    if (pendingResolve) {
+      const resolve = pendingResolve;
+      pendingResolve = undefined;
+      resolve(null);
+    }
+  });
+
+  return {
+    isTTY: () => Boolean(input.isTTY),
+    write: text => {
+      output.write(text);
+    },
+    readLine: prompt => {
+      output.write(prompt);
+      if (queuedLines.length) {
+        return Promise.resolve(queuedLines.shift() ?? null);
+      }
+      if (closed) {
+        return Promise.resolve(null);
+      }
+      return new Promise(resolve => {
+        pendingResolve = resolve;
+      });
+    },
+    close: () => {
+      rl.close();
+    },
+  };
+}
+
+function resolveStartupApiKey(apiMode: CliApiMode, env: NodeJS.ProcessEnv): string | undefined {
+  if (apiMode === 'fallback') return undefined;
+  const apiKey = resolveApiKey(env);
+  if (apiMode === 'live' && !apiKey) {
+    throw new Error('Live mode requires OPENAI_API_KEY or VITE_OPENAI_API_KEY');
+  }
+  return apiKey;
 }
 
 function parseCommand(line: string): { name: string; args: string[] } {
@@ -312,6 +469,18 @@ Weather: ${telemetry.weather.type}, wind ${telemetry.weather.windKph}kph
 Inventory: ${inventory}
 Turn: ${telemetry.turn}
 `.trimEnd();
+}
+
+function formatNarrationTimestamp(telemetry: InitResult['telemetry'] | RunTurnOutput['telemetry']): string {
+  const absolute = new Date(telemetry.time.absoluteIso);
+  const hours = String(absolute.getUTCHours()).padStart(2, '0');
+  const minutes = String(absolute.getUTCMinutes()).padStart(2, '0');
+  return `[Day ${telemetry.time.currentDay}, ${hours}:${minutes}]`;
+}
+
+function prefixNarration(text: string, telemetry: InitResult['telemetry'] | RunTurnOutput['telemetry']): string {
+  const body = text.trim();
+  return body ? `${formatNarrationTimestamp(telemetry)} ${body}` : formatNarrationTimestamp(telemetry);
 }
 
 function createDebugWriter(write: (text: string) => void, detail: DebugDetail): DebugSink {
@@ -499,36 +668,39 @@ async function initWithFallback(
   engine: CliEngine,
   sessionId: string | undefined,
   apiKey: string | undefined,
+  apiMode: CliApiMode,
+  onOpeningStart?: (telemetry: InitResult['telemetry']) => void,
   onOpeningDelta?: (delta: string) => void,
   onDebugEvent?: DebugSink,
 ) {
-  if (!apiKey) {
+  if (apiMode === 'fallback' || !apiKey) {
     return {
       result: await engine.initSession({
         sessionId,
         debug: onDebugEvent ? { onEvent: onDebugEvent } : undefined,
-        stream: onOpeningDelta ? { onOpeningDelta } : undefined,
+        stream: onOpeningStart || onOpeningDelta ? { onOpeningStart, onOpeningDelta } : undefined,
       }),
       usedFallback: false,
     };
   }
+
   try {
     return {
       result: await engine.initSession({
         sessionId,
         apiKey,
         debug: onDebugEvent ? { onEvent: onDebugEvent } : undefined,
-        stream: onOpeningDelta ? { onOpeningDelta } : undefined,
+        stream: onOpeningStart || onOpeningDelta ? { onOpeningStart, onOpeningDelta } : undefined,
       }),
       usedFallback: false,
     };
   } catch (error) {
-    if (!isRecoverableLLMError(error)) throw error;
+    if (apiMode !== 'auto' || !isRecoverableLLMError(error)) throw error;
     return {
       result: await engine.initSession({
         sessionId,
         debug: onDebugEvent ? { onEvent: onDebugEvent } : undefined,
-        stream: onOpeningDelta ? { onOpeningDelta } : undefined,
+        stream: onOpeningStart || onOpeningDelta ? { onOpeningStart, onOpeningDelta } : undefined,
       }),
       usedFallback: true,
     };
@@ -539,6 +711,7 @@ async function runTurnWithFallback(
   engine: CliEngine,
   state: CliState,
   playerText: string,
+  onNarrationStart?: (telemetry: RunTurnOutput['telemetry']) => void,
   onNarrationDelta?: (delta: string) => void,
   onDebugEvent?: DebugSink,
 ) {
@@ -550,17 +723,17 @@ async function runTurnWithFallback(
     debug: (state.debugEnabled || onDebugEvent)
       ? { includeTrace: state.debugEnabled, onEvent: onDebugEvent }
       : undefined,
-    stream: onNarrationDelta ? { onNarrationDelta } : undefined,
+    stream: onNarrationStart || onNarrationDelta ? { onNarrationStart, onNarrationDelta } : undefined,
   };
 
-  if (!state.apiKey) {
+  if (state.apiMode === 'fallback' || !state.apiKey) {
     return { result: await engine.runTurn(payload), usedFallback: false };
   }
 
   try {
     return { result: await engine.runTurn({ ...payload, apiKey: state.apiKey }), usedFallback: false };
   } catch (error) {
-    if (!isRecoverableLLMError(error)) throw error;
+    if (state.apiMode !== 'auto' || !isRecoverableLLMError(error)) throw error;
     return { result: await engine.runTurn(payload), usedFallback: true };
   }
 }

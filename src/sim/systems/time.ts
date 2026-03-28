@@ -10,8 +10,10 @@ export interface TimeSnapshot {
 
 export function deriveTime(state: WorldState): TimeSnapshot {
   const elapsed = state.systems.time.elapsedMinutes;
-  const startHour = state.systems.timeConfig.startHour ?? 0;
-  const totalMinutes = startHour * 60 + elapsed;
+  const anchor = new Date(state.systems.timeConfig.anchorIso);
+  const startHour = state.systems.timeConfig.startHour ?? anchor.getUTCHours();
+  const startMinute = anchor.getUTCMinutes();
+  const totalMinutes = startHour * 60 + startMinute + elapsed;
   const currentHour = Math.floor(totalMinutes / 60) % 24;
   const currentDay = Math.floor(totalMinutes / (24 * 60)) + 1;
 
@@ -24,7 +26,6 @@ export function deriveTime(state: WorldState): TimeSnapshot {
           ? 'evening'
           : 'night';
 
-  const anchor = new Date(state.systems.timeConfig.anchorIso);
   const absoluteIso = new Date(anchor.getTime() + elapsed * 60 * 1000).toISOString();
 
   return { elapsedMinutes: elapsed, currentHour, currentDay, timeOfDay, absoluteIso };

@@ -1,5 +1,9 @@
 import type { WorldState, LocationPOI, Actor, Item, KnowledgeState } from '../sim/state';
 
+export interface CreateWorldOptions {
+  anchorIso?: string;
+}
+
 const locations: Record<string, LocationPOI> = {
   'the-landing': {
     id: 'the-landing',
@@ -155,8 +159,9 @@ const items: Record<string, Item> = {
   },
 };
 
-export function createIsleOfMarrowWorldVNext(): WorldState {
-  const startedAt = '1825-05-14T14:00:00Z';
+export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): WorldState {
+  const startedAt = options.anchorIso ?? new Date().toISOString();
+  const startedDate = new Date(startedAt);
   const knowledge: Record<string, KnowledgeState> = {
     'player-1': {
       seenLocations: { 'the-landing': true },
@@ -185,7 +190,7 @@ export function createIsleOfMarrowWorldVNext(): WorldState {
     locations,
     systems: {
       time: { elapsedMinutes: 0 },
-      timeConfig: { anchorIso: startedAt, startHour: 14 },
+      timeConfig: { anchorIso: startedAt, startHour: startedDate.getUTCHours() },
       tideConfig: { cycleMinutes: 720 },
       weatherConfig: { climate: 'temperate', seed: 'isle-of-marrow', cadenceMinutes: 60 },
       economyConfig: {

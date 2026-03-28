@@ -42,6 +42,9 @@ export type WorldEvent =
     }
   | {
       meta?: EventMeta;
+      // Use explicit time advancement for "wait" style actions only.
+      // MoveActor, TravelToLocation, Explore, and Inspect already add their
+      // own elapsed minutes in the reducer.
       type: 'AdvanceTime';
       minutes: number;
       note?: string;

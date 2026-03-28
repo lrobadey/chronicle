@@ -346,4 +346,53 @@ describe('TurnEngine', () => {
       await removeDir(rootDir);
     }
   });
+
+  it('seeds new sessions from the injected clock', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const fixedNow = new Date('2030-06-01T08:37:00.000Z');
+      const engine = new TurnEngine({
+        store,
+        llm: new QueueLLM([]),
+        clock: () => fixedNow,
+      });
+
+      const init = await engine.initSession({});
+      const state = await store.loadSession(init.sessionId);
+
+      assert.equal(state?.systems.timeConfig.anchorIso, fixedNow.toISOString());
+      assert.equal(init.telemetry.time.absoluteIso, fixedNow.toISOString());
+      assert.equal(init.telemetry.time.currentHour, 8);
+      assert.equal(init.telemetry.time.currentDay, 1);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('keeps the stored world anchor when resuming an existing session', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const firstNow = new Date('2030-06-01T08:37:00.000Z');
+      const laterNow = new Date('2031-07-02T19:12:00.000Z');
+      const firstEngine = new TurnEngine({
+        store,
+        llm: new QueueLLM([]),
+        clock: () => firstNow,
+      });
+
+      const init = await firstEngine.initSession({});
+      const resumed = await new TurnEngine({
+        store,
+        llm: new QueueLLM([]),
+        clock: () => laterNow,
+      }).initSession({ sessionId: init.sessionId });
+      const state = await store.loadSession(init.sessionId);
+
+      assert.equal(resumed.created, false);
+      assert.equal(state?.systems.timeConfig.anchorIso, firstNow.toISOString());
+      assert.equal(resumed.telemetry.time.absoluteIso, firstNow.toISOString());
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
 });

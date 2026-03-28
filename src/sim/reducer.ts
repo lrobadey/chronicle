@@ -56,6 +56,9 @@ function applyMoveActor(state: WorldState, event: Extract<WorldEvent, { type: 'M
   const minutes = estimate.minutes;
   const distMeters = estimate.distanceMeters;
 
+  // Spatial movement is the unit that owns its time cost here. If the GM wants
+  // to move and also "wait", that should be modeled as a second event so time
+  // is not accidentally counted twice.
   next.systems.time.elapsedMinutes += minutes;
   addLedgerInPlace(next, event.note || `Traveled ${Math.round(distMeters)}m in ${minutes} min`);
 
@@ -88,6 +91,8 @@ function applyTravelToLocation(state: WorldState, event: Extract<WorldEvent, { t
     note = note || `Traveled to ${location.name}`;
   }
 
+  // Tide access is checked against the projected full arrival time, then time
+  // is charged only for the route actually taken (full trip or edge stop).
   const estimate = estimateTravel(next, actor.pos, destination, pace);
   next.actors[event.actorId] = { ...actor, pos: destination };
   next.systems.time.elapsedMinutes += estimate.minutes;
@@ -116,6 +121,8 @@ function applyExplore(state: WorldState, event: Extract<WorldEvent, { type: 'Exp
   const destination = clampToBounds(next, candidate);
 
   next.actors[event.actorId] = { ...actor, pos: destination };
+  // Explore carries a fixed search cost so the agent does not need to pair it
+  // with an additional AdvanceTime event for the same action beat.
   next.systems.time.elapsedMinutes += 5;
   addLedgerInPlace(next, event.note || `Explored ${event.area.replace('_', ' ')}`);
   if (actor.kind === 'player') {
@@ -128,6 +135,8 @@ function applyInspect(state: WorldState, event: Extract<WorldEvent, { type: 'Ins
   const actor = state.actors[event.actorId];
   if (!actor) return state;
   const next = cloneState(state);
+  // Inspect is also time-bearing; use AdvanceTime only for extra delay beyond
+  // the inspection itself.
   next.systems.time.elapsedMinutes += 2;
   addLedgerInPlace(next, event.note || `Inspected ${event.subject}`);
   if (actor.kind === 'player') {
