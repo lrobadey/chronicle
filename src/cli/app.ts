@@ -7,6 +7,7 @@ import type { DebugEvent, DebugSink } from '../engine/debug';
 import { isChronicleError } from '../engine/errors';
 import type { NarratorStyle } from '../agents/narrator/narratorAgent';
 import type { WorldEvent } from '../sim/events';
+import { ThinkingAnimation, type ThinkingPhase } from './thinkingAnimation';
 
 export type DebugDetail = 'summary' | 'raw';
 export type CliApiMode = 'auto' | 'fallback' | 'live';
@@ -50,6 +51,9 @@ export interface CliTerminal {
   isTTY(): boolean;
   write(text: string): void;
   readLine(prompt: string): Promise<string | null>;
+  supportsTransientStatus(): boolean;
+  renderTransientStatus(text: string): void;
+  clearTransientStatus(): void;
   close(): void;
 }
 
@@ -107,10 +111,16 @@ export async function runCli(options: CliOptions): Promise<CliRunResult> {
   } = options;
   let finalState: CliState | undefined;
   let shouldPrintGoodbye = false;
+  const thinkingAnimation = new ThinkingAnimation({
+    terminal,
+    ansi: shouldUseAnsi(env),
+  });
 
   const write = (text: string) => {
+    thinkingAnimation.beforeWrite();
     transcript?.({ type: 'output', text });
     terminal.write(text);
+    thinkingAnimation.afterWrite();
   };
 
   const readLine = async (prompt: string) => {
@@ -141,6 +151,7 @@ export async function runCli(options: CliOptions): Promise<CliRunResult> {
       debugDetail,
       apiMode,
       write,
+      thinkingAnimation,
     });
 
     write('Type /help for commands, or enter your action.\n\n');
@@ -155,6 +166,7 @@ export async function runCli(options: CliOptions): Promise<CliRunResult> {
         line: line.trim(),
         engine,
         write,
+        thinkingAnimation,
       });
       finalState = step.state;
       if (step.exit) {
@@ -162,9 +174,11 @@ export async function runCli(options: CliOptions): Promise<CliRunResult> {
       }
     }
   } catch (error) {
+    thinkingAnimation.stop();
     write(`${formatError(error)}\n`);
     return { exitCode: 1, finalState };
   } finally {
+    thinkingAnimation.stop();
     if (shouldPrintGoodbye) {
       write('Goodbye!\n');
     }
@@ -189,12 +203,16 @@ export async function initCliSession(params: {
   debugDetail: DebugDetail;
   apiMode: CliApiMode;
   write: (text: string) => void;
+  thinkingAnimation: ThinkingAnimation;
 }): Promise<CliState> {
-  const { engine, sessionId, apiKey, narratorStyle, debugEnabled, debugDetail, apiMode, write } = params;
-  const debugSink = debugEnabled ? createDebugWriter(write, debugDetail) : undefined;
+  const { engine, sessionId, apiKey, narratorStyle, debugEnabled, debugDetail, apiMode, write, thinkingAnimation } = params;
+  const debugSink = debugEnabled ? createDebugWriter(write, debugDetail, thinkingAnimation) : undefined;
   const openingChunks: string[] = [];
   let openingStreamed = false;
   let openingPrefixWritten = false;
+  let streamedNarrationStarted = false;
+
+  thinkingAnimation.start('opening');
 
   const { result, usedFallback } = await initWithFallback(
     engine,
@@ -202,6 +220,7 @@ export async function initCliSession(params: {
     apiKey,
     apiMode,
     telemetry => {
+      thinkingAnimation.setPhase('narrating');
       if (debugEnabled || openingPrefixWritten) return;
       write(`${formatNarrationTimestamp(telemetry)} `);
       openingPrefixWritten = true;
@@ -211,11 +230,17 @@ export async function initCliSession(params: {
         openingChunks.push(delta);
         return;
       }
+      if (!streamedNarrationStarted) {
+        streamedNarrationStarted = true;
+        thinkingAnimation.stop();
+      }
       openingStreamed = true;
       write(delta);
     },
     debugSink,
   );
+
+  thinkingAnimation.stop();
 
   if (apiMode === 'fallback') {
     write('(Fallback mode - deterministic runtime)\n\n');
@@ -250,8 +275,9 @@ export async function handleCliLine(params: {
   line: string;
   engine: CliEngine;
   write: (text: string) => void;
+  thinkingAnimation: ThinkingAnimation;
 }): Promise<CliStepResult> {
-  const { line, engine, write } = params;
+  const { line, engine, write, thinkingAnimation } = params;
   let { state } = params;
   if (!line) return { state, exit: false };
 
@@ -317,6 +343,7 @@ export async function handleCliLine(params: {
           debugEnabled: state.debugEnabled,
           debugDetail: state.debugDetail,
           apiMode: state.apiMode,
+          thinkingAnimation,
         });
         return { state, exit: false };
       }
@@ -327,14 +354,17 @@ export async function handleCliLine(params: {
   }
 
   const narrationChunks: string[] = [];
-  const debugSink = state.debugEnabled ? createDebugWriter(write, state.debugDetail) : undefined;
+  const debugSink = state.debugEnabled ? createDebugWriter(write, state.debugDetail, thinkingAnimation) : undefined;
   let narrationStreamed = false;
   let narrationPrefixWritten = false;
+  let streamedNarrationStarted = false;
+  thinkingAnimation.start('thinking');
   const turn = await runTurnWithFallback(
     engine,
     state,
     line,
     telemetry => {
+      thinkingAnimation.setPhase('narrating');
       if (state.debugEnabled || narrationPrefixWritten) return;
       write(`\n${formatNarrationTimestamp(telemetry)} `);
       narrationPrefixWritten = true;
@@ -344,11 +374,16 @@ export async function handleCliLine(params: {
         narrationChunks.push(delta);
         return;
       }
+      if (!streamedNarrationStarted) {
+        streamedNarrationStarted = true;
+        thinkingAnimation.stop();
+      }
       narrationStreamed = true;
       write(delta);
     },
     debugSink,
   );
+  thinkingAnimation.stop();
   if (turn.usedFallback) {
     state = { ...state, apiKey: undefined, apiMode: 'fallback' };
     write('\n(API request failed - switched to deterministic fallback mode)\n');
@@ -409,10 +444,23 @@ function createReadlineTerminal(): CliTerminal {
         pendingResolve = resolve;
       });
     },
+    supportsTransientStatus: () => Boolean(input.isTTY && output.isTTY),
+    renderTransientStatus: text => {
+      output.write(`\x1b[2K\r${text}`);
+    },
+    clearTransientStatus: () => {
+      output.write('\x1b[2K\r');
+    },
     close: () => {
       rl.close();
     },
   };
+}
+
+function shouldUseAnsi(env: NodeJS.ProcessEnv): boolean {
+  if (env.NO_COLOR) return false;
+  if (env.TERM === 'dumb') return false;
+  return true;
 }
 
 function resolveStartupApiKey(apiMode: CliApiMode, env: NodeJS.ProcessEnv): string | undefined {
@@ -483,10 +531,42 @@ function prefixNarration(text: string, telemetry: InitResult['telemetry'] | RunT
   return body ? `${formatNarrationTimestamp(telemetry)} ${body}` : formatNarrationTimestamp(telemetry);
 }
 
-function createDebugWriter(write: (text: string) => void, detail: DebugDetail): DebugSink {
+function createDebugWriter(
+  write: (text: string) => void,
+  detail: DebugDetail,
+  thinkingAnimation: ThinkingAnimation,
+): DebugSink {
   return event => {
+    const phase = thinkingPhaseForDebugEvent(event);
+    if (phase) {
+      thinkingAnimation.setPhase(phase);
+    }
     write(renderDebugEvent(event, detail));
   };
+}
+
+function thinkingPhaseForDebugEvent(event: DebugEvent): ThinkingPhase | null {
+  switch (event.type) {
+    case 'init.started':
+      return 'opening';
+    case 'turn.started':
+    case 'gm.iteration.started':
+    case 'gm.response.received':
+    case 'tool.called':
+    case 'tool.result':
+    case 'npc.started':
+    case 'npc.completed':
+    case 'specialist.started':
+    case 'specialist.completed':
+    case 'event.accepted':
+    case 'event.rejected':
+    case 'event.rollback':
+      return 'thinking';
+    case 'narrator.started':
+      return 'narrating';
+    default:
+      return null;
+  }
 }
 
 export function renderDebugEvent(event: DebugEvent, detail: DebugDetail): string {

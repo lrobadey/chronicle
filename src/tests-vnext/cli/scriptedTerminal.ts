@@ -23,6 +23,14 @@ export class ScriptedTerminal implements CliTerminal {
     return this.inputs.length ? this.inputs.shift() ?? null : null;
   }
 
+  supportsTransientStatus(): boolean {
+    return false;
+  }
+
+  renderTransientStatus(_text: string): void {}
+
+  clearTransientStatus(): void {}
+
   close(): void {
     this.closed = true;
   }

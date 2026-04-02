@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { CliEngine, CliState, CliTranscriptEvent } from '../../cli/app';
+import type { CliEngine, CliState, CliTerminal, CliTranscriptEvent } from '../../cli/app';
 import { handleCliLine, initCliSession, renderDebugEvent, resolveApiKey, resolveCliApiMode, runCli } from '../../cli/app';
 import type { DebugSink } from '../../engine/debug';
+import { ThinkingAnimation } from '../../cli/thinkingAnimation';
 import { ScriptedTerminal } from './scriptedTerminal';
 
 class StubCliEngine implements CliEngine {
@@ -164,6 +165,26 @@ function baseState(overrides: Partial<CliState> = {}): CliState {
   };
 }
 
+function createThinkingAnimation(terminal: CliTerminal) {
+  return new ThinkingAnimation({ terminal, intervalMs: 1000 });
+}
+
+class AnimatedTerminal extends ScriptedTerminal {
+  readonly transientEvents: string[] = [];
+
+  override supportsTransientStatus(): boolean {
+    return true;
+  }
+
+  override renderTransientStatus(text: string): void {
+    this.transientEvents.push(`render:${text}`);
+  }
+
+  override clearTransientStatus(): void {
+    this.transientEvents.push('clear');
+  }
+}
+
 describe('CLI app', () => {
   it('resolves API key with OPENAI_API_KEY precedence', () => {
     const key = resolveApiKey({ OPENAI_API_KEY: 'primary', VITE_OPENAI_API_KEY: 'secondary' });
@@ -189,6 +210,7 @@ describe('CLI app', () => {
       debugDetail: 'summary',
       apiMode: 'auto',
       write: text => writes.push(text),
+      thinkingAnimation: createThinkingAnimation(new ScriptedTerminal([])),
     });
 
     assert.equal(state.apiKey, undefined);
@@ -206,10 +228,12 @@ describe('CLI app', () => {
     const writes: string[] = [];
     let state = baseState({ apiKey: 'bad-key' });
 
-    ({ state } = await handleCliLine({ state, line: '/style lyric', engine, write: text => writes.push(text) }));
+    const thinkingAnimation = createThinkingAnimation(new ScriptedTerminal([]));
+
+    ({ state } = await handleCliLine({ state, line: '/style lyric', engine, write: text => writes.push(text), thinkingAnimation }));
     assert.equal(state.narratorStyle, 'lyric');
 
-    ({ state } = await handleCliLine({ state, line: 'look around', engine, write: text => writes.push(text) }));
+    ({ state } = await handleCliLine({ state, line: 'look around', engine, write: text => writes.push(text), thinkingAnimation }));
     assert.equal(state.apiKey, undefined);
     assert.equal(state.apiMode, 'fallback');
     assert.equal(engine.turnCalls.length, 2);
@@ -233,11 +257,58 @@ describe('CLI app', () => {
     const writes: string[] = [];
     const state = baseState({ debugEnabled: false });
 
-    await handleCliLine({ state, line: 'look around', engine, write: text => writes.push(text) });
+    await handleCliLine({
+      state,
+      line: 'look around',
+      engine,
+      write: text => writes.push(text),
+      thinkingAnimation: createThinkingAnimation(new ScriptedTerminal([])),
+    });
 
     const output = writes.join('');
     assert.ok(output.includes('\n[Day 1, 14:00] narration-look around\n\n'));
     assert.equal(output.match(/\[Day 1, 14:00\]/g)?.length, 1);
+  });
+
+  it('animates startup on tty terminals and clears before durable opening output', async () => {
+    const engine = new StubCliEngine();
+    const terminal = new AnimatedTerminal(['/exit']);
+
+    const result = await runCli({
+      engine,
+      terminal,
+      apiMode: 'fallback',
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.ok(terminal.transientEvents.some(event => event.includes('sounding the tide')));
+    assert.ok(terminal.transientEvents.some(event => event.includes('a voice gathers')));
+    assert.equal(terminal.transientEvents.at(-1), 'clear');
+    assert.ok(terminal.output().includes('Opening:\n[Day 1, 14:00] opening-session-1'));
+  });
+
+  it('clears transient status around durable writes and switches from thinking to narrator phases', async () => {
+    const engine = new StubCliEngine();
+    const terminal = new AnimatedTerminal(['look around', '/exit']);
+
+    const result = await runCli({
+      engine,
+      terminal,
+      apiMode: 'fallback',
+    });
+
+    assert.equal(result.exitCode, 0);
+    const marrowIndex = terminal.transientEvents.findIndex(event => event.includes('the marrow listens'));
+    const voiceIndex = terminal.transientEvents.findIndex((event, index) => index > marrowIndex && event.includes('a voice gathers'));
+    assert.ok(marrowIndex >= 0);
+    assert.ok(voiceIndex > marrowIndex);
+
+    const clearAfterMarrow = terminal.transientEvents.findIndex((event, index) => index > marrowIndex && event === 'clear');
+    const renderAfterClear = terminal.transientEvents.findIndex((event, index) => index > clearAfterMarrow && event.startsWith('render:'));
+    assert.ok(clearAfterMarrow > marrowIndex);
+    assert.ok(renderAfterClear > clearAfterMarrow);
+    assert.ok(terminal.output().includes('[turn] #1 "look around"'));
+    assert.ok(terminal.output().includes('Narration:\n[Day 1, 14:00] narration-look around'));
   });
 
   it('supports debug toggles, raw detail, and /trace alias', async () => {
@@ -245,16 +316,18 @@ describe('CLI app', () => {
     const writes: string[] = [];
     let state = baseState();
 
-    ({ state } = await handleCliLine({ state, line: '/trace off', engine, write: text => writes.push(text) }));
+    const thinkingAnimation = createThinkingAnimation(new ScriptedTerminal([]));
+
+    ({ state } = await handleCliLine({ state, line: '/trace off', engine, write: text => writes.push(text), thinkingAnimation }));
     assert.equal(state.debugEnabled, false);
 
-    ({ state } = await handleCliLine({ state, line: '/debug on', engine, write: text => writes.push(text) }));
+    ({ state } = await handleCliLine({ state, line: '/debug on', engine, write: text => writes.push(text), thinkingAnimation }));
     assert.equal(state.debugEnabled, true);
 
-    ({ state } = await handleCliLine({ state, line: '/detail raw', engine, write: text => writes.push(text) }));
+    ({ state } = await handleCliLine({ state, line: '/detail raw', engine, write: text => writes.push(text), thinkingAnimation }));
     assert.equal(state.debugDetail, 'raw');
 
-    ({ state } = await handleCliLine({ state, line: '/session', engine, write: text => writes.push(text) }));
+    ({ state } = await handleCliLine({ state, line: '/session', engine, write: text => writes.push(text), thinkingAnimation }));
     const output = writes.join('');
     assert.ok(output.includes('Debug mode: on'));
     assert.ok(output.includes('Debug detail: raw'));
@@ -437,7 +510,13 @@ describe('CLI app', () => {
     const writes: string[] = [];
     const state = baseState({ apiKey: undefined, apiMode: 'fallback' });
 
-    await handleCliLine({ state, line: 'where can i go', engine, write: text => writes.push(text) });
+    await handleCliLine({
+      state,
+      line: 'where can i go',
+      engine,
+      write: text => writes.push(text),
+      thinkingAnimation: createThinkingAnimation(new ScriptedTerminal([])),
+    });
 
     const output = writes.join('');
     assert.ok(output.includes('[gm] iteration 1 chose 1 next step: finalizing reply'));
