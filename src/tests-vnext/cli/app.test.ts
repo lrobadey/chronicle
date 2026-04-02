@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { CliEngine, CliState, CliTranscriptEvent } from '../../cli/app';
-import { handleCliLine, initCliSession, resolveApiKey, resolveCliApiMode, runCli } from '../../cli/app';
+import { handleCliLine, initCliSession, renderDebugEvent, resolveApiKey, resolveCliApiMode, runCli } from '../../cli/app';
 import type { DebugSink } from '../../engine/debug';
 import { ScriptedTerminal } from './scriptedTerminal';
 
@@ -103,8 +103,34 @@ class StubCliEngine implements CliEngine {
     const narration = `narration-${input.playerText}`;
     input.debug?.onEvent?.({ type: 'turn.started', sessionId: input.sessionId, turn: 1, playerText: input.playerText });
     input.debug?.onEvent?.({ type: 'gm.iteration.started', iteration: 1 });
-    input.debug?.onEvent?.({ type: 'tool.called', tool: 'observe_world', input: { perspective: 'player' } });
-    input.debug?.onEvent?.({ type: 'tool.result', tool: 'observe_world', output: { ok: true } });
+    input.debug?.onEvent?.({
+      type: 'gm.response.received',
+      iteration: 1,
+      toolCalls: 1,
+      toolCallCount: 1,
+      toolCallNames: ['observe_world'],
+      responseId: 'resp-stub-1',
+      status: 'completed',
+    });
+    input.debug?.onEvent?.({
+      type: 'tool.called',
+      iteration: 1,
+      tool: 'observe_world',
+      callId: 'stub-call-1',
+      callIndex: 1,
+      callCount: 1,
+      input: { perspective: 'player' },
+    });
+    input.debug?.onEvent?.({
+      type: 'tool.result',
+      iteration: 1,
+      tool: 'observe_world',
+      callId: 'stub-call-1',
+      callIndex: 1,
+      callCount: 1,
+      output: { ok: true },
+      ok: true,
+    });
     input.debug?.onEvent?.({ type: 'narrator.started', phase: 'turn', style: input.narratorStyle });
     const telemetry = await this.getTelemetry(input.sessionId, input.playerId);
     input.stream?.onNarrationStart?.(telemetry);
@@ -193,9 +219,11 @@ describe('CLI app', () => {
     assert.equal(engine.turnCalls[1]?.debugEnabled, true);
     const output = writes.join('');
     assert.ok(output.includes('[turn] #1 "look around"'));
-    assert.ok(output.includes('[tool] observe_world perspective=player'));
+    assert.ok(output.includes('[gm] iteration 1 planned 1 tool call: observe_world'));
+    assert.ok(output.includes('[tool] 1/1 observe_world call=stub-call-1 perspective=player'));
+    assert.ok(output.includes('[tool] 1/1 result observe_world call=stub-call-1 ok'));
     assert.ok(output.includes('Narration:\n[Day 1, 14:00] narration-look around'));
-    assert.ok(output.indexOf('[tool] observe_world perspective=player') < output.indexOf('Narration:\n[Day 1, 14:00] narration-look around'));
+    assert.ok(output.indexOf('[tool] 1/1 observe_world call=stub-call-1 perspective=player') < output.indexOf('Narration:\n[Day 1, 14:00] narration-look around'));
   });
 
   it('streams timestamped narration once when debug is off', async () => {
@@ -228,6 +256,65 @@ describe('CLI app', () => {
     const output = writes.join('');
     assert.ok(output.includes('Debug mode: on'));
     assert.ok(output.includes('Debug detail: raw'));
+  });
+
+  it('renders planned tool names and raw payloads for tool timeline events', () => {
+    const planned = renderDebugEvent({
+      type: 'gm.response.received',
+      iteration: 2,
+      toolCalls: 2,
+      toolCallCount: 2,
+      toolCallNames: ['observe_world', 'propose_events'],
+      responseId: 'resp-2',
+      status: 'completed',
+    }, 'summary');
+    assert.equal(planned, '[gm] iteration 2 planned 2 tool calls: observe_world, propose_events\n');
+
+    const raw = renderDebugEvent({
+      type: 'tool.called',
+      iteration: 2,
+      tool: 'propose_events',
+      callId: 'call-2',
+      callIndex: 2,
+      callCount: 2,
+      input: { events: [{ type: 'Explore', actorId: 'player-1', area: 'around_here' }] },
+    }, 'raw');
+    assert.ok(raw.includes('[tool] 2/2 propose_events call=call-2 events=1'));
+    assert.ok(raw.includes('"callId": "call-2"'));
+    assert.ok(raw.includes('"input"'));
+  });
+
+  it('renders finish_turn summary details inline', () => {
+    const clearPrompt = renderDebugEvent({
+      type: 'tool.called',
+      iteration: 3,
+      tool: 'finish_turn',
+      callId: 'finish-1',
+      callIndex: 1,
+      callCount: 1,
+      input: {
+        summary: 'done',
+        playerPrompt: { clear: true },
+        agendaUpdates: { scene: { currentFocus: 'Arrival', pressures: [], unresolvedBeats: [], immediateTensions: [] } },
+      },
+    }, 'summary');
+    assert.equal(clearPrompt, '[tool] 1/1 finish_turn call=finish-1 clear_prompt=true agenda_updates=true\n');
+
+    const pendingPrompt = renderDebugEvent({
+      type: 'tool.called',
+      iteration: 4,
+      tool: 'finish_turn',
+      callId: 'finish-2',
+      callIndex: 1,
+      callCount: 1,
+      input: {
+        summary: 'need confirmation',
+        playerPrompt: {
+          pending: { kind: 'confirm_travel' },
+        },
+      },
+    }, 'summary');
+    assert.equal(pendingPrompt, '[tool] 1/1 finish_turn call=finish-2 pending=confirm_travel\n');
   });
 
   it('runs a scripted session through startup, commands, and clean exit', async () => {

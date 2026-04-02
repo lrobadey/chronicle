@@ -11,12 +11,31 @@ export type DebugEvent =
       type: 'gm.response.received';
       iteration: number;
       toolCalls: number;
+      toolCallCount: number;
+      toolCallNames: string[];
       status?: string;
       responseId?: string;
       error?: unknown;
     }
-  | { type: 'tool.called'; tool: string; input: unknown }
-  | { type: 'tool.result'; tool: string; output: unknown }
+  | {
+      type: 'tool.called';
+      iteration: number;
+      tool: string;
+      callId: string;
+      callIndex: number;
+      callCount: number;
+      input: unknown;
+    }
+  | {
+      type: 'tool.result';
+      iteration: number;
+      tool: string;
+      callId: string;
+      callIndex: number;
+      callCount: number;
+      output: unknown;
+      ok?: boolean;
+    }
   | { type: 'event.accepted'; event: WorldEvent }
   | { type: 'event.rejected'; event: WorldEvent; reason: string }
   | { type: 'event.rollback'; events: WorldEvent[]; reason: string }

@@ -82,6 +82,22 @@ describe('GM agent loop', () => {
     assert.equal(debugEvents[1]?.type, 'gm.response.received');
     assert.equal(debugEvents[2]?.type, 'tool.called');
     assert.equal(debugEvents[3]?.type, 'tool.result');
+    if (debugEvents[1]?.type === 'gm.response.received') {
+      assert.equal(debugEvents[1].responseId, 'resp-first');
+      assert.equal(debugEvents[1].toolCallCount, 2);
+      assert.deepEqual(debugEvents[1].toolCallNames, ['observe_world', 'propose_events']);
+    }
+    if (debugEvents[2]?.type === 'tool.called') {
+      assert.equal(debugEvents[2].iteration, 1);
+      assert.equal(debugEvents[2].callId, 'c1');
+      assert.equal(debugEvents[2].callIndex, 1);
+      assert.equal(debugEvents[2].callCount, 2);
+    }
+    if (debugEvents[4]?.type === 'tool.called') {
+      assert.equal(debugEvents[4].callId, 'c2');
+      assert.equal(debugEvents[4].callIndex, 2);
+      assert.equal(debugEvents[4].callCount, 2);
+    }
   });
 
   it('allows propose_events without requiring observe_world first', async () => {

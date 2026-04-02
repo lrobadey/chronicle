@@ -490,7 +490,7 @@ function createDebugWriter(write: (text: string) => void, detail: DebugDetail): 
 }
 
 export function renderDebugEvent(event: DebugEvent, detail: DebugDetail): string {
-  const summary = renderDebugSummary(event);
+  const summary = detail === 'raw' ? renderRawDebugSummary(event) : renderDebugSummary(event);
   if (!summary) return '';
   if (detail === 'summary') return `${summary}\n`;
 
@@ -510,11 +510,11 @@ function renderDebugSummary(event: DebugEvent): string {
     case 'gm.iteration.started':
       return `[gm] iteration ${event.iteration}`;
     case 'gm.response.received':
-      return `[gm] iteration ${event.iteration} received ${event.toolCalls} tool call(s)`;
+      return `[gm] iteration ${event.iteration} planned ${event.toolCallCount} tool call${event.toolCallCount === 1 ? '' : 's'}: ${formatToolCallNames(event.toolCallNames)}`;
     case 'tool.called':
-      return `[tool] ${event.tool} ${summarizeToolInput(event.tool, event.input)}`.trimEnd();
+      return `[tool] ${event.callIndex}/${event.callCount} ${event.tool} call=${event.callId} ${summarizeToolInput(event.tool, event.input)}`.trimEnd();
     case 'tool.result':
-      return `[tool] result ${event.tool} ${summarizeToolOutput(event.tool, event.output)}`.trimEnd();
+      return `[tool] ${event.callIndex}/${event.callCount} result ${event.tool} call=${event.callId} ${summarizeToolOutput(event.tool, event.output)}`.trimEnd();
     case 'event.accepted':
       return `[event] accepted ${summarizeWorldEvent(event.event)}`;
     case 'event.rejected':
@@ -538,6 +538,13 @@ function renderDebugSummary(event: DebugEvent): string {
   }
 }
 
+function renderRawDebugSummary(event: DebugEvent): string {
+  if (event.type === 'narrator.completed') {
+    return `[narrator] ${event.phase === 'opening' ? 'opening complete' : 'rendering complete'}`;
+  }
+  return renderDebugSummary(event);
+}
+
 function extractDebugPayload(event: DebugEvent): unknown {
   switch (event.type) {
     case 'gm.response.received':
@@ -545,12 +552,29 @@ function extractDebugPayload(event: DebugEvent): unknown {
         responseId: event.responseId,
         status: event.status,
         toolCalls: event.toolCalls,
+        toolCallCount: event.toolCallCount,
+        toolCallNames: event.toolCallNames,
         error: event.error,
       };
     case 'tool.called':
-      return event.input;
+      return {
+        iteration: event.iteration,
+        tool: event.tool,
+        callId: event.callId,
+        callIndex: event.callIndex,
+        callCount: event.callCount,
+        input: event.input,
+      };
     case 'tool.result':
-      return event.output;
+      return {
+        iteration: event.iteration,
+        tool: event.tool,
+        callId: event.callId,
+        callIndex: event.callIndex,
+        callCount: event.callCount,
+        ok: event.ok,
+        output: event.output,
+      };
     case 'event.accepted':
       return event.event;
     case 'event.rejected':
@@ -577,10 +601,17 @@ function summarizeToolInput(tool: string, input: unknown): string {
   if (tool === 'consult_npc' && typeof record.npcId === 'string') {
     return `npc=${record.npcId}`;
   }
+  if (tool === 'consult_specialist' && typeof record.specialistType === 'string') {
+    const focus = typeof record.focus === 'string' && record.focus.trim()
+      ? ` focus=${JSON.stringify(record.focus)}`
+      : '';
+    return `specialist=${record.specialistType}${focus}`;
+  }
   if (tool === 'propose_events' && Array.isArray(record.events)) {
-    return `${record.events.length} event(s)`;
+    return `events=${record.events.length}`;
   }
   if (tool === 'finish_turn') {
+    const parts: string[] = [];
     const pending = record.playerPrompt && typeof record.playerPrompt === 'object'
       ? (record.playerPrompt as Record<string, unknown>).pending
       : undefined;
@@ -588,11 +619,15 @@ function summarizeToolInput(tool: string, input: unknown): string {
       const kind = typeof (pending as Record<string, unknown>).kind === 'string'
         ? String((pending as Record<string, unknown>).kind)
         : 'pending';
-      return `pending=${kind}`;
+      parts.push(`pending=${kind}`);
     }
     if (record.playerPrompt && typeof record.playerPrompt === 'object' && (record.playerPrompt as Record<string, unknown>).clear === true) {
-      return 'clear_prompt=true';
+      parts.push('clear_prompt=true');
     }
+    if (record.agendaUpdates && typeof record.agendaUpdates === 'object') {
+      parts.push('agenda_updates=true');
+    }
+    return parts.join(' ');
   }
   return '';
 }
@@ -607,6 +642,11 @@ function summarizeToolOutput(tool: string, output: unknown): string {
     const accepted = typeof record.accepted === 'number' ? record.accepted : 0;
     const rejected = typeof record.rejected === 'number' ? record.rejected : 0;
     return `accepted=${accepted} rejected=${rejected}`;
+  }
+  if (tool === 'finish_turn') {
+    if (typeof record.ok === 'boolean') {
+      return record.ok ? 'ok' : 'failed';
+    }
   }
   if (typeof record.ok === 'boolean') {
     return record.ok ? 'ok' : 'failed';
@@ -641,6 +681,10 @@ function summarizeWorldEvent(event: WorldEvent): string {
 
 function formatGridPos(pos: { x: number; y: number; z?: number }) {
   return `(${pos.x},${pos.y},${pos.z ?? 0})`;
+}
+
+function formatToolCallNames(names: string[]): string {
+  return names.length ? names.join(', ') : 'none';
 }
 
 function formatRawPayload(value: unknown): string {
