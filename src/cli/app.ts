@@ -510,11 +510,11 @@ function renderDebugSummary(event: DebugEvent): string {
     case 'gm.iteration.started':
       return `[gm] iteration ${event.iteration}`;
     case 'gm.response.received':
-      return `[gm] iteration ${event.iteration} planned ${event.toolCallCount} tool call${event.toolCallCount === 1 ? '' : 's'}: ${formatToolCallNames(event.toolCallNames)}`;
+      return `[gm] iteration ${event.iteration} chose ${event.toolCallCount} next step${event.toolCallCount === 1 ? '' : 's'}: ${formatToolCallNames(event.toolCallNames, 'summary')}`;
     case 'tool.called':
-      return `[tool] ${event.callIndex}/${event.callCount} ${event.tool} call=${event.callId} ${summarizeToolInput(event.tool, event.input)}`.trimEnd();
+      return summarizeToolCall(event);
     case 'tool.result':
-      return `[tool] ${event.callIndex}/${event.callCount} result ${event.tool} call=${event.callId} ${summarizeToolOutput(event.tool, event.output)}`.trimEnd();
+      return summarizeToolResult(event);
     case 'event.accepted':
       return `[event] accepted ${summarizeWorldEvent(event.event)}`;
     case 'event.rejected':
@@ -528,7 +528,7 @@ function renderDebugSummary(event: DebugEvent): string {
     case 'narrator.started':
       return `[narrator] ${event.phase === 'opening' ? 'opening' : 'rendering'}`;
     case 'narrator.completed':
-      return '';
+      return renderNarratorPreview(event.text);
     case 'turn.persisted':
       return `[persist] turn ${event.turn} saved`;
     case 'error':
@@ -541,6 +541,15 @@ function renderDebugSummary(event: DebugEvent): string {
 function renderRawDebugSummary(event: DebugEvent): string {
   if (event.type === 'narrator.completed') {
     return `[narrator] ${event.phase === 'opening' ? 'opening complete' : 'rendering complete'}`;
+  }
+  if (event.type === 'gm.response.received') {
+    return `[gm] iteration ${event.iteration} planned ${event.toolCallCount} tool call${event.toolCallCount === 1 ? '' : 's'}: ${formatToolCallNames(event.toolCallNames, 'raw')}`;
+  }
+  if (event.type === 'tool.called') {
+    return `[tool] ${event.callIndex}/${event.callCount} ${event.tool} call=${event.callId} ${summarizeToolInput(event.tool, event.input, 'raw')}`.trimEnd();
+  }
+  if (event.type === 'tool.result') {
+    return `[tool] ${event.callIndex}/${event.callCount} result ${event.tool} call=${event.callId} ${summarizeToolOutput(event.tool, event.output, 'raw')}`.trimEnd();
   }
   return renderDebugSummary(event);
 }
@@ -592,25 +601,52 @@ function extractDebugPayload(event: DebugEvent): unknown {
   }
 }
 
-function summarizeToolInput(tool: string, input: unknown): string {
+function summarizeToolCall(event: Extract<DebugEvent, { type: 'tool.called' }>): string {
+  const detail = summarizeToolInput(event.tool, event.input, 'summary');
+  return detail ? `[tool] ${detail}` : `[tool] ${formatToolName(event.tool, 'summary')}`;
+}
+
+function summarizeToolResult(event: Extract<DebugEvent, { type: 'tool.result' }>): string {
+  const detail = summarizeToolOutput(event.tool, event.output, 'summary');
+  return detail ? `[tool] ${detail}` : `[tool] ${formatToolName(event.tool, 'summary')} complete`;
+}
+
+function summarizeToolInput(tool: string, input: unknown, mode: 'summary' | 'raw'): string {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
   const record = input as Record<string, unknown>;
   if (tool === 'observe_world' && typeof record.perspective === 'string') {
+    if (mode === 'summary') {
+      return 'checking the world';
+    }
     return `perspective=${record.perspective}`;
   }
   if (tool === 'consult_npc' && typeof record.npcId === 'string') {
+    if (mode === 'summary') {
+      return `asking ${record.npcId} for input`;
+    }
     return `npc=${record.npcId}`;
   }
   if (tool === 'consult_specialist' && typeof record.specialistType === 'string') {
+    if (mode === 'summary') {
+      return `consulting the ${record.specialistType} specialist`;
+    }
     const focus = typeof record.focus === 'string' && record.focus.trim()
       ? ` focus=${JSON.stringify(record.focus)}`
       : '';
     return `specialist=${record.specialistType}${focus}`;
   }
   if (tool === 'propose_events' && Array.isArray(record.events)) {
+    if (mode === 'summary') {
+      const count = record.events.length;
+      return `considering world changes${count ? `: ${count} proposed event${count === 1 ? '' : 's'}` : ''}`;
+    }
     return `events=${record.events.length}`;
   }
   if (tool === 'finish_turn') {
+    if (mode === 'summary') {
+      const finishIntent = summarizeFinishTurnIntent(record);
+      return finishIntent;
+    }
     const parts: string[] = [];
     const pending = record.playerPrompt && typeof record.playerPrompt === 'object'
       ? (record.playerPrompt as Record<string, unknown>).pending
@@ -632,23 +668,41 @@ function summarizeToolInput(tool: string, input: unknown): string {
   return '';
 }
 
-function summarizeToolOutput(tool: string, output: unknown): string {
+function summarizeToolOutput(tool: string, output: unknown, mode: 'summary' | 'raw'): string {
   if (!output || typeof output !== 'object' || Array.isArray(output)) return '';
   const record = output as Record<string, unknown>;
   if (typeof record.error === 'string') {
+    if (mode === 'summary') {
+      return `${formatToolName(tool, 'summary')} failed`;
+    }
     return `error=${record.error}`;
   }
   if (tool === 'propose_events') {
     const accepted = typeof record.accepted === 'number' ? record.accepted : 0;
     const rejected = typeof record.rejected === 'number' ? record.rejected : 0;
+    if (mode === 'summary') {
+      if (accepted > 0) {
+        return `world updated: ${accepted} event accepted${accepted === 1 ? '' : 's'}`;
+      }
+      if (rejected > 0) {
+        return `no world changes: ${rejected} event rejected${rejected === 1 ? '' : 's'}`;
+      }
+      return 'no world changes';
+    }
     return `accepted=${accepted} rejected=${rejected}`;
   }
   if (tool === 'finish_turn') {
+    if (mode === 'summary') {
+      return 'reply ready';
+    }
     if (typeof record.ok === 'boolean') {
       return record.ok ? 'ok' : 'failed';
     }
   }
   if (typeof record.ok === 'boolean') {
+    if (mode === 'summary') {
+      return `${formatToolName(tool, 'summary')} complete`;
+    }
     return record.ok ? 'ok' : 'failed';
   }
   return '';
@@ -657,25 +711,25 @@ function summarizeToolOutput(tool: string, output: unknown): string {
 function summarizeWorldEvent(event: WorldEvent): string {
   switch (event.type) {
     case 'MoveActor':
-      return `MoveActor to=${formatGridPos(event.to)}`;
+      return `move to ${formatGridPos(event.to)}`;
     case 'TravelToLocation':
-      return `TravelToLocation location=${event.locationId}`;
+      return `travel to ${formatLocationId(event.locationId)}`;
     case 'PickUpItem':
-      return `PickUpItem item=${event.itemId}`;
+      return `pick up ${event.itemId}`;
     case 'DropItem':
-      return `DropItem item=${event.itemId}`;
+      return `drop ${event.itemId}`;
     case 'Speak':
-      return `Speak actor=${event.actorId}`;
+      return `speak as ${event.actorId}`;
     case 'AdvanceTime':
-      return `AdvanceTime minutes=${event.minutes}`;
+      return `advance time by ${event.minutes} minute${event.minutes === 1 ? '' : 's'}`;
     case 'CreateEntity':
-      return `CreateEntity kind=${event.entity.kind}`;
+      return `create ${event.entity.kind}`;
     case 'SetFlag':
-      return `SetFlag key=${event.key}`;
+      return `set ${event.key}`;
     case 'Explore':
-      return `Explore area=${event.area}`;
+      return event.area === 'around_here' ? 'explore nearby area' : `explore ${event.area.replaceAll('-', ' ').replaceAll('_', ' ')}`;
     case 'Inspect':
-      return `Inspect subject=${event.subject}`;
+      return `inspect ${event.subject}`;
   }
 }
 
@@ -683,8 +737,64 @@ function formatGridPos(pos: { x: number; y: number; z?: number }) {
   return `(${pos.x},${pos.y},${pos.z ?? 0})`;
 }
 
-function formatToolCallNames(names: string[]): string {
-  return names.length ? names.join(', ') : 'none';
+function formatToolCallNames(names: string[], mode: 'summary' | 'raw'): string {
+  if (!names.length) return 'none';
+  if (mode === 'summary') {
+    return names.map(name => formatToolName(name, 'summary')).join(', ');
+  }
+  return names.join(', ');
+}
+
+function formatToolName(tool: string, mode: 'summary' | 'raw'): string {
+  if (mode === 'raw') return tool;
+  switch (tool) {
+    case 'observe_world':
+      return 'checking the world';
+    case 'consult_npc':
+      return 'asking for NPC input';
+    case 'consult_specialist':
+      return 'consulting a specialist';
+    case 'propose_events':
+      return 'considering world changes';
+    case 'finish_turn':
+      return 'finalizing reply';
+    default:
+      return tool.replaceAll('_', ' ');
+  }
+}
+
+function summarizeFinishTurnIntent(record: Record<string, unknown>): string {
+  const pending = record.playerPrompt && typeof record.playerPrompt === 'object'
+    ? (record.playerPrompt as Record<string, unknown>).pending
+    : undefined;
+  if (pending && typeof pending === 'object') {
+    const kind = typeof (pending as Record<string, unknown>).kind === 'string'
+      ? String((pending as Record<string, unknown>).kind)
+      : '';
+    if (kind === 'confirm_travel') return 'asking for confirmation';
+    if (kind === 'clarify_target' || kind === 'clarify_explore') return 'asking for clarification';
+    return 'asking a follow-up question';
+  }
+  const summary = typeof record.summary === 'string' ? record.summary.trim() : '';
+  if (summary) {
+    return `finalizing reply: ${JSON.stringify(summary)}`;
+  }
+  return 'finalizing reply';
+}
+
+function renderNarratorPreview(text: string | undefined): string {
+  const trimmed = text?.trim();
+  if (!trimmed) return '[narrator] reply ready';
+  const maxChars = 72;
+  const preview = trimmed.length > maxChars ? `${trimmed.slice(0, maxChars - 3)}...` : trimmed;
+  return `[narrator] ${JSON.stringify(preview)}`;
+}
+
+function formatLocationId(locationId: string): string {
+  return locationId
+    .split('-')
+    .map(part => part ? part[0]!.toUpperCase() + part.slice(1) : part)
+    .join(' ');
 }
 
 function formatRawPayload(value: unknown): string {

@@ -219,11 +219,13 @@ describe('CLI app', () => {
     assert.equal(engine.turnCalls[1]?.debugEnabled, true);
     const output = writes.join('');
     assert.ok(output.includes('[turn] #1 "look around"'));
-    assert.ok(output.includes('[gm] iteration 1 planned 1 tool call: observe_world'));
-    assert.ok(output.includes('[tool] 1/1 observe_world call=stub-call-1 perspective=player'));
-    assert.ok(output.includes('[tool] 1/1 result observe_world call=stub-call-1 ok'));
+    assert.ok(output.includes('[gm] iteration 1 chose 1 next step: checking the world'));
+    assert.ok(output.includes('[tool] checking the world'));
+    assert.ok(output.includes('[tool] checking the world complete'));
+    assert.ok(output.includes('[narrator] "narration-look around"'));
+    assert.equal(output.includes('call=stub-call-1'), false);
     assert.ok(output.includes('Narration:\n[Day 1, 14:00] narration-look around'));
-    assert.ok(output.indexOf('[tool] 1/1 observe_world call=stub-call-1 perspective=player') < output.indexOf('Narration:\n[Day 1, 14:00] narration-look around'));
+    assert.ok(output.indexOf('[tool] checking the world') < output.indexOf('Narration:\n[Day 1, 14:00] narration-look around'));
   });
 
   it('streams timestamped narration once when debug is off', async () => {
@@ -268,7 +270,7 @@ describe('CLI app', () => {
       responseId: 'resp-2',
       status: 'completed',
     }, 'summary');
-    assert.equal(planned, '[gm] iteration 2 planned 2 tool calls: observe_world, propose_events\n');
+    assert.equal(planned, '[gm] iteration 2 chose 2 next steps: checking the world, considering world changes\n');
 
     const raw = renderDebugEvent({
       type: 'tool.called',
@@ -298,7 +300,7 @@ describe('CLI app', () => {
         agendaUpdates: { scene: { currentFocus: 'Arrival', pressures: [], unresolvedBeats: [], immediateTensions: [] } },
       },
     }, 'summary');
-    assert.equal(clearPrompt, '[tool] 1/1 finish_turn call=finish-1 clear_prompt=true agenda_updates=true\n');
+    assert.equal(clearPrompt, '[tool] finalizing reply: "done"\n');
 
     const pendingPrompt = renderDebugEvent({
       type: 'tool.called',
@@ -314,7 +316,135 @@ describe('CLI app', () => {
         },
       },
     }, 'summary');
-    assert.equal(pendingPrompt, '[tool] 1/1 finish_turn call=finish-2 pending=confirm_travel\n');
+    assert.equal(pendingPrompt, '[tool] asking for confirmation\n');
+  });
+
+  it('renders summary mode outcomes in plain language while keeping raw mode exact', () => {
+    const summaryResult = renderDebugEvent({
+      type: 'tool.result',
+      iteration: 1,
+      tool: 'propose_events',
+      callId: 'call-9',
+      callIndex: 1,
+      callCount: 1,
+      output: { ok: true, accepted: 1, rejected: 0 },
+      ok: true,
+    }, 'summary');
+    assert.equal(summaryResult, '[tool] world updated: 1 event accepted\n');
+
+    const noChanges = renderDebugEvent({
+      type: 'tool.result',
+      iteration: 1,
+      tool: 'propose_events',
+      callId: 'call-10',
+      callIndex: 1,
+      callCount: 1,
+      output: { ok: true, accepted: 0, rejected: 0 },
+      ok: true,
+    }, 'summary');
+    assert.equal(noChanges, '[tool] no world changes\n');
+
+    const rawCalled = renderDebugEvent({
+      type: 'tool.called',
+      iteration: 3,
+      tool: 'finish_turn',
+      callId: 'finish-raw',
+      callIndex: 1,
+      callCount: 1,
+      input: {
+        summary: 'done',
+        playerPrompt: { clear: true },
+      },
+    }, 'raw');
+    assert.ok(rawCalled.includes('call=finish-raw'));
+    assert.ok(rawCalled.includes('clear_prompt=true'));
+  });
+
+  it('renders narrator summary preview with truncation', () => {
+    const preview = renderDebugEvent({
+      type: 'narrator.completed',
+      phase: 'turn',
+      text: 'From the Landing, you can head north beneath the ribs or east along the jawline toward the docks.',
+    }, 'summary');
+    assert.ok(preview.startsWith('[narrator] "From the Landing'));
+    assert.ok(preview.includes('..."'));
+  });
+
+  it('renders finish-turn-only turn output in a natural timeline', async () => {
+    class FinishTurnOnlyEngine extends StubCliEngine {
+      override async runTurn(input: {
+        sessionId: string;
+        playerId: string;
+        playerText: string;
+        apiKey?: string;
+        narratorStyle?: 'lyric' | 'cinematic' | 'michener';
+        debug?: { includeTrace?: boolean; onEvent?: DebugSink };
+        stream?: {
+          onNarrationStart?: (telemetry: Awaited<ReturnType<StubCliEngine['getTelemetry']>>) => void;
+          onNarrationDelta?: (delta: string) => void;
+        };
+      }) {
+        const narration = 'From the Landing, you can head toward Under the Ribs, Dock Approach, or Jawline Walk.';
+        input.debug?.onEvent?.({ type: 'turn.started', sessionId: input.sessionId, turn: 2, playerText: input.playerText });
+        input.debug?.onEvent?.({ type: 'gm.iteration.started', iteration: 1 });
+        input.debug?.onEvent?.({
+          type: 'gm.response.received',
+          iteration: 1,
+          toolCalls: 1,
+          toolCallCount: 1,
+          toolCallNames: ['finish_turn'],
+          responseId: 'resp-finish-only',
+          status: 'completed',
+        });
+        input.debug?.onEvent?.({
+          type: 'tool.called',
+          iteration: 1,
+          tool: 'finish_turn',
+          callId: 'finish-only-call',
+          callIndex: 1,
+          callCount: 1,
+          input: { summary: 'Answer available destinations from current position' },
+        });
+        input.debug?.onEvent?.({
+          type: 'tool.result',
+          iteration: 1,
+          tool: 'finish_turn',
+          callId: 'finish-only-call',
+          callIndex: 1,
+          callCount: 1,
+          output: { ok: true },
+          ok: true,
+        });
+        input.debug?.onEvent?.({ type: 'narrator.started', phase: 'turn', style: input.narratorStyle });
+        const telemetry = await this.getTelemetry(input.sessionId, input.playerId);
+        input.stream?.onNarrationStart?.(telemetry);
+        input.stream?.onNarrationDelta?.(narration);
+        input.debug?.onEvent?.({ type: 'narrator.completed', phase: 'turn', text: narration });
+        input.debug?.onEvent?.({ type: 'turn.persisted', sessionId: input.sessionId, turn: 2 });
+        return {
+          sessionId: input.sessionId,
+          turn: 2,
+          acceptedEvents: [],
+          rejectedEvents: [],
+          telemetry,
+          narration,
+          trace: input.debug?.includeTrace ? { toolCalls: [] } : undefined,
+        };
+      }
+    }
+
+    const engine = new FinishTurnOnlyEngine();
+    const writes: string[] = [];
+    const state = baseState({ apiKey: undefined, apiMode: 'fallback' });
+
+    await handleCliLine({ state, line: 'where can i go', engine, write: text => writes.push(text) });
+
+    const output = writes.join('');
+    assert.ok(output.includes('[gm] iteration 1 chose 1 next step: finalizing reply'));
+    assert.ok(output.includes('[tool] finalizing reply: "Answer available destinations from current position"'));
+    assert.ok(output.includes('[tool] reply ready'));
+    assert.ok(output.includes('[narrator] "From the Landing, you can head toward Under the Ribs, Dock Approach'));
+    assert.equal(output.includes('call=finish-only-call'), false);
   });
 
   it('runs a scripted session through startup, commands, and clean exit', async () => {
