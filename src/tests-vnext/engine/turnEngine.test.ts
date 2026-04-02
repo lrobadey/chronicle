@@ -9,7 +9,7 @@ import { replayFromLog } from '../../engine/session/replay';
 import { QueueLLM } from '../helpers/queueLLM';
 import { IncompatibleSessionError } from '../../engine/errors';
 import type { DebugEvent } from '../../engine/debug';
-import { buildSpineFromLegacyWorld } from '../../sim/spine';
+import { buildInitialSpine, getItemPlacement } from '../../sim/spine';
 import { createIsleOfMarrowWorldVNext } from '../../worlds/isle-of-marrow.vnext';
 
 async function createStore() {
@@ -23,52 +23,18 @@ async function removeDir(rootDir: string) {
 
 function createSpineAuthoritativePlacementWorld() {
   const world = createIsleOfMarrowWorldVNext({ anchorIso: '2025-01-01T14:00:00Z' });
-  const baseSpine = buildSpineFromLegacyWorld(world);
-  const carriedId = 'carried_by:heartwater-jar:player-1';
 
-  world.items['heartwater-jar'] = {
-    ...world.items['heartwater-jar'],
-    location: { kind: 'ground', pos: { x: 0, y: 1200, z: 15 } },
-  };
+  // Override the initial spine so that heartwater-jar is carried by player-1
+  // instead of on the ground. This tests that loading/replay preserves
+  // spine-authoritative placement.
+  const baseSpine = buildInitialSpine(world, {
+    'heartwater-jar': { kind: 'inventory', actorId: 'player-1' },
+  });
+  world.spine = baseSpine;
+  // Derive actor inventory to match spine
   world.actors['player-1'] = {
     ...world.actors['player-1'],
-    inventory: [],
-  };
-  world.spine = {
-    ...baseSpine,
-    entities: {
-      ...baseSpine.entities,
-      'heartwater-jar': {
-        ...baseSpine.entities['heartwater-jar']!,
-        components: {
-          ...baseSpine.entities['heartwater-jar']!.components,
-          location: undefined,
-        },
-      },
-    },
-    relations: {
-      [carriedId]: {
-        id: carriedId,
-        type: 'carried_by',
-        from: 'heartwater-jar',
-        to: 'player-1',
-      },
-    },
-    indexes: {
-      ...baseSpine.indexes,
-      byFrom: {
-        ...baseSpine.indexes.byFrom,
-        'heartwater-jar': [carriedId],
-      },
-      byTo: {
-        ...baseSpine.indexes.byTo,
-        'player-1': [carriedId],
-      },
-      byRelationType: {
-        ...baseSpine.indexes.byRelationType,
-        carried_by: [carriedId],
-      },
-    },
+    inventory: ['heartwater-jar'],
   };
 
   return world;
@@ -475,10 +441,8 @@ describe('TurnEngine', () => {
       await fs.writeFile(path.join(sessionDir, 'initial.json'), JSON.stringify(world, null, 2));
 
       const loaded = await store.loadSession(sessionId);
-      assert.deepEqual(loaded?.items['heartwater-jar']?.location, {
-        kind: 'inventory',
-        actorId: 'player-1',
-      });
+      const loadedPlacement = getItemPlacement(loaded!.spine, 'heartwater-jar');
+      assert.deepEqual(loadedPlacement, { type: 'carried_by', actorId: 'player-1' });
       assert.ok(loaded?.actors['player-1']?.inventory.includes('heartwater-jar'));
       assert.equal(loaded?.spine.relations['carried_by:heartwater-jar:player-1']?.type, 'carried_by');
 
@@ -489,10 +453,8 @@ describe('TurnEngine', () => {
         }),
       ]);
 
-      assert.deepEqual(replayed.items['heartwater-jar']?.location, {
-        kind: 'inventory',
-        actorId: 'player-1',
-      });
+      const replayedPlacement = getItemPlacement(replayed.spine, 'heartwater-jar');
+      assert.deepEqual(replayedPlacement, { type: 'carried_by', actorId: 'player-1' });
       assert.ok(replayed.actors['player-1']?.inventory.includes('heartwater-jar'));
       assert.equal(replayed.spine.relations['carried_by:heartwater-jar:player-1']?.type, 'carried_by');
     } finally {

@@ -1,4 +1,4 @@
-import type { Actor, ActorId, GridPos, Item, ItemId, LocationPOI } from './state';
+import type { Actor, ActorId, GridPos, ItemId, ItemLocationInput, LocationPOI } from './state';
 
 export interface EventMeta {
   id: string;
@@ -59,7 +59,7 @@ export type WorldEvent =
               id: ItemId;
               name: string;
               description?: string;
-              location: Item['location'];
+              location: ItemLocationInput;
               tags?: string[];
             };
           }

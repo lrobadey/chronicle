@@ -18,6 +18,7 @@ import { buildTelemetry } from '../sim/views/telemetry';
 import { computeTurnDiff } from '../sim/views/diff';
 import { deriveTide } from '../sim/systems/tide';
 import { estimateTravel, LONG_TRAVEL_MINUTES } from '../sim/systems/travel';
+import { getItemPlacement } from '../sim/spine';
 import { distance } from '../sim/utils';
 import { OpenAIClient } from '../agents/llm/openaiClient';
 import type { LLMClient } from '../agents/llm/types';
@@ -530,12 +531,13 @@ function buildGMWorldContext(params: {
     .slice(0, 25);
   const nearbyItemsOnGround = Object.values(state.items)
     .flatMap(item => {
-      if (item.location.kind !== 'ground') return [];
+      const placement = getItemPlacement(state.spine, item.id);
+      if (!placement || placement.type !== 'located_in') return [];
       return [{
         id: item.id,
         name: item.name,
-        pos: item.location.pos,
-        distanceMeters: Math.round(distance(player.pos, item.location.pos) * state.map.cellSizeMeters),
+        pos: placement.anchor,
+        distanceMeters: Math.round(distance(player.pos, placement.anchor) * state.map.cellSizeMeters),
       }];
     })
     .sort((a, b) => a.distanceMeters - b.distanceMeters)

@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { createIsleOfMarrowWorldVNext } from '../../worlds/isle-of-marrow.vnext';
 import { applyEvent } from '../../sim/reducer';
 import { checkInvariants } from '../../sim/invariants';
-import type { SpineRelation } from '../../sim/spine';
+import { getItemPlacement, type SpineRelation } from '../../sim/spine';
 
 const FIXED_ANCHOR = '2025-01-01T14:00:00Z';
 
@@ -18,7 +18,7 @@ describe('world spine mirror', () => {
     assert.ok(world.spine.indexes.byType.item.includes('heartwater-jar'));
   });
 
-  it('keeps canonical item placement and legacy compatibility fields in sync across pickup and drop', () => {
+  it('keeps canonical item placement in spine across pickup and drop', () => {
     const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
     world.actors['player-1'].pos = { x: 0, y: 1200, z: 15 };
 
@@ -31,7 +31,8 @@ describe('world spine mirror', () => {
     assert.equal(pickedUp.spine.relations['carried_by:heartwater-jar:player-1']?.type, 'carried_by');
     assert.equal(pickedUp.spine.relations['located_in:heartwater-jar:the-rib-market'], undefined);
     assert.deepEqual(pickedUp.spine.entities['heartwater-jar']?.components.location, undefined);
-    assert.deepEqual(pickedUp.items['heartwater-jar']?.location, { kind: 'inventory', actorId: 'player-1' });
+    const pickedPlacement = getItemPlacement(pickedUp.spine, 'heartwater-jar');
+    assert.deepEqual(pickedPlacement, { type: 'carried_by', actorId: 'player-1' });
     assert.ok(pickedUp.actors['player-1']?.inventory.includes('heartwater-jar'));
 
     const dropped = applyEvent(pickedUp, {
@@ -43,11 +44,15 @@ describe('world spine mirror', () => {
 
     assert.equal(dropped.spine.relations['carried_by:heartwater-jar:player-1'], undefined);
     assert.equal(dropped.spine.relations['located_in:heartwater-jar:the-rib-market']?.type, 'located_in');
-    assert.deepEqual(dropped.items['heartwater-jar']?.location, { kind: 'ground', pos: { x: 0, y: 1200, z: 15 } });
+    const droppedPlacement = getItemPlacement(dropped.spine, 'heartwater-jar');
+    assert.equal(droppedPlacement?.type, 'located_in');
+    if (droppedPlacement?.type === 'located_in') {
+      assert.deepEqual(droppedPlacement.anchor, { x: 0, y: 1200, z: 15 });
+    }
     assert.deepEqual(dropped.actors['player-1']?.inventory, []);
   });
 
-  it('translates item creation into spine placement and derived legacy inventory state', () => {
+  it('translates item creation into spine placement and derived inventory state', () => {
     const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
 
     const created = applyEvent(world, {
@@ -64,7 +69,8 @@ describe('world spine mirror', () => {
     });
 
     assert.equal(created.spine.relations['carried_by:player-cache:player-1']?.type, 'carried_by');
-    assert.deepEqual(created.items['player-cache']?.location, { kind: 'inventory', actorId: 'player-1' });
+    const placement = getItemPlacement(created.spine, 'player-cache');
+    assert.deepEqual(placement, { type: 'carried_by', actorId: 'player-1' });
     assert.ok(created.actors['player-1']?.inventory.includes('player-cache'));
   });
 
@@ -98,21 +104,5 @@ describe('world spine mirror', () => {
 
     const issues = checkInvariants(world);
     assert.ok(issues.some(issue => issue.message.includes('Expected exactly one item placement relation')));
-  });
-
-  it('rejects derived legacy placement that drifts from canonical spine placement', () => {
-    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
-    world.items['heartwater-jar'] = {
-      ...world.items['heartwater-jar'],
-      location: { kind: 'inventory', actorId: 'player-1' },
-    };
-    world.actors['player-1'] = {
-      ...world.actors['player-1'],
-      inventory: ['heartwater-jar'],
-    };
-
-    const issues = checkInvariants(world);
-    assert.ok(issues.some(issue => issue.message.includes('Ground location mismatch')));
-    assert.ok(issues.some(issue => issue.message.includes('Derived inventory mismatch')));
   });
 });

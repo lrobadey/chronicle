@@ -1,5 +1,5 @@
-import type { WorldState, LocationPOI, Actor, Item, KnowledgeState } from '../sim/state';
-import { buildSpineFromLegacyWorld } from '../sim/spine';
+import type { WorldState, LocationPOI, Actor, Item, ItemLocationInput, KnowledgeState } from '../sim/state';
+import { buildInitialSpine } from '../sim/spine';
 
 export interface CreateWorldOptions {
   anchorIso?: string;
@@ -156,8 +156,11 @@ const items: Record<string, Item> = {
     id: 'heartwater-jar',
     name: 'Sealed jar of Heartwater',
     description: 'A small clay jar sealed with wax. The liquid inside glows faintly.',
-    location: { kind: 'ground', pos: { x: 0, y: 1200, z: 15 } },
   },
+};
+
+const itemPlacements: Record<string, ItemLocationInput> = {
+  'heartwater-jar': { kind: 'ground', pos: { x: 0, y: 1200, z: 15 } },
 };
 
 export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): WorldState {
@@ -230,6 +233,6 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
     knowledge,
   };
 
-  world.spine = buildSpineFromLegacyWorld(world);
+  world.spine = buildInitialSpine(world, itemPlacements);
   return world;
 }

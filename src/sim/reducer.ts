@@ -1,6 +1,6 @@
 import type { WorldEvent } from './events';
 import type { KnowledgeState, WorldState } from './state';
-import { setItemPlacement, syncWorldSpine } from './spine';
+import { getItemPlacement, setItemPlacement, syncWorldSpine } from './spine';
 import { deriveTide, isTideBlocked } from './systems/tide';
 import { deriveConstraints } from './systems/constraints';
 import { distance, locationsWithinRadius } from './utils';
@@ -157,8 +157,6 @@ function applyPickUpItem(state: WorldState, event: Extract<WorldEvent, { type: '
 
   const next = cloneState(state);
   setItemPlacement(next.spine, item.id, { type: 'carried_by', actorId: actor.id }, next.locations);
-
-  syncWorldSpine(next);
   addLedgerInPlace(next, event.note || `Picked up ${item.name}`);
   if (actor.kind === 'player') updateKnowledgeForActor(next, actor.id);
   return next;
@@ -175,7 +173,6 @@ function applyDropItem(state: WorldState, event: Extract<WorldEvent, { type: 'Dr
   if (!locationId) return state;
 
   setItemPlacement(next.spine, item.id, { type: 'located_in', locationId, anchor }, next.locations);
-  syncWorldSpine(next);
   addLedgerInPlace(next, event.note || `Dropped ${item.name}`);
   if (actor.kind === 'player') updateKnowledgeForActor(next, actor.id);
   return next;
@@ -195,7 +192,6 @@ function applyCreateEntity(state: WorldState, event: Extract<WorldEvent, { type:
       id: event.entity.data.id,
       name: event.entity.data.name,
       description: event.entity.data.description ?? undefined,
-      location: event.entity.data.location,
       tags: event.entity.data.tags,
     };
     if (event.entity.data.location.kind === 'inventory') {
@@ -285,10 +281,11 @@ function updateKnowledgeForActor(state: WorldState, actorId: string) {
   }
 
   for (const item of Object.values(state.items)) {
-    if (item.location.kind === 'ground' && distance(actor.pos, item.location.pos) <= DEFAULT_VIS_RADIUS) {
+    const placement = getItemPlacement(state.spine, item.id);
+    if (placement?.type === 'located_in' && distance(actor.pos, placement.anchor) <= DEFAULT_VIS_RADIUS) {
       knowledge.seenItems[item.id] = true;
     }
-    if (item.location.kind === 'inventory' && item.location.actorId === actor.id) {
+    if (placement && (placement.type === 'carried_by' || placement.type === 'worn_by') && placement.actorId === actor.id) {
       knowledge.seenItems[item.id] = true;
     }
   }

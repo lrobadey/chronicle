@@ -1,4 +1,4 @@
-import type { Actor, GridPos, Item, LocationPOI, WorldState } from './state';
+import type { Actor, GridPos, Item, ItemLocationInput, LocationPOI, WorldState } from './state';
 
 export type SpineEntityId = string;
 export type SpineRelationId = string;
@@ -110,8 +110,6 @@ export interface SpineState {
   schedules: Record<SpineScheduleId, SpineScheduledProcess>;
 }
 
-type LegacyWorldShape = Pick<WorldState, 'actors' | 'items' | 'locations'>;
-
 const ITEM_PLACEMENT_RELATION_TYPES = ['located_in', 'inside', 'on', 'carried_by', 'worn_by'] as const;
 
 export type ItemPlacementRelationType = (typeof ITEM_PLACEMENT_RELATION_TYPES)[number];
@@ -123,13 +121,116 @@ export type ItemPlacement =
   | { type: 'carried_by'; actorId: string }
   | { type: 'worn_by'; actorId: string };
 
-export function buildSpineFromLegacyWorld(state: LegacyWorldShape): SpineState {
-  return buildSynchronizedSpine(state, null, {});
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the initial spine for a new world. Item placements are provided
+ * explicitly — this is the only path that converts ItemLocationInput into
+ * spine relations.
+ */
+export function buildInitialSpine(
+  state: Pick<WorldState, 'actors' | 'items' | 'locations'>,
+  itemPlacements: Record<string, ItemLocationInput>,
+): SpineState {
+  const entities: Record<SpineEntityId, SpineEntity> = {};
+  const relations: Record<SpineRelationId, SpineRelation> = {};
+
+  const placements: Record<string, ItemPlacement> = {};
+  for (const [itemId, location] of Object.entries(itemPlacements)) {
+    placements[itemId] = placementFromInput(location, state.locations);
+  }
+  const carriedCounts = countCarriedItems(placements);
+
+  for (const location of Object.values(state.locations)) {
+    entities[location.id] = buildLocationEntity(location);
+  }
+
+  for (const actor of Object.values(state.actors)) {
+    entities[actor.id] = buildActorEntity(actor, carriedCounts[actor.id] || 0);
+    const containingLocationId = findContainingLocationId(actor.pos, state.locations);
+    if (containingLocationId) {
+      addRelation(relations, {
+        type: 'located_in',
+        from: actor.id,
+        to: containingLocationId,
+        props: { anchor: actor.pos },
+      });
+    }
+  }
+
+  for (const item of Object.values(state.items)) {
+    const placement = placements[item.id];
+    if (!placement) continue;
+    entities[item.id] = buildItemEntity(item, placement, state.locations);
+    addRelation(relations, buildPlacementRelation(item.id, placement));
+  }
+
+  return {
+    entities,
+    relations,
+    indexes: buildIndexes(entities, relations),
+    schedules: {},
+  };
 }
 
+/**
+ * Rebuild the spine from the current world state. Actor and location entities
+ * are rebuilt from their authoritative fields. Item placement is read from
+ * the *previous* spine — spine is the single source of truth for items.
+ *
+ * After rebuilding, actor inventories are derived from spine placement
+ * relations (the one permitted spine → legacy derivation).
+ */
 export function syncWorldSpine(state: WorldState): WorldState {
-  state.spine = buildSynchronizedSpine(state, state.spine, state.spine?.schedules || {});
-  deriveLegacyPlacement(state);
+  const previous = state.spine || emptySpine();
+
+  const entities: Record<SpineEntityId, SpineEntity> = {};
+  const relations: Record<SpineRelationId, SpineRelation> = {};
+
+  // Read item placements from previous spine (authoritative)
+  const itemPlacements: Record<string, ItemPlacement> = {};
+  for (const itemId of Object.keys(state.items)) {
+    const placement = getItemPlacement(previous, itemId);
+    if (placement) itemPlacements[itemId] = placement;
+  }
+  const carriedCounts = countCarriedItems(itemPlacements);
+
+  for (const location of Object.values(state.locations)) {
+    entities[location.id] = buildLocationEntity(location);
+  }
+
+  for (const actor of Object.values(state.actors)) {
+    entities[actor.id] = buildActorEntity(actor, carriedCounts[actor.id] || 0);
+    const containingLocationId = findContainingLocationId(actor.pos, state.locations);
+    if (containingLocationId) {
+      addRelation(relations, {
+        type: 'located_in',
+        from: actor.id,
+        to: containingLocationId,
+        props: { anchor: actor.pos },
+      });
+    }
+  }
+
+  for (const item of Object.values(state.items)) {
+    const placement = itemPlacements[item.id];
+    if (!placement) continue;
+    entities[item.id] = buildItemEntity(item, placement, state.locations);
+    addRelation(relations, buildPlacementRelation(item.id, placement));
+  }
+
+  state.spine = {
+    entities,
+    relations,
+    indexes: buildIndexes(entities, relations),
+    schedules: previous.schedules || {},
+  };
+
+  // Derive actor inventories — the one permitted spine → legacy derivation
+  deriveActorInventories(state);
+
   return state;
 }
 
@@ -200,87 +301,49 @@ export function setItemPlacement(
   spine.indexes = buildIndexes(spine.entities, spine.relations);
 }
 
-export function deriveLegacyPlacement(state: WorldState): WorldState {
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function emptySpine(): SpineState {
+  return {
+    entities: {},
+    relations: {},
+    indexes: { byType: {}, byFrom: {}, byTo: {}, byRelationType: {} },
+    schedules: {},
+  };
+}
+
+function deriveActorInventories(state: WorldState): void {
   const carried: Record<string, string[]> = {};
   for (const actorId of Object.keys(state.actors)) {
     carried[actorId] = [];
   }
-
   for (const itemId of Object.keys(state.items)) {
     const placement = getItemPlacement(state.spine, itemId);
-    if (!placement) continue;
-
-    if (placement.type === 'located_in') {
-      state.items[itemId] = {
-        ...state.items[itemId],
-        location: { kind: 'ground', pos: placement.anchor },
-      };
-      continue;
+    if (placement && (placement.type === 'carried_by' || placement.type === 'worn_by')) {
+      (carried[placement.actorId] ||= []).push(itemId);
     }
-
-    if (placement.type === 'inside' || placement.type === 'on') {
-      state.items[itemId] = {
-        ...state.items[itemId],
-        location: { kind: 'container', containerId: placement.type === 'inside' ? placement.containerId : placement.surfaceId },
-      };
-      continue;
-    }
-
-    carried[placement.actorId] = [...(carried[placement.actorId] || []), itemId];
-    state.items[itemId] = {
-      ...state.items[itemId],
-      location: { kind: 'inventory', actorId: placement.actorId },
-    };
   }
-
   for (const actorId of Object.keys(state.actors)) {
     state.actors[actorId] = {
       ...state.actors[actorId],
       inventory: carried[actorId] || [],
     };
   }
-
-  return state;
 }
 
-function buildSynchronizedSpine(
-  state: LegacyWorldShape,
-  previous: SpineState | null | undefined,
-  schedules: Record<SpineScheduleId, SpineScheduledProcess>,
-): SpineState {
-  const entities: Record<SpineEntityId, SpineEntity> = {};
-  const relations: Record<SpineRelationId, SpineRelation> = {};
-  const placements = collectItemPlacements(state, previous);
-  const carriedCounts = countCarriedItems(placements);
-
-  for (const location of Object.values(state.locations)) {
-    entities[location.id] = buildLocationEntity(location);
+function placementFromInput(location: ItemLocationInput, locations: Record<string, LocationPOI>): ItemPlacement {
+  if (location.kind === 'inventory') {
+    return { type: 'carried_by', actorId: location.actorId };
   }
-
-  for (const actor of Object.values(state.actors)) {
-    entities[actor.id] = buildActorEntity(actor, carriedCounts[actor.id] || 0);
-    const containingLocationId = findContainingLocationId(actor.pos, state.locations);
-    if (containingLocationId) {
-      addRelation(relations, {
-        type: 'located_in',
-        from: actor.id,
-        to: containingLocationId,
-        props: { anchor: actor.pos },
-      });
-    }
+  if (location.kind === 'container') {
+    return { type: 'inside', containerId: location.containerId };
   }
-
-  for (const item of Object.values(state.items)) {
-    const placement = placements[item.id] || buildPlacementFromLegacyItem(item, state.locations);
-    entities[item.id] = buildItemEntity(item, placement, state.locations);
-    addRelation(relations, buildPlacementRelation(item.id, placement));
-  }
-
   return {
-    entities,
-    relations,
-    indexes: buildIndexes(entities, relations),
-    schedules,
+    type: 'located_in',
+    locationId: findContainingLocationId(location.pos, locations) || findNearestLocationId(location.pos, locations) || 'unknown-location',
+    anchor: location.pos,
   };
 }
 
@@ -419,33 +482,6 @@ function buildIndexes(
   }
 
   return indexes;
-}
-
-function collectItemPlacements(state: LegacyWorldShape, previous: SpineState | null | undefined): Record<string, ItemPlacement> {
-  const placements: Record<string, ItemPlacement> = {};
-
-  for (const itemId of Object.keys(state.items)) {
-    const placement = previous ? getItemPlacement(previous, itemId) : null;
-    placements[itemId] = placement || buildPlacementFromLegacyItem(state.items[itemId], state.locations);
-  }
-
-  return placements;
-}
-
-function buildPlacementFromLegacyItem(item: Item, locations: Record<string, LocationPOI>): ItemPlacement {
-  if (item.location.kind === 'inventory') {
-    return { type: 'carried_by', actorId: item.location.actorId };
-  }
-
-  if (item.location.kind === 'container') {
-    return { type: 'inside', containerId: item.location.containerId };
-  }
-
-  return {
-    type: 'located_in',
-    locationId: findContainingLocationId(item.location.pos, locations) || findNearestLocationId(item.location.pos, locations) || 'unknown-location',
-    anchor: item.location.pos,
-  };
 }
 
 function countCarriedItems(placements: Record<string, ItemPlacement>) {

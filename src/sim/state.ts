@@ -45,14 +45,15 @@ export interface Actor {
   relationships?: Record<ActorId, { trust: number; fear: number; affinity: number }>;
 }
 
+export type ItemLocationInput =
+  | { kind: 'ground'; pos: GridPos }
+  | { kind: 'inventory'; actorId: ActorId }
+  | { kind: 'container'; containerId: string };
+
 export interface Item {
   id: ItemId;
   name: string;
   description?: string;
-  location:
-    | { kind: 'ground'; pos: GridPos }
-    | { kind: 'inventory'; actorId: ActorId }
-    | { kind: 'container'; containerId: string };
   tags?: string[];
 }
 
