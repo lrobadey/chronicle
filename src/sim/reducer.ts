@@ -17,6 +17,10 @@ export function applyEvents(state: WorldState, events: WorldEvent[]): WorldState
   let next = state;
   for (const event of events) {
     next = syncWorldSpine(applyEventBase(next, event));
+    // TODO(spine-commit-gate): Once syncWorldSpine() performs strict commit
+    // validation, applyEvents() should rely on that typed failure path (instead
+    // of assuming all post-event states are valid here) and propagate
+    // deterministic error metadata to callers.
   }
   return next;
 }
