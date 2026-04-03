@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createIsleOfMarrowWorldVNext } from '../../worlds/isle-of-marrow.vnext';
 import { applyEvent } from '../../sim/reducer';
-import { checkInvariants } from '../../sim/invariants';
-import { getItemPlacement, type SpineRelation } from '../../sim/spine';
+import { getItemPlacement, setItemPlacement, syncWorldSpine, validateSpineOrThrow, type SpineRelation } from '../../sim/spine';
+import { SpineIntegrityError } from '../../engine/errors';
 
 const FIXED_ANCHOR = '2025-01-01T14:00:00Z';
 
@@ -89,11 +89,22 @@ describe('world spine mirror', () => {
     world.spine.indexes.byTo['player-1'] = [...(world.spine.indexes.byTo['player-1'] || []), duplicate.id];
     world.spine.indexes.byRelationType.carried_by = [...(world.spine.indexes.byRelationType.carried_by || []), duplicate.id];
 
-    const issues = checkInvariants(world);
-    assert.ok(issues.some(issue => issue.message.includes('Expected exactly one item placement relation')));
+    assert.throws(() => {
+      validateSpineOrThrow(world.spine, {
+        actorIds: Object.keys(world.actors),
+        itemIds: Object.keys(world.items),
+        locationIds: Object.keys(world.locations),
+      });
+    }, (error: unknown) => {
+      assert.ok(error instanceof SpineIntegrityError);
+      assert.equal(error.details && typeof error.details === 'object', true);
+      const issues = (error as SpineIntegrityError).details as { issues: Array<{ code: string }> };
+      assert.equal(issues.issues[0]?.code, 'multiple_item_placements');
+      return true;
+    });
   });
 
-  it('rejects items with no canonical placement relation', () => {
+  it('rejects items with no canonical placement relation during spine sync', () => {
     const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
     const relationId = 'located_in:heartwater-jar:the-rib-market';
 
@@ -102,7 +113,62 @@ describe('world spine mirror', () => {
     world.spine.indexes.byTo['the-rib-market'] = (world.spine.indexes.byTo['the-rib-market'] || []).filter(id => id !== relationId);
     world.spine.indexes.byRelationType.located_in = (world.spine.indexes.byRelationType.located_in || []).filter(id => id !== relationId);
 
-    const issues = checkInvariants(world);
-    assert.ok(issues.some(issue => issue.message.includes('Expected exactly one item placement relation')));
+    assert.throws(() => syncWorldSpine(world), (error: unknown) => {
+      assert.ok(error instanceof SpineIntegrityError);
+      const issues = (error as SpineIntegrityError).details as { issues: Array<{ code: string }> };
+      assert.equal(issues.issues[0]?.code, 'missing_item_placement');
+      return true;
+    });
+  });
+
+  it('rejects invalid placement targets immediately in setItemPlacement', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+
+    assert.throws(() => {
+      setItemPlacement(world.spine, 'heartwater-jar', { type: 'inside', containerId: 'missing-container' }, world.locations);
+    }, (error: unknown) => {
+      assert.ok(error instanceof SpineIntegrityError);
+      const issues = (error as SpineIntegrityError).details as { issues: Array<{ code: string }> };
+      assert.equal(issues.issues[0]?.code, 'missing_placement_target');
+      return true;
+    });
+  });
+
+  it('rejects located items with no anchor', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    if (world.spine.entities['heartwater-jar']?.components.location) {
+      delete world.spine.entities['heartwater-jar'].components.location.anchor;
+    }
+
+    assert.throws(() => {
+      validateSpineOrThrow(world.spine, {
+        actorIds: Object.keys(world.actors),
+        itemIds: Object.keys(world.items),
+        locationIds: Object.keys(world.locations),
+      });
+    }, (error: unknown) => {
+      assert.ok(error instanceof SpineIntegrityError);
+      const issues = (error as SpineIntegrityError).details as { issues: Array<{ code: string }> };
+      assert.equal(issues.issues[0]?.code, 'missing_location_anchor');
+      return true;
+    });
+  });
+
+  it('rejects stale index buckets', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    world.spine.indexes.byFrom['heartwater-jar'] = [];
+
+    assert.throws(() => {
+      validateSpineOrThrow(world.spine, {
+        actorIds: Object.keys(world.actors),
+        itemIds: Object.keys(world.items),
+        locationIds: Object.keys(world.locations),
+      });
+    }, (error: unknown) => {
+      assert.ok(error instanceof SpineIntegrityError);
+      const issues = (error as SpineIntegrityError).details as { issues: Array<{ code: string }> };
+      assert.equal(issues.issues.some(issue => issue.code === 'index_missing_relation'), true);
+      return true;
+    });
   });
 });

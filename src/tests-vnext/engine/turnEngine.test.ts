@@ -7,10 +7,12 @@ import { TurnEngine } from '../../engine/turnEngine';
 import { JsonlSessionStore } from '../../engine/session/jsonlStore';
 import { replayFromLog } from '../../engine/session/replay';
 import { QueueLLM } from '../helpers/queueLLM';
-import { IncompatibleSessionError } from '../../engine/errors';
+import { IncompatibleSessionError, SpineIntegrityError } from '../../engine/errors';
 import type { DebugEvent } from '../../engine/debug';
 import { buildInitialSpine, getItemPlacement } from '../../sim/spine';
 import { createIsleOfMarrowWorldVNext } from '../../worlds/isle-of-marrow.vnext';
+
+const FIXED_ANCHOR = '2025-01-01T14:00:00Z';
 
 async function createStore() {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'chronicle-vnext-'));
@@ -460,6 +462,88 @@ describe('TurnEngine', () => {
     } finally {
       await removeDir(rootDir);
     }
+  });
+
+  it('rejects spine commit failures with structured details', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const debugEvents: DebugEvent[] = [];
+      const llm = new QueueLLM([
+        {
+          output: [{
+            type: 'function_call',
+            name: 'propose_events',
+            arguments: '{"events":[{"type":"CreateEntity","entity":{"kind":"item","data":{"id":"hidden-cache","name":"Hidden Cache","location":{"kind":"container","containerId":"missing-container"}}}}]}',
+            call_id: 'gm-propose',
+          }],
+          output_text: '',
+        },
+        {
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-finish' }],
+          output_text: '',
+        },
+        {
+          output: [],
+          output_text: 'Nothing changes.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'stash a cache somewhere',
+        apiKey: 'test-key',
+        debug: { onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 0);
+      assert.equal(turn.rejectedEvents.length, 1);
+      assert.equal(turn.rejectedEvents[0]?.reason.startsWith('spine_integrity:'), true);
+      const details = turn.rejectedEvents[0]?.details as { issues: Array<{ code: string }> } | undefined;
+      assert.equal(details?.issues[0]?.code, 'missing_placement_target');
+
+      const rejectedDebug = debugEvents.find(event => event.type === 'event.rejected');
+      assert.ok(rejectedDebug && rejectedDebug.type === 'event.rejected');
+      if (rejectedDebug?.type === 'event.rejected') {
+        const debugDetails = rejectedDebug.details as { issues: Array<{ code: string }> } | undefined;
+        assert.equal(debugDetails?.issues[0]?.code, 'missing_placement_target');
+      }
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('fails loading persisted invalid spine state through the spine integrity path', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const sessionId = 'invalid-spine-session';
+      const sessionDir = path.join(rootDir, sessionId);
+      await fs.mkdir(sessionDir, { recursive: true });
+
+      const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+      delete world.spine.relations['located_in:heartwater-jar:the-rib-market'];
+      world.spine.indexes.byFrom['heartwater-jar'] = [];
+      world.spine.indexes.byTo['the-rib-market'] = (world.spine.indexes.byTo['the-rib-market'] || []).filter(id => id !== 'located_in:heartwater-jar:the-rib-market');
+      world.spine.indexes.byRelationType.located_in = (world.spine.indexes.byRelationType.located_in || []).filter(id => id !== 'located_in:heartwater-jar:the-rib-market');
+
+      await fs.writeFile(path.join(sessionDir, 'snapshot.json'), JSON.stringify(world, null, 2));
+
+      await assert.rejects(async () => store.loadSession(sessionId), SpineIntegrityError);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('fails replaying invalid spine state through the same typed error path', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    delete world.spine.relations['located_in:heartwater-jar:the-rib-market'];
+    world.spine.indexes.byFrom['heartwater-jar'] = [];
+    world.spine.indexes.byTo['the-rib-market'] = (world.spine.indexes.byTo['the-rib-market'] || []).filter(id => id !== 'located_in:heartwater-jar:the-rib-market');
+    world.spine.indexes.byRelationType.located_in = (world.spine.indexes.byRelationType.located_in || []).filter(id => id !== 'located_in:heartwater-jar:the-rib-market');
+
+    assert.throws(() => replayFromLog(world, []), SpineIntegrityError);
   });
 
   it('rejects incompatible legacy session versions', async () => {

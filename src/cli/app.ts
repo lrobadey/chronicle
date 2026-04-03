@@ -667,7 +667,7 @@ function extractDebugPayload(event: DebugEvent): unknown {
     case 'event.accepted':
       return event.event;
     case 'event.rejected':
-      return { event: event.event, reason: event.reason };
+      return { event: event.event, reason: event.reason, details: event.details };
     case 'event.rollback':
       return { events: event.events, reason: event.reason };
     case 'npc.completed':

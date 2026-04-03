@@ -1,4 +1,5 @@
 import type { WorldEvent } from '../sim/events';
+import type { RejectedEventRecord } from './session/types';
 
 export type DebugSink = (event: DebugEvent) => void;
 
@@ -37,7 +38,7 @@ export type DebugEvent =
       ok?: boolean;
     }
   | { type: 'event.accepted'; event: WorldEvent }
-  | { type: 'event.rejected'; event: WorldEvent; reason: string }
+  | ({ type: 'event.rejected' } & RejectedEventRecord)
   | { type: 'event.rollback'; events: WorldEvent[]; reason: string }
   | { type: 'npc.started'; npcId: string }
   | { type: 'npc.completed'; npcId: string; output: unknown }

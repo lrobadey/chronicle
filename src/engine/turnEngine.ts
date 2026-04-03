@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { JsonlSessionStore } from './session/jsonlStore';
-import type { SessionStore, TurnRecord, TurnTrace } from './session/types';
+import type { RejectedEventRecord, SessionStore, TurnRecord, TurnTrace } from './session/types';
 import type {
   PendingPrompt,
   PendingPromptData,
@@ -39,6 +39,7 @@ import {
   PlayerNotFoundError,
   SessionNotFoundError,
   InputValidationError,
+  SpineIntegrityError,
 } from './errors';
 
 export interface TurnEngineConfig {
@@ -72,7 +73,7 @@ export interface RunTurnOutput {
   sessionId: string;
   turn: number;
   acceptedEvents: WorldEvent[];
-  rejectedEvents: Array<{ event: WorldEvent; reason: string }>;
+  rejectedEvents: RejectedEventRecord[];
   telemetry: ReturnType<typeof buildTelemetry>;
   narration: string;
   trace?: TurnTrace;
@@ -143,7 +144,7 @@ export class TurnEngine {
     let draft = deepClone(state);
     const nextTurn = draft.meta.turn + 1;
     const acceptedEvents: WorldEvent[] = [];
-    const rejectedEvents: Array<{ event: WorldEvent; reason: string }> = [];
+    const rejectedEvents: RejectedEventRecord[] = [];
     const npcOutputs: NpcAgentOutput[] = [];
     const specialistOutputs: Array<Omit<SpecialistConsultation, 'usedSuggestion' | 'usedCandidateEvents'>> = [];
     const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [], llmCalls: [] } : undefined;
@@ -169,8 +170,16 @@ export class TurnEngine {
         }
 
         const stamped = stampEvent(event, nextTurn);
+        try {
+          stagedState = applyEvents(stagedState, [stamped]);
+        } catch (error) {
+          const rejected = toRejectedEvent(stamped, error);
+          rejectedEvents.push(rejected);
+          emitDebugEvent(emit, { type: 'event.rejected', ...rejected });
+          continue;
+        }
+
         stagedAccepted.push(stamped);
-        stagedState = applyEvents(stagedState, [stamped]);
         if (
           stamped.type === 'TravelToLocation' &&
           typeof stamped.confirmId === 'string' &&
@@ -186,10 +195,11 @@ export class TurnEngine {
 
       const issues = checkInvariants(stagedState);
       if (issues.length) {
+        const error = new InvariantViolationError(issues[0]?.message || 'Invariant violation', issues);
         for (const event of stagedAccepted) {
-          const reason = `invariant_violation:${issues[0].message}`;
-          rejectedEvents.push({ event, reason });
-          emitDebugEvent(emit, { type: 'event.rejected', event, reason });
+          const rejected = toRejectedEvent(event, error);
+          rejectedEvents.push(rejected);
+          emitDebugEvent(emit, { type: 'event.rejected', ...rejected });
         }
         return { ok: false, accepted: acceptedEvents.length, rejected: rejectedEvents.length };
       }
@@ -387,6 +397,20 @@ function assertNoInvariantIssues(state: WorldState, message: string) {
   if (issues.length) {
     throw new InvariantViolationError(message, issues);
   }
+}
+
+function toRejectedEvent(event: WorldEvent, error: unknown): RejectedEventRecord {
+  if (error instanceof SpineIntegrityError || error instanceof InvariantViolationError) {
+    return {
+      event,
+      reason: `${error.code}:${error.message}`,
+      details: error.details,
+    };
+  }
+  return {
+    event,
+    reason: error instanceof Error ? error.message : 'unknown_error',
+  };
 }
 
 function normalizePendingPrompt(value: unknown): PendingPrompt | null {

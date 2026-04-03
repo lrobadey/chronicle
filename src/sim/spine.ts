@@ -1,4 +1,9 @@
 import type { Actor, GridPos, Item, ItemLocationInput, LocationPOI, WorldState } from './state';
+import {
+  SpineIntegrityError,
+  type SpineIntegrityIssue,
+  type SpinePlacementType,
+} from '../engine/errors';
 
 export type SpineEntityId = string;
 export type SpineRelationId = string;
@@ -121,6 +126,12 @@ export type ItemPlacement =
   | { type: 'carried_by'; actorId: string }
   | { type: 'worn_by'; actorId: string };
 
+export interface SpineValidationContext {
+  actorIds?: Iterable<string>;
+  itemIds?: Iterable<string>;
+  locationIds?: Iterable<string>;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -227,6 +238,11 @@ export function syncWorldSpine(state: WorldState): WorldState {
     indexes: buildIndexes(entities, relations),
     schedules: previous.schedules || {},
   };
+  validateSpineOrThrow(state.spine, {
+    actorIds: Object.keys(state.actors),
+    itemIds: Object.keys(state.items),
+    locationIds: Object.keys(state.locations),
+  });
 
   // Derive actor inventories — the one permitted spine → legacy derivation
   deriveActorInventories(state);
@@ -262,6 +278,8 @@ export function setItemPlacement(
   placement: ItemPlacement,
   locations: Record<string, LocationPOI>,
 ) {
+  validatePlacementTargetOrThrow(spine, itemId, placement, locations);
+
   for (const relation of getItemPlacementRelations(spine, itemId)) {
     delete spine.relations[relation.id];
   }
@@ -299,11 +317,210 @@ export function setItemPlacement(
 
   spine.entities[itemId] = entity;
   spine.indexes = buildIndexes(spine.entities, spine.relations);
+  validateSpineOrThrow(spine, {
+    itemIds: collectEntityIdsByKind(spine, 'item'),
+    actorIds: collectEntityIdsByKind(spine, 'actor'),
+    locationIds: Object.keys(locations),
+  });
+}
+
+export function validateSpine(
+  spine: SpineState,
+  context: SpineValidationContext = {},
+): SpineIntegrityIssue[] {
+  const issues: SpineIntegrityIssue[] = [];
+  const actorIds = new Set(context.actorIds ?? collectEntityIdsByKind(spine, 'actor'));
+  const itemIds = new Set(context.itemIds ?? collectEntityIdsByKind(spine, 'item'));
+  const locationIds = new Set(context.locationIds ?? collectEntityIdsByKind(spine, 'location'));
+
+  for (const itemId of itemIds) {
+    const placements = getItemPlacementRelationsFromRelations(spine, itemId);
+    if (placements.length !== 1) {
+      issues.push({
+        code: placements.length === 0 ? 'missing_item_placement' : 'multiple_item_placements',
+        path: `spine.relations.${itemId}`,
+        message: placements.length === 0
+          ? `Expected exactly one item placement relation, found 0`
+          : `Expected exactly one item placement relation, found ${placements.length}`,
+        itemId,
+        relationId: placements[0]?.id,
+      });
+      continue;
+    }
+
+    const relation = placements[0]!;
+    if (relation.type === 'carried_by' || relation.type === 'worn_by') {
+      validateEntityTarget(
+        issues,
+        spine,
+        relation,
+        itemId,
+        actorIds.has(relation.to),
+        'actor',
+        `Placement references non-existent actor ${relation.to}`,
+      );
+      continue;
+    }
+
+    if (relation.type === 'located_in') {
+      validateEntityTarget(
+        issues,
+        spine,
+        relation,
+        itemId,
+        locationIds.has(relation.to),
+        'location',
+        `Placement references non-existent location ${relation.to}`,
+      );
+      if (!readStoredItemAnchor(spine, itemId, relation)) {
+        issues.push({
+          code: 'missing_location_anchor',
+          path: `spine.entities.${itemId}.components.location.anchor`,
+          message: `Located item ${itemId} is missing an anchor`,
+          itemId,
+          relationId: relation.id,
+          placementType: relation.type,
+        });
+      }
+      continue;
+    }
+
+    if (relation.type === 'inside') {
+      validateEntityTarget(
+        issues,
+        spine,
+        relation,
+        itemId,
+        true,
+        'container',
+        `Placement references non-existent container ${relation.to}`,
+      );
+      continue;
+    }
+
+    validateEntityTarget(
+      issues,
+      spine,
+      relation,
+      itemId,
+      true,
+      'surface',
+      `Placement references non-existent surface ${relation.to}`,
+    );
+  }
+
+  appendRelationIndexIssues(issues, spine, 'byFrom', spine.indexes.byFrom, buildIndexes({}, spine.relations).byFrom);
+  appendRelationIndexIssues(issues, spine, 'byTo', spine.indexes.byTo, buildIndexes({}, spine.relations).byTo);
+  appendRelationIndexIssues(
+    issues,
+    spine,
+    'byRelationType',
+    spine.indexes.byRelationType,
+    buildIndexes({}, spine.relations).byRelationType,
+  );
+
+  return issues;
+}
+
+export function validateSpineOrThrow(
+  spine: SpineState,
+  context: SpineValidationContext = {},
+): void {
+  const issues = validateSpine(spine, context);
+  if (issues.length) {
+    throw new SpineIntegrityError({ issues });
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+function validatePlacementTargetOrThrow(
+  spine: SpineState,
+  itemId: string,
+  placement: ItemPlacement,
+  locations: Record<string, LocationPOI>,
+) {
+  if (placement.type === 'carried_by' || placement.type === 'worn_by') {
+    const actor = spine.entities[placement.actorId];
+    if (!actor || actor.kind !== 'actor') {
+      throw new SpineIntegrityError({
+        issues: [{
+          code: !actor ? 'missing_placement_target' : 'invalid_placement_target_kind',
+          path: `spine.relations.${placement.type}:${itemId}:${placement.actorId}`,
+          message: `Placement references non-existent actor ${placement.actorId}`,
+          itemId,
+          targetId: placement.actorId,
+          placementType: placement.type,
+        }],
+      });
+    }
+    return;
+  }
+
+  if (placement.type === 'inside') {
+    const container = spine.entities[placement.containerId];
+    if (!container || container.kind !== 'container') {
+      throw new SpineIntegrityError({
+        issues: [{
+          code: !container ? 'missing_placement_target' : 'invalid_placement_target_kind',
+          path: `spine.relations.inside:${itemId}:${placement.containerId}`,
+          message: !container
+            ? `Placement references non-existent container ${placement.containerId}`
+            : `Placement target ${placement.containerId} must be a container`,
+          itemId,
+          targetId: placement.containerId,
+          placementType: placement.type,
+        }],
+      });
+    }
+    return;
+  }
+
+  if (placement.type === 'on') {
+    const surface = spine.entities[placement.surfaceId];
+    if (!surface || surface.kind !== 'surface') {
+      throw new SpineIntegrityError({
+        issues: [{
+          code: !surface ? 'missing_placement_target' : 'invalid_placement_target_kind',
+          path: `spine.relations.on:${itemId}:${placement.surfaceId}`,
+          message: !surface
+            ? `Placement references non-existent surface ${placement.surfaceId}`
+            : `Placement target ${placement.surfaceId} must be a surface`,
+          itemId,
+          targetId: placement.surfaceId,
+          placementType: placement.type,
+        }],
+      });
+    }
+    return;
+  }
+
+  if (!locations[placement.locationId]) {
+    throw new SpineIntegrityError({
+      issues: [{
+        code: 'missing_placement_target',
+        path: `spine.relations.located_in:${itemId}:${placement.locationId}`,
+        message: `Placement references non-existent location ${placement.locationId}`,
+        itemId,
+        targetId: placement.locationId,
+        placementType: placement.type,
+      }],
+    });
+  }
+  if (!isGridPos(placement.anchor)) {
+    throw new SpineIntegrityError({
+      issues: [{
+        code: 'missing_location_anchor',
+        path: `spine.entities.${itemId}.components.location.anchor`,
+        message: `Located item ${itemId} is missing an anchor`,
+        itemId,
+        placementType: placement.type,
+      }],
+    });
+  }
+}
 
 function emptySpine(): SpineState {
   return {
@@ -494,6 +711,14 @@ function countCarriedItems(placements: Record<string, ItemPlacement>) {
   return counts;
 }
 
+function collectEntityIdsByKind(spine: SpineState, kind: SpineEntity['kind']): string[] {
+  const indexed = spine.indexes.byType[kind];
+  if (indexed?.length) return [...indexed];
+  return Object.values(spine.entities)
+    .filter(entity => entity.kind === kind)
+    .map(entity => entity.id);
+}
+
 function getItemPlacementRelations(spine: SpineState, itemId: string): SpineRelation[] {
   const relationIds = spine.indexes.byFrom[itemId] || Object.keys(spine.relations);
   return relationIds
@@ -501,6 +726,95 @@ function getItemPlacementRelations(spine: SpineState, itemId: string): SpineRela
     .filter((relation): relation is SpineRelation => {
       return !!relation && relation.from === itemId && ITEM_PLACEMENT_RELATION_TYPES.includes(relation.type as ItemPlacementRelationType);
     });
+}
+
+function getItemPlacementRelationsFromRelations(spine: SpineState, itemId: string): SpineRelation[] {
+  return Object.values(spine.relations).filter(relation => {
+    return relation.from === itemId && ITEM_PLACEMENT_RELATION_TYPES.includes(relation.type as ItemPlacementRelationType);
+  });
+}
+
+function validateEntityTarget(
+  issues: SpineIntegrityIssue[],
+  spine: SpineState,
+  relation: SpineRelation,
+  itemId: string,
+  existsInContext: boolean,
+  expectedKind: SpineEntity['kind'],
+  missingMessage: string,
+) {
+  const target = spine.entities[relation.to];
+  if (!existsInContext || !target) {
+    issues.push({
+      code: 'missing_placement_target',
+      path: `spine.relations.${relation.id}`,
+      message: missingMessage,
+      itemId,
+      relationId: relation.id,
+      targetId: relation.to,
+      placementType: relation.type as SpinePlacementType,
+    });
+    return;
+  }
+  if (target.kind !== expectedKind) {
+    issues.push({
+      code: 'invalid_placement_target_kind',
+      path: `spine.relations.${relation.id}`,
+      message: `Placement target ${relation.to} must be a ${expectedKind}`,
+      itemId,
+      relationId: relation.id,
+      targetId: relation.to,
+      placementType: relation.type as SpinePlacementType,
+    });
+  }
+}
+
+function appendRelationIndexIssues(
+  issues: SpineIntegrityIssue[],
+  spine: SpineState,
+  indexName: 'byFrom' | 'byTo' | 'byRelationType',
+  actual: Record<string, SpineRelationId[]>,
+  expected: Record<string, SpineRelationId[]>,
+) {
+  const bucketKeys = new Set([...Object.keys(actual), ...Object.keys(expected)]);
+  for (const bucketKey of bucketKeys) {
+    const actualBucket = actual[bucketKey] || [];
+    const expectedBucket = expected[bucketKey] || [];
+    const actualSet = new Set(actualBucket);
+    const expectedSet = new Set(expectedBucket);
+
+    if (actualSet.size !== actualBucket.length) {
+      issues.push({
+        code: 'index_relation_mismatch',
+        path: `spine.indexes.${indexName}.${bucketKey}`,
+        message: `Index ${indexName}.${bucketKey} contains duplicate relation ids`,
+      });
+    }
+
+    for (const relationId of expectedBucket) {
+      if (!actualSet.has(relationId)) {
+        issues.push({
+          code: 'index_missing_relation',
+          path: `spine.indexes.${indexName}.${bucketKey}`,
+          message: `Index ${indexName}.${bucketKey} is missing relation ${relationId}`,
+          relationId,
+        });
+      }
+    }
+
+    for (const relationId of actualBucket) {
+      if (expectedSet.has(relationId)) continue;
+      const relation = spine.relations[relationId];
+      issues.push({
+        code: relation ? 'index_relation_mismatch' : 'index_dangling_relation',
+        path: `spine.indexes.${indexName}.${bucketKey}`,
+        message: relation
+          ? `Index ${indexName}.${bucketKey} incorrectly includes relation ${relationId}`
+          : `Index ${indexName}.${bucketKey} references missing relation ${relationId}`,
+        relationId,
+      });
+    }
+  }
 }
 
 function readStoredItemAnchor(spine: SpineState, itemId: string, relation: SpineRelation): GridPos | null {
@@ -518,6 +832,13 @@ function readStoredItemAnchor(spine: SpineState, itemId: string, relation: Spine
   }
 
   return null;
+}
+
+function isGridPos(value: unknown): value is GridPos {
+  return !!value
+    && typeof value === 'object'
+    && typeof (value as GridPos).x === 'number'
+    && typeof (value as GridPos).y === 'number';
 }
 
 function findContainingLocationId(pos: GridPos, locations: Record<string, LocationPOI>): string | null {

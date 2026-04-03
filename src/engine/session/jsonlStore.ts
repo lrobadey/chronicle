@@ -86,11 +86,19 @@ export class JsonlSessionStore implements SessionStore {
   }
 
   private async readState(p: string): Promise<WorldState | null> {
+    let raw: string;
     try {
-      const raw = await fs.readFile(p, 'utf-8');
-      return normalizeLoadedState(JSON.parse(raw) as WorldState);
+      raw = await fs.readFile(p, 'utf-8');
     } catch {
       return null;
+    }
+    try {
+      return normalizeLoadedState(JSON.parse(raw) as WorldState);
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        return null;
+      }
+      throw error;
     }
   }
 

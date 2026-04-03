@@ -47,6 +47,36 @@ export class InvariantViolationError extends ChronicleError {
   }
 }
 
+export type SpinePlacementType = 'located_in' | 'inside' | 'on' | 'carried_by' | 'worn_by';
+
+export interface SpineIntegrityIssue {
+  code:
+    | 'missing_item_placement'
+    | 'multiple_item_placements'
+    | 'missing_placement_target'
+    | 'invalid_placement_target_kind'
+    | 'missing_location_anchor'
+    | 'index_missing_relation'
+    | 'index_dangling_relation'
+    | 'index_relation_mismatch';
+  path: string;
+  message: string;
+  itemId?: string;
+  relationId?: string;
+  targetId?: string;
+  placementType?: SpinePlacementType;
+}
+
+export interface SpineIntegrityErrorDetails {
+  issues: SpineIntegrityIssue[];
+}
+
+export class SpineIntegrityError extends ChronicleError {
+  constructor(details: SpineIntegrityErrorDetails, message = details.issues[0]?.message || 'Spine integrity violation') {
+    super('spine_integrity', message, 422, details);
+  }
+}
+
 export function isChronicleError(error: unknown): error is ChronicleError {
   return error instanceof ChronicleError;
 }

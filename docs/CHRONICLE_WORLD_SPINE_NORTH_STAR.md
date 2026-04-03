@@ -227,6 +227,12 @@ The system must prefer presets over bespoke behavior.
 
 Chronicle World Spine v1 should extend the current `WorldState` with a dedicated `spine` object rather than replacing the entire runtime at once.
 
+Current vNext runtime contract:
+
+- `syncWorldSpine()` is a commit gate. It rebuilds the graph, validates canonical item placement and relation indexes, and throws a typed spine-integrity error on invalid commits.
+- `setItemPlacement()` is the sanctioned item-placement mutator. It pre-validates the destination, mutates the graph, rebuilds indexes, and runs the same commit validator post-mutation.
+- Turn processing keeps backward-compatible rejection strings while also attaching structured spine error details for callers that want machine-readable diagnostics.
+
 ```ts
 WorldState {
   meta,

@@ -4,6 +4,12 @@ import type { Telemetry } from '../../sim/views/telemetry';
 import type { NpcAgentOutput } from '../../agents/npc/npcAgent';
 import type { SpecialistConsultation, SpecialistType } from '../../agents/specialists';
 
+export interface RejectedEventRecord {
+  event: WorldEvent;
+  reason: string;
+  details?: unknown;
+}
+
 export interface TurnRecord {
   sessionId: string;
   turn: number;
@@ -11,7 +17,7 @@ export interface TurnRecord {
   playerId: string;
   playerText: string;
   acceptedEvents: WorldEvent[];
-  rejectedEvents: Array<{ event: WorldEvent; reason: string }>;
+  rejectedEvents: RejectedEventRecord[];
   npcOutputs?: NpcAgentOutput[];
   specialistOutputs?: SpecialistConsultation[];
   narration?: string;
