@@ -228,6 +228,35 @@ export function syncWorldSpine(state: WorldState): WorldState {
     schedules: previous.schedules || {},
   };
 
+  // TODO(spine-commit-gate): Add a spine-level finalize/commit step here that
+  // runs *before* returning state and rejects invalid graph commits.
+  //
+  // Why here:
+  // - applyEvents() currently syncs after every event, so this is the canonical
+  //   choke point for "state leaves reducer as valid" guarantees.
+  // - turnEngine checks invariants later, but direct call sites (tests, tools,
+  //   persistence hydration) can bypass that gate.
+  //
+  // Suggested contract:
+  //   validateSpineOrThrow(state.spine, {
+  //     actors: state.actors,
+  //     locations: state.locations,
+  //     items: state.items,
+  //   });
+  //
+  // Validator should enforce at minimum:
+  // 1) exactly one placement relation per item;
+  // 2) placement target exists for every placement type:
+  //    - carried_by / worn_by => actor exists
+  //    - located_in => location exists + anchor present
+  //    - inside => container entity exists
+  //    - on => surface entity exists
+  // 3) index consistency for any touched relation buckets.
+  //
+  // On failure: throw a typed SpineIntegrityError with machine-readable fields
+  // (code, itemId/relationId/path) so turn orchestration can reject events
+  // deterministically with actionable diagnostics.
+
   // Derive actor inventories — the one permitted spine → legacy derivation
   deriveActorInventories(state);
 
@@ -262,6 +291,21 @@ export function setItemPlacement(
   placement: ItemPlacement,
   locations: Record<string, LocationPOI>,
 ) {
+  // TODO(spine-mutation-api): This function should evolve into the only
+  // sanctioned item-placement mutator and perform strict pre/post checks.
+  //
+  // Pre-check targets by relation type before mutating:
+  // - carried_by/worn_by -> actor entity id exists in spine.entities
+  // - inside -> container entity id exists and kind === 'container'
+  // - on -> surface entity id exists and kind === 'surface'
+  // - located_in -> location id exists in canonical locations/spine + anchor
+  //
+  // Post-check with the same spine commit validator used by syncWorldSpine()
+  // to ensure one placement relation and no dangling references.
+  //
+  // Migration note:
+  // Once this mutator is hardened, callers should stop writing spine.relations
+  // directly and route all placement changes through this API.
   for (const relation of getItemPlacementRelations(spine, itemId)) {
     delete spine.relations[relation.id];
   }
