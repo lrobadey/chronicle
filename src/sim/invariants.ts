@@ -8,6 +8,16 @@ export interface InvariantIssue {
 
 export function checkInvariants(state: WorldState): InvariantIssue[] {
   const issues: InvariantIssue[] = [];
+  // TODO(spine-invariants-parity): Keep this checker in lockstep with the
+  // upcoming spine commit validator so "turn-level checks" and "mutation-level
+  // checks" enforce the same rules.
+  //
+  // Specifically add missing placement target validation for:
+  // - inside -> container entity must exist
+  // - on -> surface entity must exist
+  //
+  // Today we validate actor/location targets but not container/surface targets,
+  // which allows partial dangling placement relations to survive until later.
 
   for (const [id, actor] of Object.entries(state.actors)) {
     if (!actor.pos) issues.push({ path: `actors.${id}.pos`, message: 'Missing position' });
