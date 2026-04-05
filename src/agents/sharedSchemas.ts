@@ -62,6 +62,61 @@ export const ITEM_LOCATION_SCHEMA = strictObjectSchema({
   containerId: { type: ['string', 'null'] },
 });
 
+const ITEM_COMPONENTS_SCHEMA = strictObjectSchema(
+  {
+    physical: strictObjectSchema(
+      {
+        massKg: { type: ['number', 'null'] },
+        lengthCm: { type: ['number', 'null'] },
+        widthCm: { type: ['number', 'null'] },
+        heightCm: { type: ['number', 'null'] },
+        volumeL: { type: ['number', 'null'] },
+        anchored: { type: ['boolean', 'null'] },
+        portable: { type: ['boolean', 'null'] },
+      },
+      { nullable: true },
+    ),
+    material: strictObjectSchema(
+      {
+        primary: { type: ['string', 'null'] },
+        secondary: { type: ['array', 'null'], items: { type: 'string' } },
+        rustable: { type: ['boolean', 'null'] },
+        flammable: { type: ['boolean', 'null'] },
+        rotProfile: { type: ['string', 'null'] },
+      },
+      { nullable: true },
+    ),
+    condition: strictObjectSchema(
+      {
+        durability: { type: ['number', 'null'] },
+        wear: { type: ['number', 'null'] },
+        rust: { type: ['number', 'null'] },
+        rot: { type: ['number', 'null'] },
+        broken: { type: ['boolean', 'null'] },
+        notes: { type: ['array', 'null'], items: { type: 'string' } },
+      },
+      { nullable: true },
+    ),
+    ownership: strictObjectSchema(
+      {
+        legalOwnerId: { type: ['string', 'null'] },
+        creatorId: { type: ['string', 'null'] },
+        lastPossessorId: { type: ['string', 'null'] },
+      },
+      { nullable: true },
+    ),
+    container: strictObjectSchema(
+      {
+        capacityL: { type: ['number', 'null'] },
+        acceptsTags: { type: ['array', 'null'], items: { type: 'string' } },
+        sealed: { type: ['boolean', 'null'] },
+      },
+      { nullable: true },
+    ),
+  },
+  { nullable: true },
+);
+
 export const CREATE_ENTITY_DATA_SCHEMA = strictObjectSchema({
   id: { type: 'string' },
   name: { type: 'string' },
@@ -78,6 +133,8 @@ export const CREATE_ENTITY_DATA_SCHEMA = strictObjectSchema({
     { nullable: true },
   ),
   tags: { type: ['array', 'null'], items: { type: 'string' } },
+  archetype: { type: ['string', 'null'] },
+  components: ITEM_COMPONENTS_SCHEMA,
   persona: PERSONA_SCHEMA,
   relationships: strictObjectSchema(
     {
@@ -104,6 +161,8 @@ export const TRANSFER_ITEM_DATA_SCHEMA = strictObjectSchema(
     name: { type: 'string' },
     description: { type: ['string', 'null'] },
     tags: { type: ['array', 'null'], items: { type: 'string' } },
+    archetype: { type: ['string', 'null'] },
+    components: ITEM_COMPONENTS_SCHEMA,
   },
   { nullable: true },
 );

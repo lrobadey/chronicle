@@ -4,6 +4,7 @@ import {
   type SpineIntegrityIssue,
   type SpinePlacementType,
 } from '../engine/errors';
+import { getArchetypePreset, mergeItemComponents } from './archetypes';
 
 export type SpineEntityId = string;
 export type SpineRelationId = string;
@@ -432,6 +433,57 @@ export function validateSpineOrThrow(
   }
 }
 
+export interface ItemComponentSummary {
+  material?: string;
+  condition?: string;
+  sealed?: boolean;
+  broken?: boolean;
+  owner?: string;
+}
+
+/**
+ * Derive a concise component summary suitable for LLM context windows.
+ * Returns undefined when the entity has no meaningful component data.
+ */
+export function summarizeItemComponents(spine: SpineState, itemId: string): ItemComponentSummary | undefined {
+  const entity = spine.entities[itemId];
+  if (!entity || entity.kind !== 'item') return undefined;
+
+  const summary: ItemComponentSummary = {};
+  let populated = false;
+
+  if (entity.components.material?.primary) {
+    summary.material = entity.components.material.primary;
+    populated = true;
+  }
+
+  if (entity.components.condition) {
+    const c = entity.components.condition;
+    if (c.broken) {
+      summary.condition = 'broken';
+      summary.broken = true;
+    } else if (c.durability !== undefined) {
+      if (c.durability >= 80) summary.condition = 'good';
+      else if (c.durability >= 50) summary.condition = 'worn';
+      else if (c.durability >= 20) summary.condition = 'damaged';
+      else summary.condition = 'ruined';
+    }
+    populated = true;
+  }
+
+  if (entity.components.container?.sealed !== undefined) {
+    summary.sealed = entity.components.container.sealed;
+    populated = true;
+  }
+
+  if (entity.components.ownership?.legalOwnerId) {
+    summary.owner = entity.components.ownership.legalOwnerId;
+    populated = true;
+  }
+
+  return populated ? summary : undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -600,25 +652,28 @@ function buildLocationEntity(location: LocationPOI): SpineEntity {
 }
 
 function buildItemEntity(item: Item, placement: ItemPlacement, locations: Record<string, LocationPOI>): SpineEntity {
+  const preset = getArchetypePreset(item.archetype);
+  const merged = mergeItemComponents(preset, item.components);
+
+  merged.identity = item.description
+    ? { ...merged.identity, aliases: [item.description, ...(merged.identity?.aliases ?? [])] }
+    : merged.identity;
+
+  merged.location = placement.type === 'located_in'
+    ? {
+        ...merged.location,
+        anchor: placement.anchor,
+        terrain: locations[placement.locationId]?.terrain ?? resolveContainingLocation(placement.anchor, locations)?.terrain,
+      }
+    : undefined;
+
   return {
     id: item.id,
     kind: 'item',
-    archetype: 'item.generic',
+    archetype: item.archetype || 'item.generic',
     name: item.name,
     tags: item.tags,
-    components: {
-      identity: item.description
-        ? {
-            aliases: [item.description],
-          }
-        : undefined,
-      location: placement.type === 'located_in'
-        ? {
-            anchor: placement.anchor,
-            terrain: locations[placement.locationId]?.terrain ?? resolveContainingLocation(placement.anchor, locations)?.terrain,
-          }
-        : undefined,
-    },
+    components: merged,
   };
 }
 

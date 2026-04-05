@@ -1,4 +1,5 @@
 import type { Actor, ActorId, GridPos, ItemId, ItemLocationInput, LocationPOI } from './state';
+import type { ItemComponents } from './archetypes';
 
 export interface EventMeta {
   id: string;
@@ -41,6 +42,8 @@ export type WorldEvent =
         name: string;
         description?: string;
         tags?: string[];
+        archetype?: string;
+        components?: ItemComponents;
       };
       fromActorId?: ActorId;
       toActorId?: ActorId;
@@ -76,6 +79,8 @@ export type WorldEvent =
               description?: string;
               location: ItemLocationInput;
               tags?: string[];
+              archetype?: string;
+              components?: ItemComponents;
             };
           }
         | {

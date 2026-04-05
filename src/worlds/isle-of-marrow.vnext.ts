@@ -170,6 +170,12 @@ const items: Record<string, Item> = {
     id: 'heartwater-jar',
     name: 'Sealed jar of Heartwater',
     description: 'A small clay jar sealed with wax. The liquid inside glows faintly.',
+    archetype: 'item.container.clay_jar',
+    components: {
+      ownership: { creatorId: 'father-kel' },
+      condition: { durability: 80 },
+      container: { sealed: true, capacityL: 0.3 },
+    },
   },
 };
 

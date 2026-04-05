@@ -1,4 +1,5 @@
 import type { SpineState } from './spine';
+import type { ItemComponents } from './archetypes';
 
 export type GridPos = { x: number; y: number; z?: number };
 
@@ -55,6 +56,8 @@ export interface Item {
   name: string;
   description?: string;
   tags?: string[];
+  archetype?: string;
+  components?: ItemComponents;
 }
 
 export interface LocationPOI {

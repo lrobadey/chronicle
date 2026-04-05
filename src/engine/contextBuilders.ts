@@ -5,7 +5,7 @@ import { buildObservation } from '../sim/views/observe';
 import { buildTelemetry } from '../sim/views/telemetry';
 import { deriveTide } from '../sim/systems/tide';
 import { estimateTravel, LONG_TRAVEL_MINUTES } from '../sim/systems/travel';
-import { getItemPlacement } from '../sim/spine';
+import { getItemPlacement, summarizeItemComponents, type ItemComponentSummary } from '../sim/spine';
 import { distance } from '../sim/utils';
 import type { SpecialistType } from '../agents/specialists';
 
@@ -46,6 +46,7 @@ export interface GMWorldContext {
       name: string;
       pos: { x: number; y: number; z?: number };
       distanceMeters: number;
+      components?: ItemComponentSummary;
     }>;
   };
   map: WorldState['map'];
@@ -139,6 +140,7 @@ export function buildGMWorldContext(params: {
         name: item.name,
         pos: placement.anchor,
         distanceMeters: Math.round(distance(player.pos, placement.anchor) * state.map.cellSizeMeters),
+        components: summarizeItemComponents(state.spine, item.id),
       }];
     })
     .sort((a, b) => a.distanceMeters - b.distanceMeters)

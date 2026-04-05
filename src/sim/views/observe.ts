@@ -1,5 +1,5 @@
 import type { WorldState, ActorId } from '../state';
-import { getItemPlacement } from '../spine';
+import { getItemPlacement, summarizeItemComponents, type ItemComponentSummary } from '../spine';
 import { deriveTime } from '../systems/time';
 import { deriveTide } from '../systems/tide';
 import { deriveWeather } from '../systems/weather';
@@ -27,7 +27,7 @@ export interface Observation {
     blockedNow: boolean;
   }>;
   nearbyActors: Array<{ id: string; name: string; kind: 'player' | 'npc'; distance: number; pos: { x: number; y: number; z?: number } }>;
-  nearbyItems: Array<{ id: string; name: string; distance: number; pos: { x: number; y: number; z?: number } }>;
+  nearbyItems: Array<{ id: string; name: string; distance: number; pos: { x: number; y: number; z?: number }; components?: ItemComponentSummary }>;
   ledgerTail: string[];
 }
 
@@ -63,6 +63,7 @@ export function buildObservation(state: WorldState, playerId: ActorId): Observat
         name: item.name,
         distance: itemDistance,
         pos: placement.anchor,
+        components: summarizeItemComponents(state.spine, item.id),
       }];
     })
     .sort((a, b) => a.distance - b.distance);
