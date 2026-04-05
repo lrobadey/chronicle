@@ -276,6 +276,13 @@ export function buildRecentTurnDigests(state: WorldState, turnHistory: TurnRecor
     narration: summarizeNarration(turn.narration),
     accepted: turn.acceptedEvents.map(event => summarizeAcceptedEvent(state, event)),
     rejected: turn.rejectedEvents.map(rejection => summarizeRejectedReason(rejection.reason)),
+    npcInteractions: turn.npcOutputs?.length
+      ? turn.npcOutputs.map(o => ({
+          npcId: o.npcId,
+          utterance: clipText(o.publicUtterance, 160),
+          topic: o.topic,
+        }))
+      : undefined,
   }));
 }
 

@@ -39,8 +39,12 @@ function applyEventBase(state: WorldState, event: WorldEvent): WorldState {
       return applyDropItem(state, event);
     case 'TransferItem':
       return applyTransferItem(state, event);
-    case 'Speak':
-      return addLedger(state, event.note || `${state.actors[event.actorId]?.name || 'Someone'} speaks`);
+    case 'Speak': {
+      const speaker = state.actors[event.actorId]?.name || 'Someone';
+      const target = event.toActorId ? ` (to ${state.actors[event.toActorId]?.name || event.toActorId})` : '';
+      const ledgerText = event.note || `${speaker}${target}: "${event.text}"`;
+      return addLedger(state, ledgerText);
+    }
     case 'AdvanceTime':
       return advanceTime(state, event.minutes, event.note);
     case 'CreateEntity':

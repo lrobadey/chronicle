@@ -16,6 +16,7 @@ export interface RecentTurnDigest {
   narration: string | null;
   accepted: string[];
   rejected: string[];
+  npcInteractions?: Array<{ npcId: string; utterance: string; topic?: string }>;
 }
 
 export interface TurnRecord {

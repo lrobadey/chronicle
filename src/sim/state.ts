@@ -43,6 +43,11 @@ export interface Actor {
     goals: string[];
   };
   relationships?: Record<ActorId, { trust: number; fear: number; affinity: number }>;
+  npcState?: {
+    emotionalTone?: string;
+    privateIntent?: string;
+    lastConsultedTurn?: number;
+  };
 }
 
 export type ItemLocationInput =

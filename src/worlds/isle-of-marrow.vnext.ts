@@ -109,6 +109,9 @@ const actors: Record<string, Actor> = {
       voice: 'Measured, spare, observant.',
       goals: ['warn of storms', 'protect the ridge'],
     },
+    relationships: {
+      'player-1': { trust: 0.6, fear: 0.0, affinity: 0.5 },
+    },
   },
   'ledger-pike': {
     id: 'ledger-pike',
@@ -121,6 +124,9 @@ const actors: Record<string, Actor> = {
       background: 'Ledger keeps the market running and remembers every debt.',
       voice: 'Blunt, pragmatic, transactional.',
       goals: ['keep trade flowing', 'protect stock'],
+    },
+    relationships: {
+      'player-1': { trust: 0.3, fear: 0.0, affinity: 0.3 },
     },
   },
   'father-kel': {
@@ -135,6 +141,9 @@ const actors: Record<string, Actor> = {
       voice: 'Soft, deliberate, ritualistic.',
       goals: ['guard the spring', 'test the faithful'],
     },
+    relationships: {
+      'player-1': { trust: 0.5, fear: 0.0, affinity: 0.6 },
+    },
   },
   'aline-rua': {
     id: 'aline-rua',
@@ -147,6 +156,9 @@ const actors: Record<string, Actor> = {
       background: 'Aline listens for rumors in the tavern.',
       voice: 'Wry, guarded, curious.',
       goals: ['learn the truth', 'avoid traps'],
+    },
+    relationships: {
+      'player-1': { trust: 0.2, fear: 0.2, affinity: 0.4 },
     },
   },
   'tamar-vane': {
@@ -161,6 +173,9 @@ const actors: Record<string, Actor> = {
       background: 'Tamar has worked the Landing long enough to know which marks belong to tide, rope, and weather.',
       voice: 'Brisk, tide-wise, unsentimental.',
       goals: ['keep the morning unloading on schedule', 'notice what does not fit the tide-table'],
+    },
+    relationships: {
+      'player-1': { trust: 0.4, fear: 0.1, affinity: 0.5 },
     },
   },
 };

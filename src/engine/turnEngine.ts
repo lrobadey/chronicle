@@ -281,18 +281,50 @@ export class TurnEngine {
         if (!npc || npc.kind !== 'npc' || !npc.persona) {
           return { error: 'npc_not_found' };
         }
+
+        const recentHistory = turnHistory
+          .flatMap(record =>
+            (record.npcOutputs ?? [])
+              .filter(o => o.npcId === input.npcId)
+              .map(o => ({
+                turn: record.turn,
+                utterance: o.publicUtterance,
+                privateIntent: o.privateIntent,
+                emotionalTone: o.emotionalTone,
+                topic: o.topic,
+              })),
+          )
+          .slice(-5);
+
         const observation = buildObservation(draft, playerId);
-        const output = await runNpcAgent({
+        const rawOutput = await runNpcAgent({
           apiKey,
           npcId: npc.id,
           persona: { name: npc.name, tagline: npc.persona.tagline, background: npc.persona.background, voice: npc.persona.voice, goals: npc.persona.goals },
           observation,
           playerText,
+          topic: input.topic ?? undefined,
+          recentHistory,
           llm: this.llm,
           debug: emit,
           trace,
         });
+
+        const output = { ...rawOutput, topic: input.topic ?? undefined };
         npcOutputs.push(output);
+
+        // Persist mood and intent into draft world state so future turns can reference it
+        if (draft.actors[npc.id]) {
+          draft.actors[npc.id] = {
+            ...draft.actors[npc.id],
+            npcState: {
+              emotionalTone: output.emotionalTone,
+              privateIntent: output.privateIntent,
+              lastConsultedTurn: nextTurn,
+            },
+          };
+        }
+
         return output;
       },
       consult_specialist: async (input: { specialistType: SpecialistType; question: string; focus?: string | null }) => {

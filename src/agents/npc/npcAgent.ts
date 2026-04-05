@@ -30,6 +30,15 @@ export interface NpcAgentOutput {
   publicUtterance: string;
   privateIntent: string;
   emotionalTone?: string;
+  topic?: string;
+}
+
+export interface NpcHistoryEntry {
+  turn: number;
+  utterance: string;
+  privateIntent: string;
+  emotionalTone?: string;
+  topic?: string;
 }
 
 export interface NpcAgentParams {
@@ -39,6 +48,8 @@ export interface NpcAgentParams {
   persona: { name: string; tagline?: string; background?: string; voice?: string; goals?: string[] };
   observation: unknown;
   playerText: string;
+  topic?: string;
+  recentHistory?: NpcHistoryEntry[];
   llm: LLMClient;
   debug?: DebugSink;
   trace?: {
@@ -58,7 +69,7 @@ export interface NpcAgentParams {
 }
 
 export async function runNpcAgent(params: NpcAgentParams): Promise<NpcAgentOutput> {
-  const { apiKey, model = DEFAULT_MODEL, npcId, persona, observation, playerText, llm, debug, trace } = params;
+  const { apiKey, model = DEFAULT_MODEL, npcId, persona, observation, playerText, topic, recentHistory, llm, debug, trace } = params;
   emitDebugEvent(debug, { type: 'npc.started', npcId });
 
   if (!apiKey) {
@@ -77,7 +88,7 @@ export async function runNpcAgent(params: NpcAgentParams): Promise<NpcAgentOutpu
       apiKey,
       model,
       instructions: NPC_SYSTEM_PROMPT,
-      input: JSON.stringify({ persona, observation, playerText }),
+      input: JSON.stringify({ persona, observation, playerText, topic, recentHistory }),
       tools: [NPC_OUTPUT_TOOL],
       tool_choice: { type: 'function', name: NPC_OUTPUT_TOOL_NAME },
       truncation: 'auto',
