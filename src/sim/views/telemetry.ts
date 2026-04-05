@@ -27,6 +27,7 @@ export interface Telemetry {
     seenLocations: string[];
     seenActors: string[];
     seenItems: string[];
+    notes: string[];
   };
 }
 
@@ -73,6 +74,7 @@ export function buildTelemetry(state: WorldState, playerId: ActorId): Telemetry 
       seenLocations: Object.keys(knowledge.seenLocations),
       seenActors: Object.keys(knowledge.seenActors),
       seenItems: Object.keys(knowledge.seenItems),
+      notes: knowledge.notes,
     },
   };
 }

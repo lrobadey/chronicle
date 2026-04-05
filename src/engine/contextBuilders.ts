@@ -53,6 +53,23 @@ export interface GMWorldContext {
   playerTranscriptTail: PlayerTranscriptEntry[];
 }
 
+export interface OpeningContext {
+  isFirstWorldMessage: boolean;
+  focusLocation: {
+    id: string;
+    name: string;
+    description: string;
+  };
+  focalLocal: {
+    id: string;
+    name: string;
+    role: string;
+    stance: string;
+  } | null;
+  openingHook: string;
+  playerQuestion: string;
+}
+
 const RECENT_TURN_LIMIT = 10;
 const RECENT_PLAYER_TEXT_MAX_CHARS = 240;
 const RECENT_NARRATION_MAX_CHARS = 240;
@@ -185,6 +202,33 @@ export function buildStaffInterviewContext(params: {
   };
 }
 
+export function buildOpeningContext(state: WorldState): OpeningContext | null {
+  const spec = state.meta.openingSpec;
+  if (!spec) return null;
+  const focusLocation = state.locations[spec.focusLocationId];
+  if (!focusLocation) return null;
+  const focalActor = state.actors[spec.focalActorId];
+
+  return {
+    isFirstWorldMessage: true,
+    focusLocation: {
+      id: focusLocation.id,
+      name: focusLocation.name,
+      description: focusLocation.description,
+    },
+    focalLocal: focalActor
+      ? {
+          id: focalActor.id,
+          name: focalActor.name,
+          role: focalActor.tags?.[0]?.replace(/-/g, ' ') || focalActor.persona?.tagline || focalActor.kind,
+          stance: focalActor.persona?.voice || 'watchful',
+        }
+      : null,
+    openingHook: spec.hookText,
+    playerQuestion: spec.playerQuestion,
+  };
+}
+
 export function buildSpecialistContext(params: {
   state: WorldState;
   playerId: string;
@@ -308,6 +352,16 @@ function summarizeAcceptedEvent(state: WorldState, event: WorldEvent): string {
       return `Picked up ${state.items[event.itemId]?.name || event.itemId}`;
     case 'DropItem':
       return `Dropped ${state.items[event.itemId]?.name || event.itemId}`;
+    case 'TransferItem': {
+      const itemName = event.itemId
+        ? state.items[event.itemId]?.name || event.itemId
+        : event.item?.name || event.item?.id || 'an item';
+      if (event.toActorId) {
+        const targetName = state.actors[event.toActorId]?.name || event.toActorId;
+        return `Transferred ${itemName} to ${targetName}`;
+      }
+      return `Placed ${itemName} nearby`;
+    }
     case 'Speak': {
       const targetName = event.toActorId ? state.actors[event.toActorId]?.name || event.toActorId : null;
       return targetName ? `Spoke to ${targetName}` : 'Spoke aloud';

@@ -98,6 +98,16 @@ export const CREATE_ENTITY_SCHEMA = strictObjectSchema({
   data: CREATE_ENTITY_DATA_SCHEMA,
 });
 
+export const TRANSFER_ITEM_DATA_SCHEMA = strictObjectSchema(
+  {
+    id: { type: 'string' },
+    name: { type: 'string' },
+    description: { type: ['string', 'null'] },
+    tags: { type: ['array', 'null'], items: { type: 'string' } },
+  },
+  { nullable: true },
+);
+
 export const PENDING_PROMPT_DATA_SCHEMA = strictObjectSchema(
   {
     locationId: { type: ['string', 'null'] },
@@ -118,6 +128,7 @@ export const EVENT_ITEM_SCHEMA = {
         'MoveActor',
         'PickUpItem',
         'DropItem',
+        'TransferItem',
         'Speak',
         'AdvanceTime',
         'CreateEntity',
@@ -125,6 +136,7 @@ export const EVENT_ITEM_SCHEMA = {
         'TravelToLocation',
         'Explore',
         'Inspect',
+        'RecordClue',
       ],
     },
     actorId: { type: ['string', 'null'] },
@@ -132,6 +144,8 @@ export const EVENT_ITEM_SCHEMA = {
     toLocationId: { type: ['string', 'null'] },
     mode: { type: ['string', 'null'], enum: ['walk', 'run', null] },
     itemId: { type: ['string', 'null'] },
+    item: { ...TRANSFER_ITEM_DATA_SCHEMA, type: ['object', 'null'] },
+    fromActorId: { type: ['string', 'null'] },
     at: NULLABLE_GRID_POS_SCHEMA,
     text: { type: ['string', 'null'] },
     toActorId: { type: ['string', 'null'] },
@@ -154,6 +168,8 @@ export const EVENT_ITEM_SCHEMA = {
     'toLocationId',
     'mode',
     'itemId',
+    'item',
+    'fromActorId',
     'at',
     'text',
     'toActorId',

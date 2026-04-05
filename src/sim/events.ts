@@ -34,6 +34,21 @@ export type WorldEvent =
     }
   | {
       meta?: EventMeta;
+      type: 'TransferItem';
+      itemId?: ItemId;
+      item?: {
+        id: ItemId;
+        name: string;
+        description?: string;
+        tags?: string[];
+      };
+      fromActorId?: ActorId;
+      toActorId?: ActorId;
+      at?: GridPos;
+      note?: string;
+    }
+  | {
+      meta?: EventMeta;
       type: 'Speak';
       actorId: ActorId;
       text: string;
@@ -114,6 +129,14 @@ export type WorldEvent =
       type: 'Inspect';
       actorId: ActorId;
       subject: string;
+      note?: string;
+    }
+  | {
+      meta?: EventMeta;
+      type: 'RecordClue';
+      actorId: ActorId;
+      text: string;
+      subject?: string;
       note?: string;
     }
   | {

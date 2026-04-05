@@ -74,6 +74,55 @@ describe('world spine mirror', () => {
     assert.ok(created.actors['player-1']?.inventory.includes('player-cache'));
   });
 
+  it('transfers an existing item between actors through the spine', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+
+    const stocked = applyEvent(world, {
+      type: 'CreateEntity',
+      entity: {
+        kind: 'item',
+        data: {
+          id: 'aline-cup',
+          name: 'Aline Cup',
+          description: 'A plain ceramic cup.',
+          location: { kind: 'inventory', actorId: 'aline-rua' },
+        },
+      },
+    });
+
+    const transferred = applyEvent(stocked, {
+      type: 'TransferItem',
+      itemId: 'aline-cup',
+      fromActorId: 'aline-rua',
+      toActorId: 'player-1',
+    });
+
+    assert.equal(transferred.spine.relations['carried_by:aline-cup:player-1']?.type, 'carried_by');
+    assert.equal(transferred.spine.relations['carried_by:aline-cup:aline-rua'], undefined);
+    assert.ok(transferred.actors['player-1']?.inventory.includes('aline-cup'));
+    assert.deepEqual(transferred.actors['aline-rua']?.inventory, []);
+  });
+
+  it('materializes a newly served item directly into inventory', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+
+    const served = applyEvent(world, {
+      type: 'TransferItem',
+      item: {
+        id: 'dealers-choice',
+        name: "Dealer's Choice",
+        description: 'A quick-poured house drink.',
+        tags: ['drink'],
+      },
+      toActorId: 'player-1',
+      note: 'Aline slides over a quick-poured drink.',
+    });
+
+    assert.equal(served.spine.relations['carried_by:dealers-choice:player-1']?.type, 'carried_by');
+    assert.ok(served.actors['player-1']?.inventory.includes('dealers-choice'));
+    assert.equal(served.items['dealers-choice']?.name, "Dealer's Choice");
+  });
+
   it('rejects items with multiple canonical placement relations', () => {
     const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
 

@@ -9,6 +9,8 @@ import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
 import type { SpecialistType } from '../specialists';
 
+export type GMReasoningEffort = 'low' | 'medium' | 'high';
+
 export interface GMAgendaUpdates {
   scene?: SceneAgenda | null;
   world?: WorldAgenda | null;
@@ -34,6 +36,7 @@ export interface GMToolRuntime {
 export interface GMAgentParams {
   apiKey?: string;
   model?: string;
+  gmReasoningEffort?: GMReasoningEffort;
   playerText: string;
   worldContext?: unknown;
   runtime: GMToolRuntime;
@@ -58,7 +61,18 @@ export interface GMAgentParams {
 }
 
 export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boolean }> {
-  const { apiKey, model = DEFAULT_MODEL, playerText, worldContext, runtime, llm, maxIterations = 8, debug, trace } = params;
+  const {
+    apiKey,
+    model = DEFAULT_MODEL,
+    gmReasoningEffort = 'low',
+    playerText,
+    worldContext,
+    runtime,
+    llm,
+    maxIterations = 8,
+    debug,
+    trace,
+  } = params;
 
   let previousResponseId: string | undefined;
   let pendingInput: ResponseInputItem[] = [
@@ -119,6 +133,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       response = await llm.responsesCreate({
         apiKey,
         model,
+        reasoning: { effort: gmReasoningEffort },
         instructions: GM_SYSTEM_PROMPT,
         input: pendingInput,
         previous_response_id: previousResponseId,

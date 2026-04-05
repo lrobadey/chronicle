@@ -71,6 +71,7 @@ describe('GM agent loop', () => {
     assert.deepEqual(firstSystemPayload, { world: { turn: 3, weather: 'clear' } });
     assert.equal(firstInput[1]?.content, 'advance');
     assert.equal(firstCall.model, DEFAULT_MODEL);
+    assert.deepEqual(firstCall.reasoning, { effort: 'low' });
     assert.equal(secondCall.previous_response_id, 'resp-first');
 
     const secondInput = secondCall.input;
@@ -253,5 +254,57 @@ describe('GM agent loop', () => {
     assert.ok(outputItem);
     const parsedOutput = JSON.parse(String(outputItem?.output));
     assert.equal(parsedOutput.error, 'invalid_tool_arguments');
+  });
+
+  it('accepts an explicit GM reasoning override', async () => {
+    const highLLM = new QueueLLM([
+      {
+        id: 'resp-high',
+        output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'done' }],
+        output_text: '',
+      },
+    ]);
+
+    await runGMAgent({
+      apiKey: 'test-key',
+      gmReasoningEffort: 'high',
+      playerText: 'think harder',
+      worldContext: { turn: 1 },
+      llm: highLLM,
+      runtime: {
+        observe_world: async () => ({ ok: true }),
+        consult_npc: async () => ({ ok: true }),
+        consult_specialist: async () => ({ ok: true }),
+        propose_events: async () => ({ ok: true }),
+        finish_turn: async () => ({ ok: true }),
+      },
+    });
+
+    assert.deepEqual(highLLM.calls[0]?.reasoning, { effort: 'high' });
+
+    const mediumLLM = new QueueLLM([
+      {
+        id: 'resp-medium',
+        output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'done' }],
+        output_text: '',
+      },
+    ]);
+
+    await runGMAgent({
+      apiKey: 'test-key',
+      gmReasoningEffort: 'medium',
+      playerText: 'split the difference',
+      worldContext: { turn: 2 },
+      llm: mediumLLM,
+      runtime: {
+        observe_world: async () => ({ ok: true }),
+        consult_npc: async () => ({ ok: true }),
+        consult_specialist: async () => ({ ok: true }),
+        propose_events: async () => ({ ok: true }),
+        finish_turn: async () => ({ ok: true }),
+      },
+    });
+
+    assert.deepEqual(mediumLLM.calls[0]?.reasoning, { effort: 'medium' });
   });
 });

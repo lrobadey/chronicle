@@ -5,17 +5,20 @@ import type { TurnEngine } from '../engine/turnEngine';
 import type { InitResult, RunTurnOutput } from '../engine/turnEngine';
 import type { DebugEvent, DebugSink } from '../engine/debug';
 import { isChronicleError } from '../engine/errors';
+import type { GMReasoningEffort } from '../agents/gm/gmAgent';
 import type { NarratorStyle } from '../agents/narrator/narratorAgent';
 import type { WorldEvent } from '../sim/events';
 import { ThinkingAnimation, type ThinkingPhase } from './thinkingAnimation';
 
 export type DebugDetail = 'summary' | 'raw';
 export type CliApiMode = 'auto' | 'fallback' | 'live';
+const DEFAULT_GM_REASONING_EFFORT: GMReasoningEffort = 'low';
 
 export interface CliState {
   sessionId: string;
   playerId: string;
   narratorStyle: NarratorStyle;
+  gmReasoningEffort: GMReasoningEffort;
   apiKey?: string;
   debugEnabled: boolean;
   debugDetail: DebugDetail;
@@ -38,6 +41,7 @@ export interface CliEngine {
     playerId: string;
     playerText: string;
     apiKey?: string;
+    gmReasoningEffort?: GMReasoningEffort;
     narratorStyle?: NarratorStyle;
     debug?: { includeTrace?: boolean; onEvent?: DebugSink };
     stream?: {
@@ -146,6 +150,7 @@ export async function runCli(options: CliOptions): Promise<CliRunResult> {
       engine,
       sessionId,
       apiKey: resolvedApiKey,
+      gmReasoningEffort: DEFAULT_GM_REASONING_EFFORT,
       narratorStyle,
       debugEnabled,
       debugDetail,
@@ -198,6 +203,7 @@ export async function initCliSession(params: {
   engine: CliEngine;
   sessionId?: string;
   apiKey?: string;
+  gmReasoningEffort: GMReasoningEffort;
   narratorStyle: NarratorStyle;
   debugEnabled: boolean;
   debugDetail: DebugDetail;
@@ -205,7 +211,7 @@ export async function initCliSession(params: {
   write: (text: string) => void;
   thinkingAnimation: ThinkingAnimation;
 }): Promise<CliState> {
-  const { engine, sessionId, apiKey, narratorStyle, debugEnabled, debugDetail, apiMode, write, thinkingAnimation } = params;
+  const { engine, sessionId, apiKey, gmReasoningEffort, narratorStyle, debugEnabled, debugDetail, apiMode, write, thinkingAnimation } = params;
   const debugSink = debugEnabled ? createDebugWriter(write, debugDetail, thinkingAnimation) : undefined;
   const openingChunks: string[] = [];
   let openingStreamed = false;
@@ -263,6 +269,7 @@ export async function initCliSession(params: {
     sessionId: result.sessionId,
     playerId: 'player-1',
     narratorStyle,
+    gmReasoningEffort,
     apiKey: usedFallback ? undefined : apiKey,
     debugEnabled,
     debugDetail,
@@ -292,6 +299,7 @@ export async function handleCliLine(params: {
       case 'session':
         write(`\nSession: ${state.sessionId}\n`);
         write(`Narrator style: ${state.narratorStyle}\n`);
+        write(`GM reasoning: ${state.gmReasoningEffort}\n`);
         write(`Debug mode: ${state.debugEnabled ? 'on' : 'off'}\n`);
         write(`Debug detail: ${state.debugDetail}\n`);
         write(`API mode: ${state.apiKey ? 'live' : 'fallback'}\n\n`);
@@ -304,6 +312,16 @@ export async function handleCliLine(params: {
         }
         state = { ...state, narratorStyle: next };
         write(`\nNarrator style: ${next}\n\n`);
+        return { state, exit: false };
+      }
+      case 'reasoning': {
+        const next = parsed.args[0]?.toLowerCase();
+        if (!isGMReasoningEffort(next)) {
+          write('\nUsage: /reasoning <low|medium|high>\n\n');
+          return { state, exit: false };
+        }
+        state = { ...state, gmReasoningEffort: next };
+        write(`\nGM reasoning: ${next}\n\n`);
         return { state, exit: false };
       }
       case 'trace':
@@ -338,6 +356,7 @@ export async function handleCliLine(params: {
           engine,
           sessionId: requestedSession,
           apiKey: state.apiKey,
+          gmReasoningEffort: state.gmReasoningEffort,
           write,
           narratorStyle: state.narratorStyle,
           debugEnabled: state.debugEnabled,
@@ -484,6 +503,7 @@ Commands:
   /state                Show current state snapshot
   /session              Show session and mode info
   /style <name>         Set narrator style (lyric|cinematic|michener)
+  /reasoning <level>    Set GM reasoning (low|medium|high)
   /debug [on|off]       Toggle live debug timeline (default toggles)
   /trace [on|off]       Alias for /debug
   /detail <mode>        Set debug detail (summary|raw)
@@ -501,6 +521,10 @@ function parseToggle(token: string | undefined, fallback: boolean): boolean {
 
 function isNarratorStyle(value: string | undefined): value is NarratorStyle {
   return value === 'lyric' || value === 'cinematic' || value === 'michener';
+}
+
+function isGMReasoningEffort(value: string | undefined): value is GMReasoningEffort {
+  return value === 'low' || value === 'medium' || value === 'high';
 }
 
 function isDebugDetail(value: string | undefined): value is DebugDetail {
@@ -798,6 +822,10 @@ function summarizeWorldEvent(event: WorldEvent): string {
       return `pick up ${event.itemId}`;
     case 'DropItem':
       return `drop ${event.itemId}`;
+    case 'TransferItem': {
+      const itemName = event.itemId || event.item?.id || 'item';
+      return event.toActorId ? `transfer ${itemName} to ${event.toActorId}` : `place ${itemName} at ${formatGridPos(event.at || { x: 0, y: 0, z: 0 })}`;
+    }
     case 'Speak':
       return `speak as ${event.actorId}`;
     case 'AdvanceTime':
@@ -953,6 +981,7 @@ async function runTurnWithFallback(
     sessionId: state.sessionId,
     playerId: state.playerId,
     playerText,
+    gmReasoningEffort: state.gmReasoningEffort,
     narratorStyle: state.narratorStyle,
     debug: (state.debugEnabled || onDebugEvent)
       ? { includeTrace: state.debugEnabled, onEvent: onDebugEvent }

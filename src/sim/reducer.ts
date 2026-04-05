@@ -31,10 +31,14 @@ function applyEventBase(state: WorldState, event: WorldEvent): WorldState {
       return applyExplore(state, event);
     case 'Inspect':
       return applyInspect(state, event);
+    case 'RecordClue':
+      return applyRecordClue(state, event);
     case 'PickUpItem':
       return applyPickUpItem(state, event);
     case 'DropItem':
       return applyDropItem(state, event);
+    case 'TransferItem':
+      return applyTransferItem(state, event);
     case 'Speak':
       return addLedger(state, event.note || `${state.actors[event.actorId]?.name || 'Someone'} speaks`);
     case 'AdvanceTime':
@@ -150,6 +154,31 @@ function applyInspect(state: WorldState, event: Extract<WorldEvent, { type: 'Ins
   return next;
 }
 
+function applyRecordClue(state: WorldState, event: Extract<WorldEvent, { type: 'RecordClue' }>): WorldState {
+  const actor = state.actors[event.actorId];
+  if (!actor) return state;
+
+  const next = cloneState(state);
+  const text = event.text.trim();
+  const existing = next.knowledge[event.actorId] || {
+    seenActors: {},
+    seenItems: {},
+    seenLocations: {},
+    notes: [],
+  };
+
+  if (existing.notes.includes(text)) {
+    return state;
+  }
+
+  next.knowledge[event.actorId] = {
+    ...existing,
+    notes: [...existing.notes, text],
+  };
+  addLedgerInPlace(next, event.note || `Clue recorded: ${event.subject ? `${event.subject} - ` : ''}${text}`);
+  return next;
+}
+
 function applyPickUpItem(state: WorldState, event: Extract<WorldEvent, { type: 'PickUpItem' }>): WorldState {
   const actor = state.actors[event.actorId];
   const item = state.items[event.itemId];
@@ -175,6 +204,44 @@ function applyDropItem(state: WorldState, event: Extract<WorldEvent, { type: 'Dr
   setItemPlacement(next.spine, item.id, { type: 'located_in', locationId, anchor }, next.locations);
   addLedgerInPlace(next, event.note || `Dropped ${item.name}`);
   if (actor.kind === 'player') updateKnowledgeForActor(next, actor.id);
+  return next;
+}
+
+function applyTransferItem(state: WorldState, event: Extract<WorldEvent, { type: 'TransferItem' }>): WorldState {
+  const itemId = event.itemId || event.item?.id;
+  if (!itemId) return state;
+
+  const next = cloneState(state);
+  const existingItem = next.items[itemId];
+  if (!existingItem && !event.item) return state;
+
+  if (!existingItem && event.item) {
+    next.items[itemId] = {
+      id: event.item.id,
+      name: event.item.name,
+      description: event.item.description ?? undefined,
+      tags: event.item.tags,
+    };
+  }
+
+  const item = next.items[itemId];
+  if (!item) return state;
+
+  if (event.toActorId) {
+    const actor = next.actors[event.toActorId];
+    if (!actor) return state;
+    setItemPlacement(next.spine, item.id, { type: 'carried_by', actorId: actor.id }, next.locations);
+    addLedgerInPlace(next, event.note || `${actor.name} receives ${item.name}`);
+    if (actor.kind === 'player') updateKnowledgeForActor(next, actor.id);
+    return next;
+  }
+
+  if (!event.at) return state;
+  const locationId = resolvePlacementLocationId(next, event.at);
+  if (!locationId) return state;
+
+  setItemPlacement(next.spine, item.id, { type: 'located_in', locationId, anchor: event.at }, next.locations);
+  addLedgerInPlace(next, event.note || `${item.name} is set down`);
   return next;
 }
 

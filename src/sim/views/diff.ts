@@ -7,6 +7,7 @@ export interface TurnDiff {
   moved: boolean;
   newLocationName?: string;
   newItems: string[];
+  newClues: string[];
   events: WorldEvent[];
 }
 
@@ -17,10 +18,13 @@ export function computeTurnDiff(before: Telemetry, after: Telemetry, events: Wor
 
   const beforeItems = new Set(before.player.inventory.map(i => i.id));
   const newItems = after.player.inventory.filter(i => !beforeItems.has(i.id)).map(i => i.name);
+  const beforeClues = new Set(before.knowledge.notes);
+  const newClues = after.knowledge.notes.filter(note => !beforeClues.has(note));
 
   const summaryParts: string[] = [];
   if (moved) summaryParts.push(`Moved to ${after.location.name}`);
   if (newItems.length) summaryParts.push(`Picked up ${newItems.join(', ')}`);
+  if (newClues.length) summaryParts.push(`Learned ${newClues.join('; ')}`);
   if (!summaryParts.length && timeDeltaMinutes > 0) summaryParts.push(`${timeDeltaMinutes} minutes pass`);
 
   return {
@@ -29,6 +33,7 @@ export function computeTurnDiff(before: Telemetry, after: Telemetry, events: Wor
     moved,
     newLocationName,
     newItems,
+    newClues,
     events,
   };
 }

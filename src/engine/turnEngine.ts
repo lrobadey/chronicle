@@ -22,7 +22,7 @@ import { getItemPlacement } from '../sim/spine';
 import { distance } from '../sim/utils';
 import { OpenAIClient } from '../agents/llm/openaiClient';
 import type { LLMClient } from '../agents/llm/types';
-import { runGMAgent, type GMFinishTurnInput } from '../agents/gm/gmAgent';
+import { runGMAgent, type GMFinishTurnInput, type GMReasoningEffort } from '../agents/gm/gmAgent';
 import { runNpcAgent, type NpcAgentOutput } from '../agents/npc/npcAgent';
 import { narrateOpening, narrateTurn, type NarratorStyle } from '../agents/narrator/narratorAgent';
 import {
@@ -40,6 +40,7 @@ import { createIsleOfMarrowWorldVNext } from '../worlds/isle-of-marrow.vnext';
 import type { DebugSink } from './debug';
 import { emitDebugEvent } from './debug';
 import {
+  buildOpeningContext,
   buildGMWorldContext,
   buildRecentTurnDigests,
   buildSpecialistContext,
@@ -73,6 +74,7 @@ export interface RunTurnInput {
   playerId: string;
   playerText: string;
   apiKey?: string;
+  gmReasoningEffort?: GMReasoningEffort;
   narratorStyle?: NarratorStyle;
   debug?: { includeTrace?: boolean; onEvent?: DebugSink };
   stream?: {
@@ -123,6 +125,8 @@ export class TurnEngine {
       stream?.onOpeningStart?.(telemetry);
       const opening = await narrateOpening({
         apiKey,
+        openingMode: ensured.created ? 'first-world' : 'resume',
+        openingContext: ensured.created ? buildOpeningContext(ensured.state) : null,
         telemetry,
         llm: this.llm,
         debug: emit,
@@ -185,7 +189,7 @@ export class TurnEngine {
   }
 
   async runTurn(input: RunTurnInput): Promise<RunTurnOutput> {
-    const { sessionId, playerId, playerText, apiKey, narratorStyle, debug, stream } = input;
+    const { sessionId, playerId, playerText, apiKey, gmReasoningEffort, narratorStyle, debug, stream } = input;
     const emit = debug?.onEvent;
     if (!playerText?.trim()) throw new InputValidationError('playerText is required');
 
@@ -346,6 +350,7 @@ export class TurnEngine {
       });
       await runGMAgent({
         apiKey,
+        gmReasoningEffort,
         playerText,
         worldContext: gmWorldContext,
         runtime,

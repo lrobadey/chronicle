@@ -57,6 +57,8 @@ export function validateEvent(state: WorldState, event: WorldEvent): ValidationR
       }
       return { ok: true };
     }
+    case 'TransferItem':
+      return validateTransferItem(state, event);
     case 'Speak': {
       const actor = getActor(state, event.actorId);
       if (!actor) return { ok: false, reason: 'actor_not_found' };
@@ -86,6 +88,14 @@ export function validateEvent(state: WorldState, event: WorldEvent): ValidationR
       const actor = getActor(state, event.actorId);
       if (!actor) return { ok: false, reason: 'actor_not_found' };
       if (!event.subject?.trim()) return { ok: false, reason: 'inspect_subject_required' };
+      return { ok: true };
+    }
+    case 'RecordClue': {
+      const actor = getActor(state, event.actorId);
+      if (!actor) return { ok: false, reason: 'actor_not_found' };
+      if (!event.text?.trim()) return { ok: false, reason: 'clue_text_required' };
+      const knowledge = state.knowledge[event.actorId];
+      if (knowledge?.notes.includes(event.text.trim())) return { ok: false, reason: 'clue_already_known' };
       return { ok: true };
     }
     case 'CreateEntity':
@@ -166,5 +176,58 @@ function validateCreateEntity(state: WorldState, event: Extract<WorldEvent, { ty
   if (!data.name.trim()) return { ok: false, reason: 'location_name_required' };
   if (!data.description.trim()) return { ok: false, reason: 'location_description_required' };
   if (!isWithinBounds(state, data.anchor)) return { ok: false, reason: 'location_anchor_out_of_bounds' };
+  return { ok: true };
+}
+
+function validateTransferItem(state: WorldState, event: Extract<WorldEvent, { type: 'TransferItem' }>): ValidationResult {
+  const hasItemId = typeof event.itemId === 'string' && event.itemId.trim().length > 0;
+  const hasItemPayload = Boolean(event.item);
+
+  if (!hasItemId && !hasItemPayload) return { ok: false, reason: 'transfer_item_required' };
+
+  if (event.item) {
+    if (!event.item.id.trim() || !event.item.name.trim()) {
+      return { ok: false, reason: 'transfer_item_payload_invalid' };
+    }
+    if (hasItemId && event.itemId !== event.item.id) {
+      return { ok: false, reason: 'transfer_item_id_mismatch' };
+    }
+    if (!state.items[event.item.id] && !event.item.name.trim()) {
+      return { ok: false, reason: 'transfer_item_payload_invalid' };
+    }
+  }
+
+  const itemId = hasItemId ? event.itemId! : event.item!.id;
+  const existingItem = state.items[itemId];
+  if (!existingItem && !event.item) return { ok: false, reason: 'item_not_found' };
+  if (existingItem && event.item && event.item.name.trim().length === 0) return { ok: false, reason: 'transfer_item_payload_invalid' };
+
+  const hasDestinationActor = typeof event.toActorId === 'string' && event.toActorId.trim().length > 0;
+  const hasDestinationPos = typeof event.at === 'object' && event.at !== null;
+  if (hasDestinationActor === hasDestinationPos) {
+    return { ok: false, reason: 'transfer_destination_required' };
+  }
+
+  if (hasDestinationActor && !getActor(state, event.toActorId!)) {
+    return { ok: false, reason: 'transfer_target_actor_not_found' };
+  }
+
+  if (hasDestinationPos && !isWithinBounds(state, event.at!)) {
+    return { ok: false, reason: 'item_location_out_of_bounds' };
+  }
+
+  if (existingItem && event.fromActorId) {
+    const sourceActor = getActor(state, event.fromActorId);
+    if (!sourceActor) return { ok: false, reason: 'transfer_source_actor_not_found' };
+    const placement = getItemPlacement(state.spine, itemId);
+    if (
+      !placement
+      || (placement.type !== 'carried_by' && placement.type !== 'worn_by')
+      || placement.actorId !== event.fromActorId
+    ) {
+      return { ok: false, reason: 'item_not_held_by_source_actor' };
+    }
+  }
+
   return { ok: true };
 }

@@ -752,6 +752,7 @@ describe('TurnEngine', () => {
     const { rootDir, store } = await createStore();
     try {
       const fixedNow = new Date('2030-06-01T08:37:00.000Z');
+      const expectedAnchor = '2030-06-01T06:00:00.000Z';
       const engine = new TurnEngine({
         store,
         llm: new QueueLLM([]),
@@ -761,9 +762,9 @@ describe('TurnEngine', () => {
       const init = await engine.initSession({});
       const state = await store.loadSession(init.sessionId);
 
-      assert.equal(state?.systems.timeConfig.anchorIso, fixedNow.toISOString());
-      assert.equal(init.telemetry.time.absoluteIso, fixedNow.toISOString());
-      assert.equal(init.telemetry.time.currentHour, 8);
+      assert.equal(state?.systems.timeConfig.anchorIso, expectedAnchor);
+      assert.equal(init.telemetry.time.absoluteIso, expectedAnchor);
+      assert.equal(init.telemetry.time.currentHour, 6);
       assert.equal(init.telemetry.time.currentDay, 1);
     } finally {
       await removeDir(rootDir);
@@ -775,6 +776,7 @@ describe('TurnEngine', () => {
     try {
       const firstNow = new Date('2030-06-01T08:37:00.000Z');
       const laterNow = new Date('2031-07-02T19:12:00.000Z');
+      const expectedAnchor = '2030-06-01T06:00:00.000Z';
       const firstEngine = new TurnEngine({
         store,
         llm: new QueueLLM([]),
@@ -790,10 +792,64 @@ describe('TurnEngine', () => {
       const state = await store.loadSession(init.sessionId);
 
       assert.equal(resumed.created, false);
-      assert.equal(state?.systems.timeConfig.anchorIso, firstNow.toISOString());
-      assert.equal(resumed.telemetry.time.absoluteIso, firstNow.toISOString());
+      assert.equal(state?.systems.timeConfig.anchorIso, expectedAnchor);
+      assert.equal(resumed.telemetry.time.absoluteIso, expectedAnchor);
     } finally {
       await removeDir(rootDir);
     }
+  });
+
+  it('uses first-world opening context only when creating a new session', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        { id: 'open-1', output: [], output_text: 'First opener.' },
+        { id: 'open-2', output: [], output_text: 'Resume opener.' },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+
+      const init = await engine.initSession({ apiKey: 'test-key' });
+      const resumed = await engine.initSession({ sessionId: init.sessionId, apiKey: 'test-key' });
+
+      assert.equal(init.created, true);
+      assert.equal(resumed.created, false);
+
+      const firstInput = JSON.parse(String(llm.calls[0]?.input));
+      const resumedInput = JSON.parse(String(llm.calls[1]?.input));
+
+      assert.equal(firstInput.openingMode, 'first-world');
+      assert.equal(firstInput.openingContext.isFirstWorldMessage, true);
+      assert.equal(firstInput.openingContext.focalLocal.name, 'Tamar Vane');
+      assert.equal(firstInput.openingContext.focusLocation.id, 'the-landing');
+      assert.equal(resumedInput.openingMode, 'resume');
+      assert.equal(resumedInput.openingContext, null);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('authors first-message opener state into the live world seed', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+
+    assert.equal(world.systems.timeConfig.anchorIso, '2025-01-01T06:00:00.000Z');
+    assert.equal(world.systems.timeConfig.startHour, 6);
+    assert.equal(world.meta.openingSpec?.focalActorId, 'tamar-vane');
+    assert.equal(world.meta.openingSpec?.focusLocationId, 'the-landing');
+    assert.ok(world.meta.openingSpec?.hookText.includes('weed-line'));
+    assert.ok(world.meta.openingSpec?.playerQuestion.includes('Why has Tamar Vane'));
+    assert.equal(world.actors['tamar-vane']?.tags?.includes('dockhand'), true);
+    assert.equal(world.agendas.scene.currentFocus, 'Dawn arrival at the Landing');
+    assert.equal(
+      world.agendas.world.introductionOpportunities[0],
+      'Tamar Vane can explain why the tide-mark on the pilings has the dockhands unsettled.',
+    );
+    assert.equal(
+      world.ledger[1]?.text,
+      'You arrive at first light at the Landing, where dark sand meets ancient bone.',
+    );
+    assert.equal(
+      world.ledger[2]?.text,
+      'Tamar Vane halts the dawn rope-check, staring at a weed-line wrapped too high on the outer pilings.',
+    );
   });
 });

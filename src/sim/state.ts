@@ -111,7 +111,15 @@ export interface WorldMeta {
   seed: string;
   version: string;
   turn: number;
+  openingSpec?: OpeningSpec;
   pendingPrompt?: PendingPrompt;
+}
+
+export interface OpeningSpec {
+  focalActorId: ActorId;
+  focusLocationId: LocationId;
+  hookText: string;
+  playerQuestion: string;
 }
 
 export interface PendingPrompt {

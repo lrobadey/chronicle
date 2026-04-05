@@ -149,6 +149,20 @@ const actors: Record<string, Actor> = {
       goals: ['learn the truth', 'avoid traps'],
     },
   },
+  'tamar-vane': {
+    id: 'tamar-vane',
+    kind: 'npc',
+    name: 'Tamar Vane',
+    pos: { x: 28, y: 42, z: 0 },
+    inventory: [],
+    tags: ['dockhand', 'witness'],
+    persona: {
+      tagline: 'A dockhand who keeps first-light watch on the pilings.',
+      background: 'Tamar has worked the Landing long enough to know which marks belong to tide, rope, and weather.',
+      voice: 'Brisk, tide-wise, unsentimental.',
+      goals: ['keep the morning unloading on schedule', 'notice what does not fit the tide-table'],
+    },
+  },
 };
 
 const items: Record<string, Item> = {
@@ -164,12 +178,12 @@ const itemPlacements: Record<string, ItemLocationInput> = {
 };
 
 export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): WorldState {
-  const startedAt = options.anchorIso ?? new Date().toISOString();
-  const startedDate = new Date(startedAt);
+  const startedDate = normalizeOpeningAnchor(options.anchorIso ?? new Date().toISOString());
+  const startedAt = startedDate.toISOString();
   const knowledge: Record<string, KnowledgeState> = {
     'player-1': {
       seenLocations: { 'the-landing': true },
-      seenActors: { 'player-1': true },
+      seenActors: { 'player-1': true, 'tamar-vane': true },
       seenItems: {},
       notes: [],
     },
@@ -181,6 +195,13 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
       seed: 'isle-of-marrow-1825',
       version: 'vnext-0.2',
       turn: 0,
+      openingSpec: {
+        focalActorId: 'tamar-vane',
+        focusLocationId: 'the-landing',
+        hookText:
+          'Tamar Vane has paused halfway through the dawn rope-check at the outer pilings, staring at a fresh black weed-line wrapped too high above the water for the morning tide.',
+        playerQuestion: 'Why has Tamar Vane broken his routine at the docks, and what did the tide leave on those pilings before dawn?',
+      },
     },
     map: {
       minX: -1000,
@@ -205,7 +226,7 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
     },
     systems: {
       time: { elapsedMinutes: 0 },
-      timeConfig: { anchorIso: startedAt, startHour: startedDate.getUTCHours() },
+      timeConfig: { anchorIso: startedAt, startHour: 6 },
       tideConfig: { cycleMinutes: 720 },
       weatherConfig: { climate: 'temperate', seed: 'isle-of-marrow', cadenceMinutes: 60 },
       economyConfig: {
@@ -214,20 +235,24 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
     },
     agendas: {
       scene: {
-        currentFocus: 'Arrival at the Landing',
-        pressures: ['The tide is high and cuts off the Maw.'],
-        unresolvedBeats: ['Learn what the island wants from you.'],
-        immediateTensions: ['The island is unfamiliar and larger than it first appears.'],
+        currentFocus: 'Dawn arrival at the Landing',
+        pressures: [
+          'Tamar Vane has stopped the dock routine over a tide-mark left too high on the pilings.',
+          'The tide is high and cuts off the Maw.',
+        ],
+        unresolvedBeats: ['Find out what Tamar Vane has seen at the docks.'],
+        immediateTensions: ['Your arrival is noticed before the morning work has settled into rhythm.'],
       },
       world: {
-        activeThreads: ['Life continues around the leviathan bones.'],
-        introductionOpportunities: ['A local with useful knowledge could notice the player.'],
-        escalationHooks: ['Travel inland reveals how much larger the Isle of Marrow is than the shoreline suggests.'],
+        activeThreads: ['The docks keep their own watch at first light.'],
+        introductionOpportunities: ['Tamar Vane can explain why the tide-mark on the pilings has the dockhands unsettled.'],
+        escalationHooks: ['If the tide has left something out of pattern, the island routine will bend around it before noon.'],
       },
     },
     ledger: [
       { turn: 0, text: 'Isle of Marrow initialized' },
-      { turn: 0, text: 'You arrive at the Landing, where dark sand meets ancient bone.' },
+      { turn: 0, text: 'You arrive at first light at the Landing, where dark sand meets ancient bone.' },
+      { turn: 0, text: 'Tamar Vane halts the dawn rope-check, staring at a weed-line wrapped too high on the outer pilings.' },
       { turn: 0, text: 'The tide is high. The Maw is flooded and impassable.' },
     ],
     knowledge,
@@ -235,4 +260,10 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
 
   world.spine = buildInitialSpine(world, itemPlacements);
   return world;
+}
+
+function normalizeOpeningAnchor(anchorIso: string): Date {
+  const normalized = new Date(anchorIso);
+  normalized.setUTCHours(6, 0, 0, 0);
+  return normalized;
 }

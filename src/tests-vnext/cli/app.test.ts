@@ -16,7 +16,7 @@ class StubCliEngine implements CliEngine {
       onOpeningDelta?: (delta: string) => void;
     };
   }> = [];
-  readonly turnCalls: Array<{ apiKey?: string; playerText: string; includeTrace?: boolean; debugEnabled?: boolean }> = [];
+  readonly turnCalls: Array<{ apiKey?: string; playerText: string; gmReasoningEffort?: 'low' | 'medium' | 'high'; includeTrace?: boolean; debugEnabled?: boolean }> = [];
   initCounter = 0;
 
   async initSession(params: {
@@ -76,7 +76,7 @@ class StubCliEngine implements CliEngine {
         signals: [],
       },
       ledgerTail: ['init'],
-      knowledge: { seenLocations: ['the-landing'], seenActors: ['player-1'], seenItems: [] },
+      knowledge: { seenLocations: ['the-landing'], seenActors: ['player-1'], seenItems: [], notes: [] },
     };
   }
 
@@ -85,6 +85,7 @@ class StubCliEngine implements CliEngine {
     playerId: string;
     playerText: string;
     apiKey?: string;
+    gmReasoningEffort?: 'low' | 'medium' | 'high';
     narratorStyle?: 'lyric' | 'cinematic' | 'michener';
     debug?: { includeTrace?: boolean; onEvent?: DebugSink };
     stream?: {
@@ -95,6 +96,7 @@ class StubCliEngine implements CliEngine {
     this.turnCalls.push({
       apiKey: input.apiKey,
       playerText: input.playerText,
+      gmReasoningEffort: input.gmReasoningEffort,
       includeTrace: input.debug?.includeTrace,
       debugEnabled: Boolean(input.debug?.onEvent),
     });
@@ -157,6 +159,7 @@ function baseState(overrides: Partial<CliState> = {}): CliState {
     sessionId: 'session-1',
     playerId: 'player-1',
     narratorStyle: 'michener',
+    gmReasoningEffort: 'low',
     apiKey: 'test-key',
     debugEnabled: true,
     debugDetail: 'summary',
@@ -205,6 +208,7 @@ describe('CLI app', () => {
       engine,
       sessionId: undefined,
       apiKey: 'bad-key',
+      gmReasoningEffort: 'low',
       narratorStyle: 'michener',
       debugEnabled: true,
       debugDetail: 'summary',
@@ -233,12 +237,16 @@ describe('CLI app', () => {
     ({ state } = await handleCliLine({ state, line: '/style lyric', engine, write: text => writes.push(text), thinkingAnimation }));
     assert.equal(state.narratorStyle, 'lyric');
 
+    ({ state } = await handleCliLine({ state, line: '/reasoning medium', engine, write: text => writes.push(text), thinkingAnimation }));
+    assert.equal(state.gmReasoningEffort, 'medium');
+
     ({ state } = await handleCliLine({ state, line: 'look around', engine, write: text => writes.push(text), thinkingAnimation }));
     assert.equal(state.apiKey, undefined);
     assert.equal(state.apiMode, 'fallback');
     assert.equal(engine.turnCalls.length, 2);
     assert.equal(engine.turnCalls[0]?.apiKey, 'bad-key');
     assert.equal(engine.turnCalls[1]?.apiKey, undefined);
+    assert.equal(engine.turnCalls[1]?.gmReasoningEffort, 'medium');
     assert.equal(engine.turnCalls[1]?.includeTrace, true);
     assert.equal(engine.turnCalls[1]?.debugEnabled, true);
     const output = writes.join('');
@@ -327,10 +335,48 @@ describe('CLI app', () => {
     ({ state } = await handleCliLine({ state, line: '/detail raw', engine, write: text => writes.push(text), thinkingAnimation }));
     assert.equal(state.debugDetail, 'raw');
 
+    ({ state } = await handleCliLine({ state, line: '/reasoning high', engine, write: text => writes.push(text), thinkingAnimation }));
+    assert.equal(state.gmReasoningEffort, 'high');
+
     ({ state } = await handleCliLine({ state, line: '/session', engine, write: text => writes.push(text), thinkingAnimation }));
     const output = writes.join('');
+    assert.ok(output.includes('GM reasoning: high'));
     assert.ok(output.includes('Debug mode: on'));
     assert.ok(output.includes('Debug detail: raw'));
+  });
+
+  it('shows usage for invalid reasoning input and leaves state unchanged', async () => {
+    const engine = new StubCliEngine();
+    const writes: string[] = [];
+    let state = baseState({ gmReasoningEffort: 'medium' });
+
+    ({ state } = await handleCliLine({
+      state,
+      line: '/reasoning extreme',
+      engine,
+      write: text => writes.push(text),
+      thinkingAnimation: createThinkingAnimation(new ScriptedTerminal([])),
+    }));
+
+    assert.equal(state.gmReasoningEffort, 'medium');
+    assert.ok(writes.join('').includes('Usage: /reasoning <low|medium|high>'));
+  });
+
+  it('preserves GM reasoning across /new within one CLI process', async () => {
+    const engine = new StubCliEngine();
+    const writes: string[] = [];
+    let state = baseState({ gmReasoningEffort: 'high' });
+
+    ({ state } = await handleCliLine({
+      state,
+      line: '/new session-2',
+      engine,
+      write: text => writes.push(text),
+      thinkingAnimation: createThinkingAnimation(new ScriptedTerminal([])),
+    }));
+
+    assert.equal(state.sessionId, 'session-2');
+    assert.equal(state.gmReasoningEffort, 'high');
   });
 
   it('renders planned tool names and raw payloads for tool timeline events', () => {
@@ -450,6 +496,7 @@ describe('CLI app', () => {
         playerId: string;
         playerText: string;
         apiKey?: string;
+        gmReasoningEffort?: 'low' | 'medium' | 'high';
         narratorStyle?: 'lyric' | 'cinematic' | 'michener';
         debug?: { includeTrace?: boolean; onEvent?: DebugSink };
         stream?: {

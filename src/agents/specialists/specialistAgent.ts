@@ -3,7 +3,7 @@ import { DEFAULT_MODEL } from '../llm/defaults';
 import { classifyLLMError } from '../llm/errorUtils';
 import { emitDebugEvent, type DebugSink } from '../../engine/debug';
 import { EVENT_ITEM_SCHEMA, strictObjectSchema } from '../sharedSchemas';
-import { normalizeWorldEvent } from '../../sim/events';
+import { normalizeWorldEvent, type WorldEvent } from '../../sim/events';
 import { SPECIALIST_SYSTEM_PROMPTS } from './prompts';
 import type {
   SpecialistAgentOutput,
@@ -121,8 +121,12 @@ export async function runSpecialistAgent(params: SpecialistAgentParams): Promise
     return fallback;
   }
 
-  emitDebugEvent(debug, { type: 'specialist.completed', specialistType, output: parsed });
-  return parsed;
+  const output = {
+    ...parsed,
+    candidateEvents: parsed.candidateEvents.filter(isUsableCandidateEvent),
+  };
+  emitDebugEvent(debug, { type: 'specialist.completed', specialistType, output });
+  return output;
 }
 
 export function finalizeSpecialistConsultations(
@@ -192,6 +196,13 @@ function parseSpecialistOutput(specialistType: SpecialistType, argumentsJSON: st
   } catch {
     return null;
   }
+}
+
+function isUsableCandidateEvent(event: WorldEvent): boolean {
+  if (event.type === 'Speak') {
+    return typeof event.actorId === 'string' && event.actorId.trim().length > 0;
+  }
+  return true;
 }
 
 function isFunctionCallItem(item: ResponseOutputItem): item is {

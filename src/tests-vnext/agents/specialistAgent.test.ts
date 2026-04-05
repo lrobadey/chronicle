@@ -132,6 +132,43 @@ describe('specialist agent', () => {
     ]);
   });
 
+  it('drops speakerless Speak suggestions from specialist candidate events', async () => {
+    const llm = new QueueLLM([
+      {
+        id: 'resp-specialist-4',
+        output: [
+          {
+            type: 'function_call',
+            name: 'emit_specialist_advice',
+            arguments:
+              '{"summary":"Reward the wait.","recommendations":["Let the room speak."],"candidateEvents":[{"type":"Speak","actorId":null,"to":null,"toLocationId":null,"mode":null,"itemId":null,"at":null,"text":"A rumor rises from the room.","toActorId":"player-1","minutes":null,"entity":null,"key":null,"value":null,"locationId":"the-drunken-vertebra","pace":null,"confirmId":null,"area":null,"direction":null,"subject":"ambient rumor","note":"Invalid because it has no real speaker."},{"type":"AdvanceTime","actorId":null,"to":null,"toLocationId":null,"mode":null,"itemId":null,"at":null,"text":null,"toActorId":null,"minutes":8,"entity":null,"key":null,"value":null,"locationId":null,"pace":null,"confirmId":null,"area":null,"direction":null,"subject":null,"note":"Let the room settle."}],"creationIntent":null,"risks":[]}',
+            call_id: 'specialist-call-4',
+          },
+        ],
+        output_text: '',
+      },
+    ]);
+
+    const result = await runSpecialistAgent({
+      apiKey: 'test-key',
+      specialistType: 'scene',
+      question: 'What should happen next?',
+      focus: 'the vertebra',
+      context: {
+        agendas: { currentFocus: 'Arrival', pressures: [], unresolvedBeats: [], immediateTensions: [] },
+        pendingPrompt: null,
+        telemetry: { turn: 3 },
+        observation: { nearbyActors: [] },
+        playerText: 'wait',
+        recentTurns: [],
+      },
+      llm,
+    });
+
+    assert.equal(result.candidateEvents.length, 1);
+    assert.equal(result.candidateEvents[0]?.type, 'AdvanceTime');
+  });
+
   it('marks suggested events as used only when the GM accepts matching events', () => {
     const consultations = finalizeSpecialistConsultations(
       [
