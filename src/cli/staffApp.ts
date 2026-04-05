@@ -3,6 +3,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import type { CliTerminal } from './app';
 import type { StaffInterviewContext } from '../engine/contextBuilders';
 import type { StaffInterviewMessage, StaffInterviewResult } from '../agents/staffInterview';
+import { parseCommand } from './commandParsing';
 
 export interface StaffCliEngine {
   ensureStaffSession(params: { sessionId?: string; playerId: string }): Promise<{
@@ -205,11 +206,6 @@ Commands:
   /new [sessionId]      Open or create another interview session
   /exit                 Exit staff CLI
 `;
-}
-
-function parseCommand(line: string): { name: string; args: string[] } {
-  const [name, ...args] = line.slice(1).trim().split(/\s+/);
-  return { name: (name || '').toLowerCase(), args };
 }
 
 function formatError(error: unknown): string {
