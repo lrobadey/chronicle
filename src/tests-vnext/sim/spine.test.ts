@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { createIsleOfMarrowWorldVNext } from '../../worlds/isle-of-marrow.vnext';
 import { applyEvent } from '../../sim/reducer';
-import { getItemPlacement, setItemPlacement, syncWorldSpine, validateSpineOrThrow, type SpineRelation } from '../../sim/spine';
+import { getItemPlacement, setItemPlacement, summarizeItemComponents, syncWorldSpine, validateSpineOrThrow, type SpineRelation } from '../../sim/spine';
+import { getArchetypePreset, mergeItemComponents } from '../../sim/archetypes';
 import { SpineIntegrityError } from '../../engine/errors';
 
 const FIXED_ANCHOR = '2025-01-01T14:00:00Z';
@@ -219,5 +220,162 @@ describe('world spine mirror', () => {
       assert.equal(issues.issues.some(issue => issue.code === 'index_missing_relation'), true);
       return true;
     });
+  });
+});
+
+describe('item components', () => {
+  it('resolves archetype preset defaults onto the spine entity', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    const entity = world.spine.entities['heartwater-jar'];
+
+    assert.equal(entity?.archetype, 'item.container.clay_jar');
+    assert.equal(entity?.components.material?.primary, 'clay');
+    assert.equal(entity?.components.material?.flammable, false);
+    assert.equal(entity?.components.physical?.volumeL, 0.5);
+    assert.equal(entity?.components.physical?.portable, true);
+  });
+
+  it('applies item-level overrides over preset defaults', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    const entity = world.spine.entities['heartwater-jar'];
+
+    assert.equal(entity?.components.condition?.durability, 80);
+    assert.equal(entity?.components.container?.sealed, true);
+    assert.equal(entity?.components.container?.capacityL, 0.3);
+    assert.equal(entity?.components.ownership?.creatorId, 'father-kel');
+  });
+
+  it('round-trips item components through syncWorldSpine', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+
+    const synced = syncWorldSpine(JSON.parse(JSON.stringify(world)));
+    const entity = synced.spine.entities['heartwater-jar'];
+
+    assert.equal(entity?.archetype, 'item.container.clay_jar');
+    assert.equal(entity?.components.material?.primary, 'clay');
+    assert.equal(entity?.components.condition?.durability, 80);
+    assert.equal(entity?.components.container?.sealed, true);
+    assert.equal(entity?.components.ownership?.creatorId, 'father-kel');
+  });
+
+  it('works for items with no archetype or components (backward compat)', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+
+    const created = applyEvent(world, {
+      type: 'CreateEntity',
+      entity: {
+        kind: 'item',
+        data: {
+          id: 'plain-rock',
+          name: 'A plain rock',
+          location: { kind: 'ground', pos: { x: 0, y: 0, z: 0 } },
+        },
+      },
+    });
+
+    const entity = created.spine.entities['plain-rock'];
+    assert.equal(entity?.kind, 'item');
+    assert.equal(entity?.archetype, 'item.generic');
+    assert.equal(entity?.components.material, undefined);
+    assert.equal(entity?.components.condition, undefined);
+    assert.equal(entity?.components.ownership, undefined);
+  });
+
+  it('persists archetype and components through CreateEntity', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+
+    const created = applyEvent(world, {
+      type: 'CreateEntity',
+      entity: {
+        kind: 'item',
+        data: {
+          id: 'iron-sword',
+          name: 'Iron Longsword',
+          description: 'A rusted blade.',
+          location: { kind: 'inventory', actorId: 'player-1' },
+          archetype: 'item.weapon.iron_longsword',
+          components: {
+            condition: { durability: 40, rust: 30 },
+          },
+        },
+      },
+    });
+
+    assert.equal(created.items['iron-sword']?.archetype, 'item.weapon.iron_longsword');
+    const entity = created.spine.entities['iron-sword'];
+    assert.equal(entity?.archetype, 'item.weapon.iron_longsword');
+    assert.equal(entity?.components.material?.primary, 'iron');
+    assert.equal(entity?.components.material?.rustable, true);
+    assert.equal(entity?.components.condition?.durability, 40);
+    assert.equal(entity?.components.condition?.rust, 30);
+    assert.equal(entity?.components.physical?.massKg, 1.4);
+  });
+
+  it('persists archetype and components through TransferItem with inline item', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+
+    const served = applyEvent(world, {
+      type: 'TransferItem',
+      item: {
+        id: 'leather-glove',
+        name: 'Worn Glove',
+        archetype: 'item.clothing.leather_glove',
+        components: {
+          condition: { durability: 30, wear: 50 },
+        },
+      },
+      toActorId: 'player-1',
+    });
+
+    assert.equal(served.items['leather-glove']?.archetype, 'item.clothing.leather_glove');
+    const entity = served.spine.entities['leather-glove'];
+    assert.equal(entity?.components.material?.primary, 'leather');
+    assert.equal(entity?.components.material?.flammable, true);
+    assert.equal(entity?.components.condition?.durability, 30);
+    assert.equal(entity?.components.condition?.wear, 50);
+  });
+
+  it('getArchetypePreset returns empty for unknown archetypes', () => {
+    const preset = getArchetypePreset('item.unknown.mystery');
+    assert.deepEqual(preset, {});
+  });
+
+  it('mergeItemComponents gives overrides precedence per component', () => {
+    const preset = { material: { primary: 'iron', rustable: true }, condition: { durability: 100 } };
+    const overrides = { condition: { durability: 25, broken: true } };
+    const merged = mergeItemComponents(preset, overrides);
+
+    assert.equal(merged.material?.primary, 'iron');
+    assert.equal(merged.condition?.durability, 25);
+    assert.equal(merged.condition?.broken, true);
+  });
+
+  it('summarizeItemComponents produces concise LLM-facing summaries', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    const summary = summarizeItemComponents(world.spine, 'heartwater-jar');
+
+    assert.ok(summary);
+    assert.equal(summary.material, 'clay');
+    assert.equal(summary.condition, 'good');
+    assert.equal(summary.sealed, true);
+  });
+
+  it('summarizeItemComponents returns undefined for items with no component data', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+
+    const created = applyEvent(world, {
+      type: 'CreateEntity',
+      entity: {
+        kind: 'item',
+        data: {
+          id: 'bare-item',
+          name: 'Bare Item',
+          location: { kind: 'ground', pos: { x: 0, y: 0, z: 0 } },
+        },
+      },
+    });
+
+    const summary = summarizeItemComponents(created.spine, 'bare-item');
+    assert.equal(summary, undefined);
   });
 });

@@ -221,6 +221,8 @@ function applyTransferItem(state: WorldState, event: Extract<WorldEvent, { type:
       name: event.item.name,
       description: event.item.description ?? undefined,
       tags: event.item.tags,
+      archetype: event.item.archetype,
+      components: event.item.components,
     };
   }
 
@@ -260,6 +262,8 @@ function applyCreateEntity(state: WorldState, event: Extract<WorldEvent, { type:
       name: event.entity.data.name,
       description: event.entity.data.description ?? undefined,
       tags: event.entity.data.tags,
+      archetype: event.entity.data.archetype,
+      components: event.entity.data.components,
     };
     if (event.entity.data.location.kind === 'inventory') {
       setItemPlacement(
