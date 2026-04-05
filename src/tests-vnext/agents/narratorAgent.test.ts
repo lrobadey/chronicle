@@ -32,6 +32,7 @@ describe('narrator streaming', () => {
       playerText: 'Look to sea',
       telemetry,
       diff,
+      recentTurns: [],
       llm,
       debug: event => debugEvents.push(event),
       onNarrationDelta: delta => deltas.push(delta),
@@ -51,6 +52,7 @@ describe('narrator streaming', () => {
       playerText: 'Wait',
       telemetry,
       diff,
+      recentTurns: [],
       llm,
       onNarrationDelta: delta => deltas.push(delta),
     });
@@ -98,11 +100,49 @@ describe('narrator streaming', () => {
       playerText: 'look up',
       telemetry,
       diff,
+      recentTurns: [],
       llm,
       onNarrationDelta: delta => deltas.push(delta),
     });
 
     assert.equal(narration, 'A gull wheels above the bones.');
     assert.deepEqual(deltas, ['A gull wheels above the bones.']);
+  });
+
+  it('includes recent turn digests in narrator input', async () => {
+    const llm = new QueueLLM([
+      {
+        output: [],
+        output_text: 'The market shutters clatter in the wind.',
+      },
+    ]);
+
+    await narrateTurn({
+      apiKey: 'test-key',
+      playerText: 'head north',
+      telemetry,
+      diff,
+      recentTurns: [
+        {
+          turn: 1,
+          playerText: 'go to the rib market',
+          narration: 'You set out toward the market.',
+          accepted: ['Traveled to Dock Approach'],
+          rejected: [],
+        },
+      ],
+      llm,
+    });
+
+    const input = JSON.parse(String(llm.calls[0]?.input));
+    assert.deepEqual(input.recentTurns, [
+      {
+        turn: 1,
+        playerText: 'go to the rib market',
+        narration: 'You set out toward the market.',
+        accepted: ['Traveled to Dock Approach'],
+        rejected: [],
+      },
+    ]);
   });
 });

@@ -36,7 +36,7 @@ describe('specialist agent', () => {
         telemetry: { turn: 1 },
         observation: { nearbyActors: [] },
         playerText: 'look around',
-        transcriptTail: [],
+        recentTurns: [],
       },
       llm,
       debug: event => debugEvents.push(event),
@@ -70,7 +70,7 @@ describe('specialist agent', () => {
         telemetry: { turn: 1 },
         worldSnapshot: {},
         playerText: 'look around',
-        transcriptTail: [],
+        recentTurns: [],
       },
       llm,
     });
@@ -78,6 +78,58 @@ describe('specialist agent', () => {
     assert.equal(result.specialistType, 'world');
     assert.equal(Array.isArray(result.recommendations), true);
     assert.equal(result.candidateEvents.length, 0);
+  });
+
+  it('passes recent turn digests through specialist context', async () => {
+    const llm = new QueueLLM([
+      {
+        id: 'resp-specialist-3',
+        output: [
+          {
+            type: 'function_call',
+            name: 'emit_specialist_advice',
+            arguments:
+              '{"summary":"Keep it grounded.","recommendations":[],"candidateEvents":[],"creationIntent":null,"risks":[]}',
+            call_id: 'specialist-call-3',
+          },
+        ],
+        output_text: '',
+      },
+    ]);
+
+    await runSpecialistAgent({
+      apiKey: 'test-key',
+      specialistType: 'scene',
+      question: 'What should happen next?',
+      context: {
+        agendas: { currentFocus: 'Arrival', pressures: [], unresolvedBeats: [], immediateTensions: [] },
+        pendingPrompt: null,
+        telemetry: { turn: 2 },
+        observation: { nearbyActors: [] },
+        playerText: 'keep walking',
+        recentTurns: [
+          {
+            turn: 1,
+            playerText: 'go north',
+            narration: 'You made your way inland.',
+            accepted: ['Traveled to Dock Approach'],
+            rejected: [],
+          },
+        ],
+      },
+      llm,
+    });
+
+    const input = JSON.parse(String(llm.calls[0]?.input));
+    assert.deepEqual(input.context.recentTurns, [
+      {
+        turn: 1,
+        playerText: 'go north',
+        narration: 'You made your way inland.',
+        accepted: ['Traveled to Dock Approach'],
+        rejected: [],
+      },
+    ]);
   });
 
   it('marks suggested events as used only when the GM accepts matching events', () => {

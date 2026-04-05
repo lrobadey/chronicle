@@ -1,5 +1,6 @@
 import type { WorldEvent } from '../../sim/events';
 import type { WorldAgenda, SceneAgenda } from '../../sim/state';
+import type { RecentTurnDigest } from '../../engine/session/types';
 
 export type SpecialistType = 'scene' | 'world';
 
@@ -32,7 +33,7 @@ export interface SceneSpecialistContext {
   telemetry: unknown;
   observation: unknown;
   playerText: string;
-  transcriptTail: Array<{ turn: number; playerId: string; playerText: string }>;
+  recentTurns: RecentTurnDigest[];
 }
 
 export interface WorldSpecialistContext {
@@ -41,7 +42,7 @@ export interface WorldSpecialistContext {
   telemetry: unknown;
   worldSnapshot: unknown;
   playerText: string;
-  transcriptTail: Array<{ turn: number; playerId: string; playerText: string }>;
+  recentTurns: RecentTurnDigest[];
 }
 
 export type SpecialistContext = SceneSpecialistContext | WorldSpecialistContext;

@@ -1,4 +1,4 @@
-import type { WorldState } from '../../sim/state';
+import type { PendingPrompt, WorldState } from '../../sim/state';
 import type { WorldEvent } from '../../sim/events';
 import type { Telemetry } from '../../sim/views/telemetry';
 import type { NpcAgentOutput } from '../../agents/npc/npcAgent';
@@ -10,12 +10,21 @@ export interface RejectedEventRecord {
   details?: unknown;
 }
 
+export interface RecentTurnDigest {
+  turn: number;
+  playerText: string;
+  narration: string | null;
+  accepted: string[];
+  rejected: string[];
+}
+
 export interface TurnRecord {
   sessionId: string;
   turn: number;
   atIso: string;
   playerId: string;
   playerText: string;
+  pendingPrompt?: PendingPrompt;
   acceptedEvents: WorldEvent[];
   rejectedEvents: RejectedEventRecord[];
   npcOutputs?: NpcAgentOutput[];

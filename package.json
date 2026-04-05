@@ -8,6 +8,7 @@
   },
   "scripts": {
     "cli": "tsx src/cli.ts",
+    "staff-cli": "tsx src/staff-cli.ts",
     "server": "tsx src/server.ts",
     "test": "rm -rf .tmp-tests && tsc -p tsconfig.test.json && echo '{\"type\":\"commonjs\"}' > .tmp-tests/package.json && node --test .tmp-tests/tests-vnext/**/*.test.js",
     "test:vnext": "rm -rf .tmp-tests && tsc -p tsconfig.test.json && echo '{\"type\":\"commonjs\"}' > .tmp-tests/package.json && node --test .tmp-tests/tests-vnext/**/*.test.js",

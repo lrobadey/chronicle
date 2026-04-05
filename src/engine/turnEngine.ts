@@ -26,6 +26,11 @@ import { runGMAgent, type GMFinishTurnInput } from '../agents/gm/gmAgent';
 import { runNpcAgent, type NpcAgentOutput } from '../agents/npc/npcAgent';
 import { narrateOpening, narrateTurn, type NarratorStyle } from '../agents/narrator/narratorAgent';
 import {
+  runStaffInterview as runStaffInterviewAgent,
+  type StaffInterviewMessage,
+  type StaffInterviewResult,
+} from '../agents/staffInterview';
+import {
   finalizeSpecialistConsultations,
   runSpecialistAgent,
   type SpecialistConsultation,
@@ -34,6 +39,13 @@ import {
 import { createIsleOfMarrowWorldVNext } from '../worlds/isle-of-marrow.vnext';
 import type { DebugSink } from './debug';
 import { emitDebugEvent } from './debug';
+import {
+  buildGMWorldContext,
+  buildRecentTurnDigests,
+  buildSpecialistContext,
+  buildStaffInterviewContext,
+  type StaffInterviewContext,
+} from './contextBuilders';
 import {
   InvariantViolationError,
   PlayerNotFoundError,
@@ -128,6 +140,48 @@ export class TurnEngine {
     if (!state) throw new SessionNotFoundError(sessionId);
     if (!state.actors[playerId]) throw new PlayerNotFoundError(playerId);
     return buildTelemetry(state, playerId);
+  }
+
+  async ensureStaffSession(params: { sessionId?: string; playerId: string }) {
+    const ensured = await this.store.ensureSession(params.sessionId, this.worldFactory);
+    if (!ensured.state.actors[params.playerId]) throw new PlayerNotFoundError(params.playerId);
+    assertNoInvariantIssues(ensured.state, 'Session initialized with invalid world state');
+    return {
+      sessionId: ensured.sessionId,
+      created: ensured.created,
+      telemetry: buildTelemetry(ensured.state, params.playerId),
+    };
+  }
+
+  async getStaffInterviewContext(sessionId: string, playerId: string): Promise<StaffInterviewContext> {
+    const state = await this.store.loadSession(sessionId);
+    if (!state) throw new SessionNotFoundError(sessionId);
+    if (!state.actors[playerId]) throw new PlayerNotFoundError(playerId);
+    assertNoInvariantIssues(state, 'Session world state is invalid before staff interview');
+    const turnHistory = await this.store.loadTurnLog(sessionId);
+    return buildStaffInterviewContext({
+      sessionId,
+      state,
+      playerId,
+      turnHistory,
+    });
+  }
+
+  async runStaffInterview(input: {
+    sessionId: string;
+    playerId: string;
+    question: string;
+    apiKey?: string;
+    conversation?: StaffInterviewMessage[];
+  }): Promise<StaffInterviewResult> {
+    const context = await this.getStaffInterviewContext(input.sessionId, input.playerId);
+    return runStaffInterviewAgent({
+      apiKey: input.apiKey,
+      question: input.question,
+      context,
+      conversation: input.conversation,
+      llm: this.llm,
+    });
   }
 
   async runTurn(input: RunTurnInput): Promise<RunTurnOutput> {
@@ -325,6 +379,7 @@ export class TurnEngine {
     const beforeTelemetry = buildTelemetry(state, playerId);
     const afterTelemetry = buildTelemetry(draft, playerId);
     const diff = computeTurnDiff(beforeTelemetry, afterTelemetry, acceptedEvents);
+    const recentTurns = buildRecentTurnDigests(draft, turnHistory);
     stream?.onNarrationStart?.(afterTelemetry);
     const narration = await narrateTurn({
       apiKey,
@@ -332,6 +387,7 @@ export class TurnEngine {
       playerText,
       telemetry: afterTelemetry,
       diff,
+      recentTurns,
       pendingPrompt: draft.meta.pendingPrompt || null,
       rejectedEvents,
       llm: this.llm,
@@ -351,6 +407,7 @@ export class TurnEngine {
       atIso: new Date().toISOString(),
       playerId,
       playerText,
+      pendingPrompt: draft.meta.pendingPrompt || undefined,
       acceptedEvents,
       rejectedEvents,
       npcOutputs,
@@ -520,126 +577,4 @@ function normalizeStringArray(value: unknown): string[] | null {
     .map(item => item.trim())
     .filter(Boolean);
   return normalized;
-}
-
-function buildGMWorldContext(params: {
-  state: WorldState;
-  playerId: string;
-  playerText: string;
-  nextTurn: number;
-  turnHistory: TurnRecord[];
-}) {
-  const { state, playerId, playerText, nextTurn, turnHistory } = params;
-  const player = state.actors[playerId];
-  const observation = buildObservation(state, playerId);
-  const telemetry = buildTelemetry(state, playerId);
-  const tide = deriveTide(state);
-  const landmarks = Object.values(state.locations)
-    .map(location => {
-      const estimate = estimateTravel(state, player.pos, location.anchor, 'walk');
-      return {
-        id: location.id,
-        name: location.name,
-        anchor: location.anchor,
-        terrain: location.terrain ?? 'unknown',
-        tideAccess: location.tideAccess ?? 'always',
-        radiusCells: location.radiusCells ?? 0,
-        distanceMeters: Math.round(distance(player.pos, location.anchor) * state.map.cellSizeMeters),
-        shortDescription: location.description.slice(0, 180),
-        blockedNow: tide.blockedLocationIds.includes(location.id),
-        estimatedWalkMinutes: estimate.minutes,
-        requiresConfirm: estimate.minutes > LONG_TRAVEL_MINUTES,
-      };
-    })
-    .sort((a, b) => a.distanceMeters - b.distanceMeters)
-    .slice(0, 25);
-  const nearbyItemsOnGround = Object.values(state.items)
-    .flatMap(item => {
-      const placement = getItemPlacement(state.spine, item.id);
-      if (!placement || placement.type !== 'located_in') return [];
-      return [{
-        id: item.id,
-        name: item.name,
-        pos: placement.anchor,
-        distanceMeters: Math.round(distance(player.pos, placement.anchor) * state.map.cellSizeMeters),
-      }];
-    })
-    .sort((a, b) => a.distanceMeters - b.distanceMeters)
-    .slice(0, 20);
-  const nearbyActors = Object.values(state.actors)
-    .filter(actor => actor.id !== playerId)
-    .map(actor => ({
-      id: actor.id,
-      name: actor.name,
-      kind: actor.kind,
-      pos: actor.pos,
-      distanceMeters: Math.round(distance(player.pos, actor.pos) * state.map.cellSizeMeters),
-    }))
-    .sort((a, b) => a.distanceMeters - b.distanceMeters)
-    .slice(0, 20);
-
-  return {
-    observation,
-    telemetry,
-    agendas: state.agendas,
-    pendingPrompt: state.meta.pendingPrompt || null,
-    landmarks,
-    nearby: {
-      actors: nearbyActors,
-      itemsOnGround: nearbyItemsOnGround,
-    },
-    map: state.map,
-    playerTranscript: buildPlayerTranscript(turnHistory, nextTurn, playerId, playerText),
-  };
-}
-
-function buildSpecialistContext(params: {
-  state: WorldState;
-  playerId: string;
-  playerText: string;
-  nextTurn: number;
-  turnHistory: TurnRecord[];
-  specialistType: SpecialistType;
-}) {
-  const { state, playerId, playerText, nextTurn, turnHistory, specialistType } = params;
-  const telemetry = buildTelemetry(state, playerId);
-  const observation = buildObservation(state, playerId);
-  const transcriptTail = buildPlayerTranscript(turnHistory, nextTurn, playerId, playerText).slice(-8);
-
-  if (specialistType === 'scene') {
-    return {
-      agendas: state.agendas.scene,
-      pendingPrompt: state.meta.pendingPrompt || null,
-      telemetry,
-      observation,
-      playerText,
-      transcriptTail,
-    };
-  }
-
-  return {
-    agendas: state.agendas.world,
-    pendingPrompt: state.meta.pendingPrompt || null,
-    telemetry,
-    worldSnapshot: buildGMWorldContext({
-      state,
-      playerId,
-      playerText,
-      nextTurn,
-      turnHistory,
-    }),
-    playerText,
-    transcriptTail,
-  };
-}
-
-function buildPlayerTranscript(turnHistory: TurnRecord[], nextTurn: number, playerId: string, playerText: string) {
-  return [
-    ...turnHistory.map(turn => ({
-      turn: turn.turn,
-      playerId: turn.playerId,
-      playerText: turn.playerText,
-    })),
-    { turn: nextTurn, playerId, playerText },
-  ];
 }

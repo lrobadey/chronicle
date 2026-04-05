@@ -240,7 +240,7 @@ describe('TurnEngine', () => {
     }
   });
 
-  it('injects full player transcript into GM world context each turn', async () => {
+  it('injects recent turn digests and bounded player transcript tail into GM and narrator context', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
@@ -285,15 +285,124 @@ describe('TurnEngine', () => {
       const secondGMInput = llm.calls[2]?.input as Array<Record<string, unknown>>;
       const firstContext = JSON.parse(String(firstGMInput[0]?.content));
       const secondContext = JSON.parse(String(secondGMInput[0]?.content));
+      const secondNarratorInput = JSON.parse(String(llm.calls[3]?.input));
 
       assert.equal(firstGMInput[0]?.role, 'system');
       assert.equal(secondGMInput[0]?.role, 'system');
-      assert.deepEqual(firstContext.world.playerTranscript, [
+      assert.deepEqual(firstContext.world.recentTurns, []);
+      assert.deepEqual(firstContext.world.playerTranscriptTail, []);
+      assert.deepEqual(secondContext.world.recentTurns, [
+        {
+          turn: 1,
+          playerText: 'I sit',
+          narration: 'Turn one narration',
+          accepted: [],
+          rejected: [],
+        },
+      ]);
+      assert.deepEqual(secondContext.world.playerTranscriptTail, [
         { turn: 1, playerId: 'player-1', playerText: 'I sit' },
       ]);
-      assert.deepEqual(secondContext.world.playerTranscript, [
-        { turn: 1, playerId: 'player-1', playerText: 'I sit' },
-        { turn: 2, playerId: 'player-1', playerText: 'I stand' },
+      assert.deepEqual(secondNarratorInput.recentTurns, secondContext.world.recentTurns);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('limits recent turn digests to the last 10 completed turns and excludes the current turn', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const queue = [];
+      for (let turn = 1; turn <= 12; turn += 1) {
+        queue.push({
+          id: `gm-${turn}`,
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: `g${turn}` }],
+          output_text: '',
+        });
+        queue.push({
+          id: `narr-${turn}`,
+          output: [],
+          output_text: `Turn ${turn} narration`,
+        });
+      }
+
+      const llm = new QueueLLM(queue);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+
+      for (let turn = 1; turn <= 12; turn += 1) {
+        await engine.runTurn({
+          sessionId: init.sessionId,
+          playerId: 'player-1',
+          playerText: `Action ${turn}`,
+          apiKey: 'test-key',
+        });
+      }
+
+      const twelfthGMInput = llm.calls[22]?.input as Array<Record<string, unknown>>;
+      const twelfthContext = JSON.parse(String(twelfthGMInput[0]?.content));
+      const recentTurns = twelfthContext.world.recentTurns as Array<Record<string, unknown>>;
+
+      assert.equal(recentTurns.length, 10);
+      assert.deepEqual(
+        recentTurns.map(turn => turn.turn),
+        [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      );
+      assert.equal(recentTurns.some(turn => turn.turn === 12), false);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('builds recent turn digests from legacy turn records without narration', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-1',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'g1' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'Turn two narration',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const state = await store.loadSession(init.sessionId);
+
+      assert.ok(state);
+      state.meta.turn = 1;
+      await store.saveSnapshot(init.sessionId, state);
+      await store.appendTurn(init.sessionId, {
+        sessionId: init.sessionId,
+        turn: 1,
+        atIso: new Date().toISOString(),
+        playerId: 'player-1',
+        playerText: 'legacy turn',
+        acceptedEvents: [],
+        rejectedEvents: [],
+      });
+
+      await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'new turn',
+        apiKey: 'test-key',
+      });
+
+      const gmInput = llm.calls[0]?.input as Array<Record<string, unknown>>;
+      const context = JSON.parse(String(gmInput[0]?.content));
+      assert.deepEqual(context.world.recentTurns, [
+        {
+          turn: 1,
+          playerText: 'legacy turn',
+          narration: null,
+          accepted: [],
+          rejected: [],
+        },
       ]);
     } finally {
       await removeDir(rootDir);
@@ -347,7 +456,10 @@ describe('TurnEngine', () => {
 
       assert.equal(turnOne.narration, 'The Rib Market is a longer walk. Set out now?');
       const afterTurnOne = await store.loadSession(init.sessionId);
+      const turnLogAfterTurnOne = await store.loadTurnLog(init.sessionId);
       assert.equal(afterTurnOne?.meta.pendingPrompt?.id, 'confirm-rib-market');
+      assert.equal(turnLogAfterTurnOne[0]?.pendingPrompt?.id, 'confirm-rib-market');
+      assert.equal(turnLogAfterTurnOne[0]?.trace, undefined);
 
       await engine.runTurn({
         sessionId: init.sessionId,
@@ -362,6 +474,65 @@ describe('TurnEngine', () => {
 
       const afterTurnTwo = await store.loadSession(init.sessionId);
       assert.equal(afterTurnTwo?.meta.pendingPrompt, undefined);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('clips historical player text in recent turn digests and transcript tails', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const longPlayerText = 'x'.repeat(260);
+      const clippedPlayerText = `${'x'.repeat(239)}…`;
+      const llm = new QueueLLM([
+        {
+          id: 'gm-1',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'g1' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'Turn one narration',
+        },
+        {
+          id: 'gm-2',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'g2' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-2',
+          output: [],
+          output_text: 'Turn two narration',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+
+      await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: longPlayerText,
+        apiKey: 'test-key',
+      });
+
+      await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'continue',
+        apiKey: 'test-key',
+      });
+
+      const secondGMInput = llm.calls[2]?.input as Array<Record<string, unknown>>;
+      const secondContext = JSON.parse(String(secondGMInput[0]?.content));
+      const secondNarratorInput = JSON.parse(String(llm.calls[3]?.input));
+
+      assert.equal(secondContext.world.recentTurns[0]?.playerText, clippedPlayerText);
+      assert.equal(secondContext.world.playerTranscriptTail[0]?.playerText, clippedPlayerText);
+      assert.equal(secondNarratorInput.recentTurns[0]?.playerText, clippedPlayerText);
+
+      const storedTurnLog = await store.loadTurnLog(init.sessionId);
+      assert.equal(storedTurnLog[0]?.playerText, longPlayerText);
     } finally {
       await removeDir(rootDir);
     }

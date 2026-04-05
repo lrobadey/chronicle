@@ -7,6 +7,7 @@ import type { TurnDiff } from '../../sim/views/diff';
 import type { PendingPrompt } from '../../sim/state';
 import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
+import type { RecentTurnDigest } from '../../engine/session/types';
 import type { SpecialistType } from '../specialists';
 
 export type NarratorStyle = 'lyric' | 'cinematic' | 'michener';
@@ -18,6 +19,7 @@ export interface NarratorParams {
   playerText: string;
   telemetry: Telemetry;
   diff: TurnDiff;
+  recentTurns: RecentTurnDigest[];
   pendingPrompt?: PendingPrompt | null;
   rejectedEvents?: Array<{ reason: string; event?: unknown }>;
   llm: LLMClient;
@@ -51,7 +53,7 @@ export interface NarratorOpeningParams {
 }
 
 export async function narrateTurn(params: NarratorParams): Promise<string> {
-  const { apiKey, model = DEFAULT_MODEL, style = 'michener', playerText, telemetry, diff, pendingPrompt, rejectedEvents, llm, onNarrationDelta, debug, trace } = params;
+  const { apiKey, model = DEFAULT_MODEL, style = 'michener', playerText, telemetry, diff, recentTurns, pendingPrompt, rejectedEvents, llm, onNarrationDelta, debug, trace } = params;
   emitDebugEvent(debug, { type: 'narrator.started', phase: 'turn', style });
   if (pendingPrompt?.question?.trim()) {
     const question = pendingPrompt.question.trim();
@@ -78,6 +80,7 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
       instructions: NARRATOR_STYLE_PROMPTS[style],
       input: JSON.stringify({
         attemptedAction: playerText,
+        recentTurns,
         telemetry,
         diff,
         rejectedEventReasons: (rejectedEvents || []).map(rejection => rejection.reason),
