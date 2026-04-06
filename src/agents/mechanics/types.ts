@@ -103,6 +103,12 @@ export interface MechanicsWorkerRequest {
   objective?: string;
   focus?: string;
   revisionFeedback?: string;
+  previousDraft?: {
+    interpretation: MechanicsInterpretation;
+    summary: string;
+    candidateEvents: unknown[];
+    confidence: number;
+  };
   pendingPrompt: PendingPrompt | null;
   telemetry: unknown;
   travelCandidates: MechanicsTravelCandidate[];
@@ -129,4 +135,5 @@ export interface MechanicsResolutionDraft {
 export interface MechanicsResolutionRecord {
   request: MechanicsWorkerRequest;
   resolution: MechanicsResolution;
+  revisionCount: number;
 }

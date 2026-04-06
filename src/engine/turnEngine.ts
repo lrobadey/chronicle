@@ -428,7 +428,7 @@ export class TurnEngine {
             request.pendingPrompt,
             nextTurn,
           );
-          mechanicsResolutions.set(resolutionId, { request, resolution });
+          mechanicsResolutions.set(resolutionId, { request, resolution, revisionCount: 0 });
           activeMechanicsResolutionId = resolutionId;
           if (trace) {
             trace.mechanicsResolutions = trace.mechanicsResolutions || [];
@@ -484,11 +484,26 @@ export class TurnEngine {
             return { ok: false, error: 'revision_feedback_required', resolutionId: input.resolutionId };
           }
 
+          const MAX_REVISIONS = 2;
+          if (cached.revisionCount >= MAX_REVISIONS) {
+            mechanicsResolutions.delete(input.resolutionId);
+            if (activeMechanicsResolutionId === input.resolutionId) {
+              activeMechanicsResolutionId = null;
+            }
+            return { ok: true, status: 'rejected', resolutionId: input.resolutionId, reason: 'max_revisions_exceeded' };
+          }
+
           const revisedDraft = await runMechanicsAgent({
             apiKey,
             request: {
               ...cached.request,
               revisionFeedback: feedback,
+              previousDraft: {
+                interpretation: cached.resolution.interpretation,
+                summary: cached.resolution.summary,
+                candidateEvents: cached.resolution.candidateEvents,
+                confidence: cached.resolution.confidence,
+              },
             },
             llm: this.llm,
             debug: emit,
@@ -514,8 +529,15 @@ export class TurnEngine {
             request: {
               ...cached.request,
               revisionFeedback: feedback,
+              previousDraft: {
+                interpretation: cached.resolution.interpretation,
+                summary: cached.resolution.summary,
+                candidateEvents: cached.resolution.candidateEvents,
+                confidence: cached.resolution.confidence,
+              },
             },
             resolution,
+            revisionCount: cached.revisionCount + 1,
           });
           activeMechanicsResolutionId = nextResolutionId;
           const { debug: _debug, ...resolutionForGM } = resolution;

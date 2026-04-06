@@ -8,6 +8,8 @@ import type {
 export function resolveDeterministicMechanics(request: MechanicsWorkerRequest): MechanicsResolutionDraft | null {
   const travel = resolveDeterministicTravel(request);
   if (travel) return travel;
+  const wait = resolveDeterministicWait(request);
+  if (wait) return wait;
   return null;
 }
 
@@ -75,6 +77,53 @@ function resolveDeterministicTravel(request: MechanicsWorkerRequest): MechanicsR
     confidence: Math.max(0.82, Math.min(0.98, best.score)),
     warnings: [`deterministic_travel_match:${best.alias}`],
   };
+}
+
+function resolveDeterministicWait(request: MechanicsWorkerRequest): MechanicsResolutionDraft | null {
+  const minutes = extractWaitMinutes(request.playerText);
+  if (minutes === null || minutes <= 0 || minutes > 480) return null;
+
+  return {
+    status: 'ok',
+    interpretation: 'wait',
+    summary: `wait ${minutes} minute${minutes === 1 ? '' : 's'}`,
+    actions: [{
+      type: 'wait',
+      minutes,
+      note: `Wait ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+    }],
+    pendingPromptDraft: null,
+    touchedEntities: [],
+    confidence: 0.95,
+    warnings: ['deterministic_wait'],
+  };
+}
+
+function extractWaitMinutes(text: string): number | null {
+  const normalized = normalizeInput(text);
+  if (!normalized) return null;
+
+  const patterns = [
+    /^(?:i\s+)?(?:wait|rest|stay|stay here|sit|sit here|pause)\s+(?:for\s+)?(\d+)\s*(min(?:ute)?s?|hours?|hrs?|h)\b/,
+    /^(?:i\s+)?(?:wait|rest|stay|stay here|sit|sit here|pause)\s+(?:for\s+)?an?\s+hour\b/,
+    /^(?:i\s+)?(?:wait|rest|stay|stay here|sit|sit here|pause)\s+(?:for\s+)?half\s+an?\s+hour\b/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (!match) continue;
+
+    if (pattern === patterns[2]) return 30;
+    if (pattern === patterns[1]) return 60;
+
+    const value = parseInt(match[1]!, 10);
+    if (Number.isNaN(value) || value <= 0) return null;
+    const unit = match[2]!.toLowerCase();
+    if (unit.startsWith('h')) return value * 60;
+    return value;
+  }
+
+  return null;
 }
 
 function buildClarifyTravelPrompt(first: MechanicsTravelCandidate, second: MechanicsTravelCandidate): MechanicsPendingPromptDraft {
