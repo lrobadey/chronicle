@@ -115,7 +115,6 @@ export interface WorldMeta {
   version: string;
   turn: number;
   openingSpec?: OpeningSpec;
-  pendingPrompt?: PendingPrompt;
 }
 
 export interface OpeningSpec {

@@ -46,19 +46,18 @@ describe('sim determinism', () => {
     assert.equal(noConfirm.ok, false);
     assert.equal(noConfirm.reason, 'travel_requires_confirmation');
 
-    world.meta.pendingPrompt = {
-      id: 'confirm-spine',
-      kind: 'confirm_travel',
-      question: 'Set out for Spine Ridge?',
-      createdTurn: 1,
-      data: { locationId: 'the-spine-ridge' },
-    };
     const withConfirm = validateEvent(world, {
       type: 'TravelToLocation',
       actorId: 'player-1',
       locationId: 'the-spine-ridge',
       pace: 'walk',
       confirmId: 'confirm-spine',
+    }, {
+      id: 'confirm-spine',
+      kind: 'confirm_travel',
+      question: 'Set out for Spine Ridge?',
+      createdTurn: 1,
+      data: { locationId: 'the-spine-ridge' },
     });
     assert.equal(withConfirm.ok, true);
   });

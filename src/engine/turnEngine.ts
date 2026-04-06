@@ -199,6 +199,10 @@ export class TurnEngine {
     assertNoInvariantIssues(state, 'Session world state is invalid before turn execution');
     const turnHistory = await this.store.loadTurnLog(sessionId);
 
+    const incomingPendingPrompt: PendingPrompt | undefined =
+      turnHistory[turnHistory.length - 1]?.pendingPrompt ?? undefined;
+    let currentPendingPrompt: PendingPrompt | undefined = incomingPendingPrompt;
+
     let draft = deepClone(state);
     const nextTurn = draft.meta.turn + 1;
     const acceptedEvents: WorldEvent[] = [];
@@ -219,7 +223,7 @@ export class TurnEngine {
       let stagedState = deepClone(draft);
 
       for (const event of batch) {
-        const validation = validateEvent(stagedState, event);
+        const validation = validateEvent(stagedState, event, currentPendingPrompt);
         if (!validation.ok) {
           const reason = validation.reason || 'invalid';
           rejectedEvents.push({ event, reason });
@@ -241,9 +245,9 @@ export class TurnEngine {
         if (
           stamped.type === 'TravelToLocation' &&
           typeof stamped.confirmId === 'string' &&
-          stagedState.meta.pendingPrompt?.id === stamped.confirmId
+          currentPendingPrompt?.id === stamped.confirmId
         ) {
-          delete stagedState.meta.pendingPrompt;
+          currentPendingPrompt = undefined;
         }
       }
 
@@ -303,6 +307,7 @@ export class TurnEngine {
           nextTurn,
           turnHistory,
           specialistType: input.specialistType,
+          pendingPrompt: currentPendingPrompt ?? null,
         });
         const output = await runSpecialistAgent({
           apiKey,
@@ -329,11 +334,11 @@ export class TurnEngine {
       finish_turn: async (input: GMFinishTurnInput) => {
         const clear = input.playerPrompt?.clear === true;
         if (clear) {
-          delete draft.meta.pendingPrompt;
+          currentPendingPrompt = undefined;
         }
         const pending = normalizePendingPrompt(input.playerPrompt?.pending);
         if (pending) {
-          draft.meta.pendingPrompt = pending;
+          currentPendingPrompt = pending;
         }
         applyAgendaUpdates(draft, input.agendaUpdates);
         return { ok: true };
@@ -347,6 +352,7 @@ export class TurnEngine {
         playerText,
         nextTurn,
         turnHistory,
+        pendingPrompt: incomingPendingPrompt ?? null,
       });
       await runGMAgent({
         apiKey,
@@ -377,6 +383,7 @@ export class TurnEngine {
 
       draft = deepClone(state);
       draft.meta.turn = nextTurn;
+      currentPendingPrompt = incomingPendingPrompt;
     }
 
     assertNoInvariantIssues(draft, 'Session world state failed post-turn invariant checks');
@@ -393,7 +400,7 @@ export class TurnEngine {
       telemetry: afterTelemetry,
       diff,
       recentTurns,
-      pendingPrompt: draft.meta.pendingPrompt || null,
+      pendingPrompt: currentPendingPrompt ?? null,
       rejectedEvents,
       llm: this.llm,
       debug: emit,
@@ -412,7 +419,7 @@ export class TurnEngine {
       atIso: new Date().toISOString(),
       playerId,
       playerText,
-      pendingPrompt: draft.meta.pendingPrompt || undefined,
+      pendingPrompt: currentPendingPrompt ?? undefined,
       acceptedEvents,
       rejectedEvents,
       npcOutputs,
