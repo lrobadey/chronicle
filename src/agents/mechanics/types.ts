@@ -56,7 +56,7 @@ export type MechanicsAction =
   | {
       type: 'explore';
       actorId: string;
-      area: 'shoreline' | 'docks' | 'under_ribs' | 'around_here';
+      area: string;
       direction?: 'east' | 'west' | 'north' | 'south';
       note?: string;
     }

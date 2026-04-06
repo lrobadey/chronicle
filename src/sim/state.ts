@@ -139,7 +139,7 @@ export interface PendingPromptData {
   locationId?: string;
   estimatedMinutes?: number;
   subject?: string;
-  area?: 'shoreline' | 'docks' | 'under_ribs' | 'around_here';
+  area?: string;
   direction?: 'east' | 'west' | 'north' | 'south';
 }
 

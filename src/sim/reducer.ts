@@ -376,7 +376,7 @@ function isLocationBlockedAtElapsed(state: WorldState, locationId: string, elaps
   return isTideBlocked(location, deriveTide(snapshot));
 }
 
-function resolveExploreVector(area: 'shoreline' | 'docks' | 'under_ribs' | 'around_here', direction?: 'east' | 'west' | 'north' | 'south') {
+function resolveExploreVector(area: string, direction?: 'east' | 'west' | 'north' | 'south') {
   if (direction === 'east') return { x: 1, y: 0 };
   if (direction === 'west') return { x: -1, y: 0 };
   if (direction === 'north') return { x: 0, y: 1 };

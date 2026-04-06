@@ -463,7 +463,7 @@ function summarizeRejectedReason(reason: string): string {
   return clipText(reason.trim() || 'invalid', RECENT_REASON_MAX_CHARS);
 }
 
-function formatExploreArea(area: 'shoreline' | 'docks' | 'under_ribs' | 'around_here'): string {
+function formatExploreArea(area: string): string {
   switch (area) {
     case 'shoreline':
       return 'the shoreline';
@@ -473,6 +473,8 @@ function formatExploreArea(area: 'shoreline' | 'docks' | 'under_ribs' | 'around_
       return 'under the ribs';
     case 'around_here':
       return 'the area';
+    default:
+      return area.replace(/_/g, ' ');
   }
 }
 

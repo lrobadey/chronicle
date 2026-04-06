@@ -125,7 +125,7 @@ export type WorldEvent =
       meta?: EventMeta;
       type: 'Explore';
       actorId: ActorId;
-      area: 'shoreline' | 'docks' | 'under_ribs' | 'around_here';
+      area: string;
       direction?: 'east' | 'west' | 'north' | 'south';
       note?: string;
     }

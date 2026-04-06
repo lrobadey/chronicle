@@ -62,7 +62,7 @@ const MECHANICS_ACTION_SCHEMA = {
     strictObjectSchema({
       type: { type: 'string', enum: ['explore'] },
       actorId: { type: 'string' },
-      area: { type: 'string', enum: ['shoreline', 'docks', 'under_ribs', 'around_here'] },
+      area: { type: 'string' },
       direction: { type: ['string', 'null'], enum: ['east', 'west', 'north', 'south', null] },
       note: { type: ['string', 'null'] },
     }),
@@ -176,7 +176,7 @@ export async function runMechanicsAgent(params: MechanicsAgentParams): Promise<M
       response = await llm.responsesCreate({
         apiKey,
         model: selectedModel,
-        reasoning: { effort: 'minimal' },
+        reasoning: { effort: 'low' },
         instructions: MECHANICS_SYSTEM_PROMPT,
         input: JSON.stringify(request),
         tools: [MECHANICS_OUTPUT_TOOL],
@@ -519,7 +519,7 @@ function parseAction(value: unknown): { ok: true; action: MechanicsAction } | { 
     case 'explore':
       if (
         typeof record.actorId !== 'string' ||
-        (record.area !== 'shoreline' && record.area !== 'docks' && record.area !== 'under_ribs' && record.area !== 'around_here')
+        typeof record.area !== 'string' || !record.area.trim()
       ) {
         return { ok: false, reason: 'invalid_explore_action' };
       }
@@ -606,8 +606,8 @@ function normalizePendingPromptData(value: unknown): PendingPrompt['data'] | und
     data.estimatedMinutes = record.estimatedMinutes;
   }
   if (typeof record.subject === 'string') data.subject = record.subject;
-  if (record.area === 'shoreline' || record.area === 'docks' || record.area === 'under_ribs' || record.area === 'around_here') {
-    data.area = record.area;
+  if (typeof record.area === 'string' && record.area.trim()) {
+    data.area = record.area.trim();
   }
   if (record.direction === 'east' || record.direction === 'west' || record.direction === 'north' || record.direction === 'south') {
     data.direction = record.direction;

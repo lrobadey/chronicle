@@ -63,7 +63,7 @@ describe('mechanics agent', () => {
     });
 
     assert.equal(llm.calls[0]?.model, MECHANICS_MODEL);
-    assert.deepEqual(llm.calls[0]?.reasoning, { effort: 'minimal' });
+    assert.deepEqual(llm.calls[0]?.reasoning, { effort: 'low' });
     assert.ok(String(llm.calls[0]?.input).includes('"travelCandidates"'));
     assert.equal(result.status, 'ok');
     assert.equal(result.interpretation, 'inspect');
