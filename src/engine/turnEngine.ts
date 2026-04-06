@@ -754,13 +754,8 @@ function normalizePendingPromptData(value: unknown): PendingPromptData | undefin
   if (typeof record.subject === 'string') {
     data.subject = record.subject;
   }
-  if (
-    record.area === 'shoreline' ||
-    record.area === 'docks' ||
-    record.area === 'under_ribs' ||
-    record.area === 'around_here'
-  ) {
-    data.area = record.area;
+  if (typeof record.area === 'string' && record.area.trim()) {
+    data.area = record.area.trim();
   }
   if (
     record.direction === 'east' ||
