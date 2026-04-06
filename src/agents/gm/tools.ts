@@ -104,7 +104,7 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
   {
     type: 'function',
     name: 'review_mechanics_resolution',
-    description: 'Approve, revise, or reject a mechanics draft by resolution id.',
+    description: "Approve, revise, or reject a mechanics draft by resolution id. When action='revise', feedback is required and must describe what is wrong and what correction to make.",
     parameters: {
       ...strictObjectSchema({
         resolutionId: MECHANICS_RESOLUTION_ID_SCHEMA,

@@ -176,7 +176,7 @@ export async function runMechanicsAgent(params: MechanicsAgentParams): Promise<M
       response = await llm.responsesCreate({
         apiKey,
         model: selectedModel,
-        reasoning: { effort: 'low' },
+        reasoning: { effort: 'medium' },
         instructions: MECHANICS_SYSTEM_PROMPT,
         input: JSON.stringify(request),
         tools: [MECHANICS_OUTPUT_TOOL],
