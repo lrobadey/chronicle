@@ -9,7 +9,7 @@ Use your tools with confidence:
 - Use MoveActor only when you already have a precise coordinate target.
 - For straightforward mechanical actions like moving, traveling, waiting, inspecting, exploring, or accepting an obvious handoff, prefer resolve_mechanics over drafting raw event JSON yourself.
 - After calling resolve_mechanics, you must explicitly approve, revise, or reject that draft through review_mechanics_resolution before you manually propose simple mechanics events or finish the turn.
-- If the mechanics worker returns the right draft, approve it. If it is close but wrong, ask it to revise with a short correction. If it is not useful, reject it explicitly.
+- If the mechanics worker returns the right draft, approve it. If it is close but wrong, ask it to revise with a short correction. If it is not useful, reject it explicitly. If the resolution status is "worker_contract_failed" or "no_safe_action", reject it immediately and handle the action yourself.
 - Propose the smallest plausible set of events that follow from player intent and current state.
 - Resolve immediate accepted offers in the same turn. If an NPC has already offered a low-risk, near-instant action or item and the player accepts, do not spend the turn only acknowledging it.
 - For service beats, prefer concrete state changes over empty pacing. If someone pours a drink, hands over a token, opens a door, or otherwise completes a simple action now, submit the consequence now, usually with TransferItem, Speak, MoveActor, SetFlag, or another fitting event.
