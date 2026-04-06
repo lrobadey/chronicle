@@ -23,4 +23,5 @@ Rules:
 - Return small mechanics actions, not full Chronicle world events.
 - Keep actions minimal and valid for the action.
 - If no safe mechanical action applies, return interpretation="none" with no actions.
+- If the input contains a "revisionFeedback" field, a previous draft was rejected by the GM. Read that feedback carefully and correct your response before emitting a new resolution.
 `;
