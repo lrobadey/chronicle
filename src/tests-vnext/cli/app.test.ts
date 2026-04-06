@@ -438,6 +438,95 @@ describe('CLI app', () => {
     assert.equal(pendingPrompt, '[tool] asking for confirmation\n');
   });
 
+  it('renders mechanics tool summaries and raw payloads compactly', () => {
+    const resolveSummary = renderDebugEvent({
+      type: 'tool.called',
+      iteration: 2,
+      tool: 'resolve_mechanics',
+      callId: 'mech-1',
+      callIndex: 1,
+      callCount: 2,
+      input: { objective: 'resolve travel to the docks' },
+    }, 'summary');
+    assert.equal(resolveSummary, '[tool] mechanics: resolving the action\n');
+
+    const resolveResult = renderDebugEvent({
+      type: 'tool.result',
+      iteration: 2,
+      tool: 'resolve_mechanics',
+      callId: 'mech-1',
+      callIndex: 1,
+      callCount: 2,
+      output: {
+        resolutionId: 'res-1',
+        status: 'ok',
+        interpretation: 'travel',
+        summary: 'travel to Dock Approach',
+        candidateEvents: [{ type: 'TravelToLocation' }],
+        confidence: 0.93,
+        debug: { selectedModel: 'gpt-5.4-mini', usedFallback: false },
+      },
+      ok: true,
+    }, 'summary');
+    assert.equal(resolveResult, '[tool] mechanics: drafted travel to Dock Approach (high confidence)\n');
+
+    const failedMechanics = renderDebugEvent({
+      type: 'tool.result',
+      iteration: 2,
+      tool: 'resolve_mechanics',
+      callId: 'mech-failed',
+      callIndex: 1,
+      callCount: 1,
+      output: {
+        resolutionId: 'res-2',
+        status: 'worker_contract_failed',
+        interpretation: 'none',
+        summary: 'worker failed to produce a valid draft',
+        candidateEvents: [],
+        confidence: 0,
+        debug: { selectedModel: 'gpt-5.4', usedFallback: true, failureReason: 'invalid_function_output' },
+      },
+      ok: true,
+    }, 'summary');
+    assert.equal(failedMechanics, '[tool] mechanics: worker failed to produce a valid draft\n');
+
+    const resolveRaw = renderDebugEvent({
+      type: 'tool.result',
+      iteration: 2,
+      tool: 'resolve_mechanics',
+      callId: 'mech-raw',
+      callIndex: 1,
+      callCount: 1,
+      output: {
+        resolutionId: 'res-3',
+        status: 'worker_contract_failed',
+        interpretation: 'none',
+        summary: 'worker failed to produce a valid draft',
+        candidateEvents: [],
+        confidence: 0,
+        debug: { selectedModel: 'gpt-5.4', usedFallback: true, failureReason: 'invalid_function_output' },
+      },
+      ok: true,
+    }, 'raw');
+    assert.ok(resolveRaw.includes('status=worker_contract_failed'));
+    assert.ok(resolveRaw.includes('model=gpt-5.4'));
+    assert.ok(resolveRaw.includes('fallback_used=true'));
+    assert.ok(resolveRaw.includes('invalid_function_output'));
+
+    const reviewRaw = renderDebugEvent({
+      type: 'tool.called',
+      iteration: 2,
+      tool: 'review_mechanics_resolution',
+      callId: 'mech-2',
+      callIndex: 2,
+      callCount: 2,
+      input: { resolutionId: 'res-1', action: 'revise', feedback: 'Make it wait instead.' },
+    }, 'raw');
+    assert.ok(reviewRaw.includes('resolution=res-1'));
+    assert.ok(reviewRaw.includes('action=revise'));
+    assert.ok(reviewRaw.includes('Make it wait instead.'));
+  });
+
   it('renders summary mode outcomes in plain language while keeping raw mode exact', () => {
     const summaryResult = renderDebugEvent({
       type: 'tool.result',

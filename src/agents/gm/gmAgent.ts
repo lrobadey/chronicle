@@ -8,6 +8,7 @@ import type { PendingPrompt, SceneAgenda, WorldAgenda } from '../../sim/state';
 import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
 import type { SpecialistType } from '../specialists';
+import type { MechanicsResolution } from '../mechanics';
 
 export type GMReasoningEffort = 'low' | 'medium' | 'high';
 
@@ -30,6 +31,17 @@ export interface GMToolRuntime {
   consult_npc(input: { npcId: string; topic?: string }): Promise<unknown>;
   consult_specialist(input: { specialistType: SpecialistType; question: string; focus?: string | null }): Promise<unknown>;
   propose_events(input: { events: WorldEvent[] }): Promise<unknown>;
+  resolve_mechanics(input: {
+    playerText?: string | null;
+    objective?: string | null;
+    focus?: string | null;
+    pendingPrompt?: PendingPrompt | null;
+  }): Promise<MechanicsResolution>;
+  review_mechanics_resolution(input: {
+    resolutionId: string;
+    action: 'approve' | 'revise' | 'reject';
+    feedback?: string | null;
+  }): Promise<unknown>;
   finish_turn(input: GMFinishTurnInput): Promise<unknown>;
 }
 
@@ -46,7 +58,7 @@ export interface GMAgentParams {
   trace?: {
     toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
     llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator' | 'specialist';
+      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -191,6 +203,9 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       consult_npc:        (args) => runtime.consult_npc(args as Parameters<GMToolRuntime['consult_npc']>[0]),
       consult_specialist: (args) => runtime.consult_specialist(args as Parameters<GMToolRuntime['consult_specialist']>[0]),
       propose_events:     (args) => runtime.propose_events(args as Parameters<GMToolRuntime['propose_events']>[0]),
+      resolve_mechanics:  (args) => runtime.resolve_mechanics(args as Parameters<GMToolRuntime['resolve_mechanics']>[0]),
+      review_mechanics_resolution:
+                          (args) => runtime.review_mechanics_resolution(args as Parameters<GMToolRuntime['review_mechanics_resolution']>[0]),
       finish_turn:        (args) => runtime.finish_turn(args as unknown as GMFinishTurnInput),
     };
 
@@ -232,7 +247,10 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       emitDebugEvent(debug, { type: 'tool.result', iteration, tool: call.name, callId, callIndex, callCount, output, ok: deriveToolResultOk(output) });
       nextInput.push({ type: 'function_call_output', call_id: callId, output: safeJSONStringify(output) });
 
-      if (call.name === 'finish_turn' && dispatch[call.name]) return { finished: true };
+      if (call.name === 'finish_turn' && dispatch[call.name]) {
+        if (deriveToolResultOk(output) === false) continue;
+        return { finished: true };
+      }
     }
 
     pendingInput = nextInput;
@@ -283,7 +301,7 @@ function isFunctionCallItem(item: ResponseOutputItem): item is {
 function pushLLMTrace(
   trace: GMAgentParams['trace'] | undefined,
   entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;

@@ -18,8 +18,18 @@ export interface PlayerTranscriptEntry {
 export interface GMWorldContext {
   observation: ReturnType<typeof buildObservation>;
   telemetry: ReturnType<typeof buildTelemetry>;
+  opening: OpeningRecap | null;
   agendas: WorldState['agendas'];
   pendingPrompt: PendingPrompt | null;
+  travelCandidates: Array<{
+    id: string;
+    name: string;
+    aliases?: string[];
+    distanceMeters: number;
+    estimatedWalkMinutes: number;
+    blockedNow: boolean;
+    requiresConfirm: boolean;
+  }>;
   landmarks: Array<{
     id: string;
     name: string;
@@ -71,6 +81,13 @@ export interface OpeningContext {
   playerQuestion: string;
 }
 
+export interface OpeningRecap {
+  narration: string;
+  focalActorId?: string;
+  focusLocationId?: string;
+  playerQuestion?: string;
+}
+
 const RECENT_TURN_LIMIT = 10;
 const RECENT_PLAYER_TEXT_MAX_CHARS = 240;
 const RECENT_NARRATION_MAX_CHARS = 240;
@@ -119,6 +136,8 @@ export function buildGMWorldContext(params: {
       return {
         id: location.id,
         name: location.name,
+        description: location.description,
+        tags: location.tags,
         anchor: location.anchor,
         terrain: location.terrain ?? 'unknown',
         tideAccess: location.tideAccess ?? 'always',
@@ -132,6 +151,17 @@ export function buildGMWorldContext(params: {
     })
     .sort((a, b) => a.distanceMeters - b.distanceMeters)
     .slice(0, 25);
+  const travelCandidates = landmarks
+    .map(location => ({
+      id: location.id,
+      name: location.name,
+      aliases: deriveLocationAliases(location.name, location.description, location.tags),
+      distanceMeters: location.distanceMeters,
+      estimatedWalkMinutes: location.estimatedWalkMinutes,
+      blockedNow: location.blockedNow,
+      requiresConfirm: location.requiresConfirm,
+    }))
+    .slice(0, 12);
   const nearbyItemsOnGround = Object.values(state.items)
     .flatMap(item => {
       const placement = getItemPlacement(state.spine, item.id);
@@ -161,8 +191,10 @@ export function buildGMWorldContext(params: {
   return {
     observation,
     telemetry,
+    opening: buildOpeningRecap(state),
     agendas: state.agendas,
     pendingPrompt: params.pendingPrompt,
+    travelCandidates,
     landmarks,
     nearby: {
       actors: nearbyActors,
@@ -172,6 +204,31 @@ export function buildGMWorldContext(params: {
     recentTurns,
     playerTranscriptTail: buildPlayerTranscript(turnHistory).slice(-RECENT_TURN_LIMIT),
   };
+}
+
+function deriveLocationAliases(name: string, description: string, tags?: string[]): string[] | undefined {
+  const aliases = new Set<string>();
+  const trimmed = name.trim();
+  if (!trimmed) return undefined;
+  aliases.add(trimmed);
+  const withoutArticle = trimmed.replace(/^(the|a|an)\s+/i, '').trim();
+  if (withoutArticle && withoutArticle.toLowerCase() !== trimmed.toLowerCase()) {
+    aliases.add(withoutArticle);
+  }
+  const haystack = `${trimmed} ${description} ${(tags || []).join(' ')}`.toLowerCase();
+  if (/\btavern\b/.test(haystack)) aliases.add('tavern');
+  if (/\bmarket(?:place)?\b/.test(haystack)) {
+    aliases.add('market');
+    aliases.add('marketplace');
+  }
+  if (/\bdocks?\b|\bpiers?\b/.test(haystack)) {
+    aliases.add('dock');
+    aliases.add('docks');
+    aliases.add('pier');
+    aliases.add('piers');
+  }
+  if (/\blanding\b/.test(haystack)) aliases.add('landing');
+  return aliases.size > 1 ? [...aliases] : undefined;
 }
 
 export function buildStaffInterviewContext(params: {
@@ -230,6 +287,17 @@ export function buildOpeningContext(state: WorldState): OpeningContext | null {
       : null,
     openingHook: spec.hookText,
     playerQuestion: spec.playerQuestion,
+  };
+}
+
+export function buildOpeningRecap(state: WorldState): OpeningRecap | null {
+  const narration = state.meta.openingNarration?.trim();
+  if (!narration) return null;
+  return {
+    narration,
+    focalActorId: state.meta.openingSpec?.focalActorId,
+    focusLocationId: state.meta.openingSpec?.focusLocationId,
+    playerQuestion: state.meta.openingSpec?.playerQuestion,
   };
 }
 

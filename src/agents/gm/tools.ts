@@ -25,6 +25,20 @@ const WORLD_AGENDA_UPDATE_SCHEMA = strictObjectSchema(
   { nullable: true },
 );
 
+const MECHANICS_RESOLUTION_ID_SCHEMA = { type: 'string' } as const;
+
+const MECHANICS_PENDING_PROMPT_SCHEMA = strictObjectSchema(
+  {
+    id: { type: 'string' },
+    kind: { type: 'string', enum: ['confirm_travel', 'clarify_target', 'clarify_explore'] },
+    question: { type: 'string' },
+    options: { type: ['array', 'null'], items: PROMPT_OPTION_SCHEMA },
+    data: PENDING_PROMPT_DATA_SCHEMA,
+    createdTurn: { type: 'number' },
+  },
+  { nullable: true },
+);
+
 export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
   {
     type: 'function',
@@ -69,6 +83,33 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
     parameters: {
       ...strictObjectSchema({
         events: { type: 'array', items: EVENT_ITEM_SCHEMA },
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'resolve_mechanics',
+    description: 'Ask the mechanics worker to draft a simple mechanical resolution for the current player action.',
+    parameters: {
+      ...strictObjectSchema({
+        playerText: { type: ['string', 'null'] },
+        objective: { type: ['string', 'null'] },
+        focus: { type: ['string', 'null'] },
+        pendingPrompt: MECHANICS_PENDING_PROMPT_SCHEMA,
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'review_mechanics_resolution',
+    description: 'Approve, revise, or reject a mechanics draft by resolution id.',
+    parameters: {
+      ...strictObjectSchema({
+        resolutionId: MECHANICS_RESOLUTION_ID_SCHEMA,
+        action: { type: 'string', enum: ['approve', 'revise', 'reject'] },
+        feedback: { type: ['string', 'null'] },
       }),
     },
     strict: true,

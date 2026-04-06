@@ -5,6 +5,23 @@ import { DEFAULT_MODEL } from '../../agents/llm/defaults';
 import { QueueLLM } from '../helpers/queueLLM';
 import type { DebugEvent } from '../../engine/debug';
 
+function createMechanicsStub() {
+  return {
+    resolve_mechanics: async () => ({
+      resolutionId: 'res-1',
+      status: 'no_safe_action' as const,
+      interpretation: 'none' as const,
+      summary: 'no mechanical draft',
+      candidateEvents: [],
+      pendingPrompt: null,
+      touchedEntities: [],
+      confidence: 0.2,
+      warnings: [],
+    }),
+    review_mechanics_resolution: async () => ({ ok: true, status: 'rejected', resolutionId: 'res-1' }),
+  };
+}
+
 describe('GM agent loop', () => {
   it('chains calls with previous_response_id and sends only function outputs to follow-up calls', async () => {
     let observeCalls = 0;
@@ -34,6 +51,7 @@ describe('GM agent loop', () => {
       worldContext: { turn: 3, weather: 'clear' },
       llm,
       runtime: {
+        ...createMechanicsStub(),
         observe_world: async () => {
           observeCalls += 1;
           return { ok: true };
@@ -124,6 +142,7 @@ describe('GM agent loop', () => {
       playerText: 'do something',
       llm,
       runtime: {
+        ...createMechanicsStub(),
         observe_world: async () => {
           observeCalls += 1;
           return { ok: true };
@@ -175,6 +194,7 @@ describe('GM agent loop', () => {
       playerText: 'look around',
       llm,
       runtime: {
+        ...createMechanicsStub(),
         observe_world: async () => ({ ok: true }),
         consult_npc: async () => ({ ok: true }),
         consult_specialist: async input => {
@@ -200,6 +220,81 @@ describe('GM agent loop', () => {
     assert.equal(result.finished, true);
     assert.equal(specialistCalls, 1);
     assert.equal(proposeCalls, 1);
+  });
+
+  it('can resolve mechanics and approve the draft without rewriting events', async () => {
+    let resolveCalls = 0;
+    let reviewCalls = 0;
+
+    const llm = new QueueLLM([
+      {
+        id: 'resp-first',
+        output: [{ type: 'function_call', name: 'resolve_mechanics', arguments: '{"objective":"resolve the player moving to the docks"}', call_id: 'm1' }],
+        output_text: '',
+      },
+      {
+        id: 'resp-second',
+        output: [{ type: 'function_call', name: 'review_mechanics_resolution', arguments: '{"resolutionId":"res-1","action":"approve","feedback":null}', call_id: 'm2' }],
+        output_text: '',
+      },
+      {
+        id: 'resp-third',
+        output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'm3' }],
+        output_text: '',
+      },
+    ]);
+
+    await runGMAgent({
+      apiKey: 'test-key',
+      playerText: 'I go to the docks',
+      llm,
+      runtime: {
+        observe_world: async () => ({ ok: true }),
+        consult_npc: async () => ({ ok: true }),
+        consult_specialist: async () => ({ ok: true }),
+        resolve_mechanics: async () => {
+          resolveCalls += 1;
+          return {
+            resolutionId: 'res-1',
+            status: 'ok' as const,
+            interpretation: 'travel',
+            summary: 'travel to Dock Approach',
+            candidateEvents: [{ type: 'TravelToLocation', actorId: 'player-1', locationId: 'dock-approach', pace: 'walk' }],
+            pendingPrompt: null,
+            touchedEntities: ['player-1', 'dock-approach'],
+            confidence: 0.91,
+            warnings: [],
+          };
+        },
+        review_mechanics_resolution: async input => {
+          reviewCalls += 1;
+          assert.equal(input.resolutionId, 'res-1');
+          assert.equal(input.action, 'approve');
+          return { ok: true, status: 'approved', resolutionId: 'res-1', accepted: 1, rejected: 0 };
+        },
+        propose_events: async () => ({ ok: true }),
+        finish_turn: async () => ({ ok: true }),
+      },
+      trace: { toolCalls: [], llmCalls: [] },
+    });
+
+    assert.equal(resolveCalls, 1);
+    assert.equal(reviewCalls, 1);
+    assert.equal(llm.calls[1]?.previous_response_id, 'resp-first');
+    assert.equal(llm.calls[2]?.previous_response_id, 'resp-second');
+
+    const secondInput = llm.calls[1]?.input as Array<Record<string, unknown>>;
+    const firstWorkerOutput = secondInput.find(item => item.type === 'function_call_output');
+    assert.ok(firstWorkerOutput);
+    const parsedWorkerOutput = JSON.parse(String(firstWorkerOutput.output));
+    assert.equal(parsedWorkerOutput.resolutionId, 'res-1');
+    assert.equal(Array.isArray(parsedWorkerOutput.candidateEvents), true);
+
+    const thirdInput = llm.calls[2]?.input as Array<Record<string, unknown>>;
+    const reviewOutput = thirdInput.find(item => item.type === 'function_call_output');
+    assert.ok(reviewOutput);
+    const parsedReviewOutput = JSON.parse(String(reviewOutput.output));
+    assert.equal(parsedReviewOutput.status, 'approved');
   });
 
   it('handles malformed tool arguments and continues', async () => {
@@ -229,6 +324,7 @@ describe('GM agent loop', () => {
       playerText: 'test malformed',
       llm,
       runtime: {
+        ...createMechanicsStub(),
         observe_world: async () => {
           observeCalls += 1;
           return { ok: true };
@@ -272,6 +368,7 @@ describe('GM agent loop', () => {
       worldContext: { turn: 1 },
       llm: highLLM,
       runtime: {
+        ...createMechanicsStub(),
         observe_world: async () => ({ ok: true }),
         consult_npc: async () => ({ ok: true }),
         consult_specialist: async () => ({ ok: true }),
@@ -297,6 +394,7 @@ describe('GM agent loop', () => {
       worldContext: { turn: 2 },
       llm: mediumLLM,
       runtime: {
+        ...createMechanicsStub(),
         observe_world: async () => ({ ok: true }),
         consult_npc: async () => ({ ok: true }),
         consult_specialist: async () => ({ ok: true }),

@@ -36,11 +36,17 @@ import {
   type SpecialistConsultation,
   type SpecialistType,
 } from '../agents/specialists';
+import {
+  attachResolutionMetadata,
+  runMechanicsAgent,
+  type MechanicsResolutionRecord,
+} from '../agents/mechanics';
 import { createIsleOfMarrowWorldVNext } from '../worlds/isle-of-marrow.vnext';
 import type { DebugSink } from './debug';
 import { emitDebugEvent } from './debug';
 import {
   buildOpeningContext,
+  buildOpeningRecap,
   buildGMWorldContext,
   buildRecentTurnDigests,
   buildSpecialistContext,
@@ -132,6 +138,13 @@ export class TurnEngine {
         debug: emit,
         onOpeningDelta: stream?.onOpeningDelta,
       });
+      if (ensured.created || !ensured.state.meta.openingNarration?.trim()) {
+        ensured.state.meta.openingNarration = opening;
+        if (ensured.created) {
+          await this.store.saveInitialState(ensured.sessionId, ensured.state);
+        }
+        await this.store.saveSnapshot(ensured.sessionId, ensured.state);
+      }
       return { sessionId: ensured.sessionId, created: ensured.created, telemetry, opening };
     } catch (error) {
       emitDebugEvent(emit, { type: 'error', stage: 'init', message: error instanceof Error ? error.message : 'unknown' });
@@ -200,7 +213,7 @@ export class TurnEngine {
     const turnHistory = await this.store.loadTurnLog(sessionId);
 
     const incomingPendingPrompt: PendingPrompt | undefined =
-      turnHistory[turnHistory.length - 1]?.pendingPrompt ?? undefined;
+      state.meta.pendingPrompt ?? turnHistory[turnHistory.length - 1]?.pendingPrompt ?? undefined;
     let currentPendingPrompt: PendingPrompt | undefined = incomingPendingPrompt;
 
     let draft = deepClone(state);
@@ -209,6 +222,8 @@ export class TurnEngine {
     const rejectedEvents: RejectedEventRecord[] = [];
     const npcOutputs: NpcAgentOutput[] = [];
     const specialistOutputs: Array<Omit<SpecialistConsultation, 'usedSuggestion' | 'usedCandidateEvents'>> = [];
+    const mechanicsResolutions = new Map<string, MechanicsResolutionRecord>();
+    let activeMechanicsResolutionId: string | null = null;
     const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [], llmCalls: [] } : undefined;
     draft.meta.turn = nextTurn;
     emitDebugEvent(emit, { type: 'turn.started', sessionId, turn: nextTurn, playerText });
@@ -248,6 +263,7 @@ export class TurnEngine {
           currentPendingPrompt?.id === stamped.confirmId
         ) {
           currentPendingPrompt = undefined;
+          delete stagedState.meta.pendingPrompt;
         }
       }
 
@@ -274,116 +290,310 @@ export class TurnEngine {
       return { ok: true, accepted: acceptedEvents.length, rejected: rejectedEvents.length };
     };
 
-    const runtime = {
-      observe_world: async (input: { perspective: 'gm' | 'player' }) => {
-        return input.perspective === 'player'
-          ? buildTelemetry(draft, playerId)
-          : buildObservation(draft, playerId);
-      },
-      consult_npc: async (input: { npcId: string; topic?: string }) => {
-        const npc = draft.actors[input.npcId];
-        if (!npc || npc.kind !== 'npc' || !npc.persona) {
-          return { error: 'npc_not_found' };
-        }
-        const observation = buildObservation(draft, playerId);
-        const output = await runNpcAgent({
-          apiKey,
-          npcId: npc.id,
-          persona: { name: npc.name, tagline: npc.persona.tagline, background: npc.persona.background, voice: npc.persona.voice, goals: npc.persona.goals },
-          observation,
-          playerText,
-          llm: this.llm,
-          debug: emit,
-          trace,
+    const requiresMechanicsReview = (events: WorldEvent[]) => {
+      if (!activeMechanicsResolutionId) return false;
+      return events.some(event => isSimpleMechanicsEvent(event));
+    };
+
+    const pendingPromptResolution = resolvePendingPromptReply(currentPendingPrompt, playerText, playerId);
+    if (pendingPromptResolution) {
+      if (trace) {
+        trace.toolCalls.push({
+          tool: 'resolve_pending_prompt',
+          input: {
+            playerText,
+            pendingPrompt: currentPendingPrompt,
+          },
+          output: {
+            handled: pendingPromptResolution.handled,
+            clearPrompt: pendingPromptResolution.clearPrompt,
+            events: pendingPromptResolution.events,
+          },
         });
-        npcOutputs.push(output);
-        return output;
-      },
-      consult_specialist: async (input: { specialistType: SpecialistType; question: string; focus?: string | null }) => {
-        const context = buildSpecialistContext({
+      }
+
+      if (pendingPromptResolution.clearPrompt) {
+        delete draft.meta.pendingPrompt;
+      }
+      if (pendingPromptResolution.events.length) {
+        applyProposedEvents(pendingPromptResolution.events);
+      }
+      if (pendingPromptResolution.clearPrompt && !draft.meta.pendingPrompt) {
+        currentPendingPrompt = undefined;
+      }
+    } else {
+
+      const runtime = {
+        observe_world: async (input: { perspective: 'gm' | 'player' }) => {
+          return input.perspective === 'player'
+            ? buildTelemetry(draft, playerId)
+            : buildObservation(draft, playerId);
+        },
+        consult_npc: async (input: { npcId: string; topic?: string }) => {
+          const npc = draft.actors[input.npcId];
+          if (!npc || npc.kind !== 'npc' || !npc.persona) {
+            return { error: 'npc_not_found' };
+          }
+          const observation = buildObservation(draft, playerId);
+          const output = await runNpcAgent({
+            apiKey,
+            npcId: npc.id,
+            persona: { name: npc.name, tagline: npc.persona.tagline, background: npc.persona.background, voice: npc.persona.voice, goals: npc.persona.goals },
+            observation,
+            playerText,
+            llm: this.llm,
+            debug: emit,
+            trace,
+          });
+          npcOutputs.push(output);
+          return output;
+        },
+        consult_specialist: async (input: { specialistType: SpecialistType; question: string; focus?: string | null }) => {
+          const context = buildSpecialistContext({
+            state: draft,
+            playerId,
+            playerText,
+            nextTurn,
+            turnHistory,
+            specialistType: input.specialistType,
+            pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
+          });
+          const output = await runSpecialistAgent({
+            apiKey,
+            specialistType: input.specialistType,
+            question: input.question,
+            focus: input.focus || undefined,
+            context,
+            llm: this.llm,
+            debug: emit,
+            trace,
+          });
+          specialistOutputs.push({
+            specialistType: input.specialistType,
+            question: input.question,
+            focus: input.focus || undefined,
+            output,
+          });
+          return output;
+        },
+        propose_events: async (input: { events: WorldEvent[] }) => {
+          if (requiresMechanicsReview(input.events || [])) {
+            const active = mechanicsResolutions.get(activeMechanicsResolutionId!);
+            return {
+              ok: false,
+              error: 'mechanics_review_required',
+              resolutionId: activeMechanicsResolutionId,
+              summary: active?.resolution.summary,
+            };
+          }
+          const result = applyProposedEvents(input.events || []);
+          return { ok: true, ...result };
+        },
+        resolve_mechanics: async (input: {
+          playerText?: string | null;
+          objective?: string | null;
+          focus?: string | null;
+          pendingPrompt?: PendingPrompt | null;
+        }) => {
+          const gmWorldContext = buildGMWorldContext({
+            state: draft,
+            playerId,
+            playerText,
+            nextTurn,
+            turnHistory,
+            pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
+          });
+          const request = {
+            playerText: typeof input.playerText === 'string' && input.playerText.trim() ? input.playerText : playerText,
+            objective: typeof input.objective === 'string' && input.objective.trim() ? input.objective.trim() : undefined,
+            focus: typeof input.focus === 'string' && input.focus.trim() ? input.focus.trim() : undefined,
+            pendingPrompt: normalizePendingPrompt(input.pendingPrompt) || currentPendingPrompt || draft.meta.pendingPrompt || null,
+            telemetry: gmWorldContext.telemetry,
+            travelCandidates: gmWorldContext.travelCandidates,
+            nearby: gmWorldContext.nearby,
+            landmarks: gmWorldContext.landmarks,
+            observation: gmWorldContext.observation,
+          };
+          const draftResolution = await runMechanicsAgent({
+            apiKey,
+            request,
+            llm: this.llm,
+            debug: emit,
+            trace,
+          });
+          const resolutionId = createRuntimeId();
+          const resolution = attachResolutionMetadata(
+            draftResolution,
+            resolutionId,
+            request.pendingPrompt,
+            nextTurn,
+          );
+          mechanicsResolutions.set(resolutionId, { request, resolution });
+          activeMechanicsResolutionId = resolutionId;
+          if (trace) {
+            trace.mechanicsResolutions = trace.mechanicsResolutions || [];
+            trace.mechanicsResolutions.push(resolution);
+            if (resolution.debug) {
+              trace.mechanicsDebug = trace.mechanicsDebug || [];
+              trace.mechanicsDebug.push(resolution.debug);
+            }
+          }
+          return resolution;
+        },
+        review_mechanics_resolution: async (input: {
+          resolutionId: string;
+          action: 'approve' | 'revise' | 'reject';
+          feedback?: string | null;
+        }) => {
+          const cached = mechanicsResolutions.get(input.resolutionId);
+          if (!cached) {
+            return { ok: false, error: 'mechanics_resolution_not_found', resolutionId: input.resolutionId };
+          }
+
+          if (input.action === 'approve') {
+            const result = applyProposedEvents(cached.resolution.candidateEvents || []);
+            if (cached.resolution.pendingPrompt) {
+              draft.meta.pendingPrompt = cached.resolution.pendingPrompt;
+              currentPendingPrompt = cached.resolution.pendingPrompt;
+            }
+            mechanicsResolutions.delete(input.resolutionId);
+            if (activeMechanicsResolutionId === input.resolutionId) {
+              activeMechanicsResolutionId = null;
+            }
+            return {
+              ok: result.ok,
+              status: 'approved',
+              resolutionId: input.resolutionId,
+              accepted: result.accepted,
+              rejected: result.rejected,
+              summary: cached.resolution.summary,
+            };
+          }
+
+          if (input.action === 'reject') {
+            mechanicsResolutions.delete(input.resolutionId);
+            if (activeMechanicsResolutionId === input.resolutionId) {
+              activeMechanicsResolutionId = null;
+            }
+            return { ok: true, status: 'rejected', resolutionId: input.resolutionId };
+          }
+
+          const feedback = typeof input.feedback === 'string' ? input.feedback.trim() : '';
+          if (!feedback) {
+            return { ok: false, error: 'revision_feedback_required', resolutionId: input.resolutionId };
+          }
+
+          const revisedDraft = await runMechanicsAgent({
+            apiKey,
+            request: {
+              ...cached.request,
+              revisionFeedback: feedback,
+            },
+            llm: this.llm,
+            debug: emit,
+            trace,
+          });
+          const nextResolutionId = createRuntimeId();
+          const resolution = attachResolutionMetadata(
+            revisedDraft,
+            nextResolutionId,
+            cached.request.pendingPrompt,
+            nextTurn,
+          );
+          if (trace) {
+            trace.mechanicsResolutions = trace.mechanicsResolutions || [];
+            trace.mechanicsResolutions.push(resolution);
+            if (resolution.debug) {
+              trace.mechanicsDebug = trace.mechanicsDebug || [];
+              trace.mechanicsDebug.push(resolution.debug);
+            }
+          }
+          mechanicsResolutions.delete(input.resolutionId);
+          mechanicsResolutions.set(nextResolutionId, {
+            request: {
+              ...cached.request,
+              revisionFeedback: feedback,
+            },
+            resolution,
+          });
+          activeMechanicsResolutionId = nextResolutionId;
+          return {
+            ok: true,
+            status: 'revised',
+            previousResolutionId: input.resolutionId,
+            resolution,
+          };
+        },
+        finish_turn: async (input: GMFinishTurnInput) => {
+          if (activeMechanicsResolutionId) {
+            const active = mechanicsResolutions.get(activeMechanicsResolutionId);
+            return {
+              ok: false,
+              error: 'mechanics_review_required',
+              resolutionId: activeMechanicsResolutionId,
+              summary: active?.resolution.summary,
+            };
+          }
+          const clear = input.playerPrompt?.clear === true;
+          if (clear) {
+            delete draft.meta.pendingPrompt;
+            currentPendingPrompt = undefined;
+          }
+          const pending = normalizePendingPrompt(input.playerPrompt?.pending);
+          if (pending) {
+            draft.meta.pendingPrompt = pending;
+            currentPendingPrompt = pending;
+          }
+          applyAgendaUpdates(draft, input.agendaUpdates);
+          return { ok: true };
+        },
+      };
+
+      try {
+        const gmWorldContext = buildGMWorldContext({
           state: draft,
           playerId,
           playerText,
           nextTurn,
           turnHistory,
-          specialistType: input.specialistType,
-          pendingPrompt: currentPendingPrompt ?? null,
+          pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
         });
-        const output = await runSpecialistAgent({
+        await runGMAgent({
           apiKey,
-          specialistType: input.specialistType,
-          question: input.question,
-          focus: input.focus || undefined,
-          context,
-          llm: this.llm,
+          gmReasoningEffort,
+          playerText,
+          worldContext: gmWorldContext,
+          runtime,
           debug: emit,
+          llm: this.llm,
           trace,
         });
-        specialistOutputs.push({
-          specialistType: input.specialistType,
-          question: input.question,
-          focus: input.focus || undefined,
-          output,
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown';
+        emitDebugEvent(emit, { type: 'error', stage: 'gm', message });
+        trace?.toolCalls.push({
+          tool: 'gm_agent_error',
+          input: { playerText },
+          output: { error: 'gm_agent_failed', message },
         });
-        return output;
-      },
-      propose_events: async (input: { events: WorldEvent[] }) => {
-        const result = applyProposedEvents(input.events || []);
-        return { ok: true, ...result };
-      },
-      finish_turn: async (input: GMFinishTurnInput) => {
-        const clear = input.playerPrompt?.clear === true;
-        if (clear) {
-          currentPendingPrompt = undefined;
+
+        const rolledBackAccepted = acceptedEvents.splice(0, acceptedEvents.length);
+        if (rolledBackAccepted.length) {
+          emitDebugEvent(emit, { type: 'event.rollback', events: rolledBackAccepted, reason: 'agent_failure_rollback' });
         }
-        const pending = normalizePendingPrompt(input.playerPrompt?.pending);
-        if (pending) {
-          currentPendingPrompt = pending;
+        for (const event of rolledBackAccepted) {
+          rejectedEvents.push({ event, reason: 'agent_failure_rollback' });
         }
-        applyAgendaUpdates(draft, input.agendaUpdates);
-        return { ok: true };
-      },
-    };
 
-    try {
-      const gmWorldContext = buildGMWorldContext({
-        state: draft,
-        playerId,
-        playerText,
-        nextTurn,
-        turnHistory,
-        pendingPrompt: incomingPendingPrompt ?? null,
-      });
-      await runGMAgent({
-        apiKey,
-        gmReasoningEffort,
-        playerText,
-        worldContext: gmWorldContext,
-        runtime,
-        debug: emit,
-        llm: this.llm,
-        trace,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'unknown';
-      emitDebugEvent(emit, { type: 'error', stage: 'gm', message });
-      trace?.toolCalls.push({
-        tool: 'gm_agent_error',
-        input: { playerText },
-        output: { error: 'gm_agent_failed', message },
-      });
-
-      const rolledBackAccepted = acceptedEvents.splice(0, acceptedEvents.length);
-      if (rolledBackAccepted.length) {
-        emitDebugEvent(emit, { type: 'event.rollback', events: rolledBackAccepted, reason: 'agent_failure_rollback' });
+        draft = deepClone(state);
+        draft.meta.turn = nextTurn;
+        currentPendingPrompt = incomingPendingPrompt;
+        if (currentPendingPrompt) {
+          draft.meta.pendingPrompt = currentPendingPrompt;
+        } else {
+          delete draft.meta.pendingPrompt;
+        }
       }
-      for (const event of rolledBackAccepted) {
-        rejectedEvents.push({ event, reason: 'agent_failure_rollback' });
-      }
-
-      draft = deepClone(state);
-      draft.meta.turn = nextTurn;
-      currentPendingPrompt = incomingPendingPrompt;
     }
 
     assertNoInvariantIssues(draft, 'Session world state failed post-turn invariant checks');
@@ -400,7 +610,8 @@ export class TurnEngine {
       telemetry: afterTelemetry,
       diff,
       recentTurns,
-      pendingPrompt: currentPendingPrompt ?? null,
+      opening: buildOpeningRecap(draft),
+      pendingPrompt: draft.meta.pendingPrompt || null,
       rejectedEvents,
       llm: this.llm,
       debug: emit,
@@ -419,7 +630,7 @@ export class TurnEngine {
       atIso: new Date().toISOString(),
       playerId,
       playerText,
-      pendingPrompt: currentPendingPrompt ?? undefined,
+      pendingPrompt: draft.meta.pendingPrompt || undefined,
       acceptedEvents,
       rejectedEvents,
       npcOutputs,
@@ -449,12 +660,34 @@ function stampEvent(event: WorldEvent, turn: number): WorldEvent {
   return {
     ...event,
     meta: {
-      id: randomUUID(),
+      id: createRuntimeId(),
       turn,
       by: 'gm',
       actorId: event.type === 'AdvanceTime' ? undefined : 'actorId' in event ? event.actorId : undefined,
     },
   };
+}
+
+function createRuntimeId(): string {
+  try {
+    if (globalThis.crypto?.randomUUID) {
+      return globalThis.crypto.randomUUID();
+    }
+  } catch {
+    // Fall through to node:crypto helper.
+  }
+  return randomUUID();
+}
+
+function isSimpleMechanicsEvent(event: WorldEvent): boolean {
+  return (
+    event.type === 'MoveActor' ||
+    event.type === 'TravelToLocation' ||
+    event.type === 'Explore' ||
+    event.type === 'Inspect' ||
+    event.type === 'AdvanceTime' ||
+    event.type === 'TransferItem'
+  );
 }
 
 function deepClone<T>(value: T): T {
@@ -539,6 +772,55 @@ function normalizePendingPromptData(value: unknown): PendingPromptData | undefin
   }
 
   return Object.keys(data).length ? data : undefined;
+}
+
+function resolvePendingPromptReply(
+  pendingPrompt: PendingPrompt | undefined,
+  playerText: string,
+  playerId: string,
+): { handled: 'confirm_travel_yes' | 'confirm_travel_no'; clearPrompt: boolean; events: WorldEvent[] } | null {
+  if (!pendingPrompt || pendingPrompt.kind !== 'confirm_travel') return null;
+  const reply = classifyPromptReply(playerText);
+  if (!reply) return null;
+
+  if (reply === 'no') {
+    return {
+      handled: 'confirm_travel_no',
+      clearPrompt: true,
+      events: [],
+    };
+  }
+
+  const locationId = typeof pendingPrompt.data?.locationId === 'string' ? pendingPrompt.data.locationId : null;
+  if (!locationId) return null;
+  return {
+    handled: 'confirm_travel_yes',
+    clearPrompt: false,
+    events: [{
+      type: 'TravelToLocation',
+      actorId: playerId,
+      locationId,
+      pace: 'walk',
+      confirmId: pendingPrompt.id,
+      note: `Travel confirmed to ${locationId}.`,
+    }],
+  };
+}
+
+function classifyPromptReply(playerText: string): 'yes' | 'no' | null {
+  const normalized = playerText
+    .toLowerCase()
+    .replace(/[^a-z0-9\s']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!normalized) return null;
+
+  const affirmative = new Set(['yes', 'y', 'yeah', 'yep', 'sure', 'ok', 'okay', 'do it', 'go ahead', 'confirm']);
+  const negative = new Set(['no', 'n', 'nope', 'nah', 'cancel', 'stop', 'never mind', 'dont', "don't"]);
+
+  if (affirmative.has(normalized)) return 'yes';
+  if (negative.has(normalized)) return 'no';
+  return null;
 }
 
 function applyAgendaUpdates(state: WorldState, updates: GMFinishTurnInput['agendaUpdates']) {

@@ -7,7 +7,7 @@ import type { TurnDiff } from '../../sim/views/diff';
 import type { PendingPrompt } from '../../sim/state';
 import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
-import type { OpeningContext } from '../../engine/contextBuilders';
+import type { OpeningContext, OpeningRecap } from '../../engine/contextBuilders';
 import type { RecentTurnDigest } from '../../engine/session/types';
 import type { SpecialistType } from '../specialists';
 
@@ -22,6 +22,7 @@ export interface NarratorParams {
   telemetry: Telemetry;
   diff: TurnDiff;
   recentTurns: RecentTurnDigest[];
+  opening?: OpeningRecap | null;
   pendingPrompt?: PendingPrompt | null;
   rejectedEvents?: Array<{ reason: string; event?: unknown }>;
   llm: LLMClient;
@@ -29,7 +30,7 @@ export interface NarratorParams {
   debug?: DebugSink;
   trace?: {
     llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator' | 'specialist';
+      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -57,7 +58,7 @@ export interface NarratorOpeningParams {
 }
 
 export async function narrateTurn(params: NarratorParams): Promise<string> {
-  const { apiKey, model = DEFAULT_MODEL, style = 'michener', playerText, telemetry, diff, recentTurns, pendingPrompt, rejectedEvents, llm, onNarrationDelta, debug, trace } = params;
+  const { apiKey, model = DEFAULT_MODEL, style = 'michener', playerText, telemetry, diff, recentTurns, opening = null, pendingPrompt, rejectedEvents, llm, onNarrationDelta, debug, trace } = params;
   emitDebugEvent(debug, { type: 'narrator.started', phase: 'turn', style });
   if (pendingPrompt?.question?.trim()) {
     const question = pendingPrompt.question.trim();
@@ -84,6 +85,7 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
       instructions: NARRATOR_STYLE_PROMPTS[style],
       input: JSON.stringify({
         attemptedAction: playerText,
+        opening,
         recentTurns,
         telemetry,
         diff,
@@ -244,7 +246,7 @@ function formatAttemptedAction(playerText: string): string {
 function pushLLMTrace(
   trace: NarratorParams['trace'] | undefined,
   entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;

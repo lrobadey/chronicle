@@ -742,6 +742,34 @@ function summarizeToolInput(tool: string, input: unknown, mode: 'summary' | 'raw
     }
     return `events=${record.events.length}`;
   }
+  if (tool === 'resolve_mechanics') {
+    if (mode === 'summary') {
+      return 'mechanics: resolving the action';
+    }
+    const parts: string[] = [];
+    if (typeof record.objective === 'string' && record.objective.trim()) {
+      parts.push(`objective=${JSON.stringify(record.objective)}`);
+    }
+    if (typeof record.focus === 'string' && record.focus.trim()) {
+      parts.push(`focus=${JSON.stringify(record.focus)}`);
+    }
+    if (record.pendingPrompt && typeof record.pendingPrompt === 'object') {
+      parts.push('pending_prompt=true');
+    }
+    return parts.join(' ');
+  }
+  if (tool === 'review_mechanics_resolution' && typeof record.resolutionId === 'string') {
+    const action = typeof record.action === 'string' ? record.action : 'review';
+    if (mode === 'summary') {
+      if (action === 'approve') return 'mechanics: GM approved draft';
+      if (action === 'revise') return 'mechanics: GM asked for a revision';
+      if (action === 'reject') return 'mechanics: GM rejected draft';
+    }
+    const feedback = typeof record.feedback === 'string' && record.feedback.trim()
+      ? ` feedback=${JSON.stringify(record.feedback)}`
+      : '';
+    return `resolution=${record.resolutionId} action=${action}${feedback}`;
+  }
   if (tool === 'finish_turn') {
     if (mode === 'summary') {
       const finishIntent = summarizeFinishTurnIntent(record);
@@ -790,6 +818,54 @@ function summarizeToolOutput(tool: string, output: unknown, mode: 'summary' | 'r
       return 'no world changes';
     }
     return `accepted=${accepted} rejected=${rejected}`;
+  }
+  if (tool === 'resolve_mechanics') {
+    const resolutionId = typeof record.resolutionId === 'string' ? record.resolutionId : null;
+    const status = typeof record.status === 'string' ? record.status : null;
+    const summary = typeof record.summary === 'string' ? record.summary.trim() : 'mechanics draft';
+    const confidence = typeof record.confidence === 'number' ? record.confidence : null;
+    const eventCount = Array.isArray(record.candidateEvents) ? record.candidateEvents.length : 0;
+    const debug = record.debug && typeof record.debug === 'object'
+      ? record.debug as Record<string, unknown>
+      : null;
+    if (mode === 'summary') {
+      if (status === 'worker_contract_failed') {
+        return 'mechanics: worker failed to produce a valid draft';
+      }
+      if (status === 'no_safe_action') {
+        return 'mechanics: no safe action found';
+      }
+      const confidenceLabel = formatConfidence(confidence);
+      return `mechanics: drafted ${summary}${confidenceLabel ? ` (${confidenceLabel} confidence)` : ''}`;
+    }
+    const parts = [
+      resolutionId ? `resolution=${resolutionId}` : '',
+      status ? `status=${status}` : '',
+      typeof record.interpretation === 'string' ? `interpretation=${record.interpretation}` : '',
+      confidence != null ? `confidence=${confidence.toFixed(2)}` : '',
+      `events=${eventCount}`,
+      typeof debug?.selectedModel === 'string' ? `model=${debug.selectedModel}` : '',
+      debug?.usedFallback === true ? 'fallback_used=true' : '',
+      typeof debug?.failureReason === 'string' ? `failure=${JSON.stringify(debug.failureReason)}` : '',
+    ].filter(Boolean);
+    return parts.join(' ');
+  }
+  if (tool === 'review_mechanics_resolution') {
+    const status = typeof record.status === 'string' ? record.status : null;
+    if (mode === 'summary') {
+      if (status === 'approved') return 'mechanics: GM approved draft';
+      if (status === 'revised') return 'mechanics: drafted revision ready';
+      if (status === 'rejected') return 'mechanics: no world changes after review';
+    }
+    const parts = [
+      status ? `status=${status}` : '',
+      typeof record.resolutionId === 'string' ? `resolution=${record.resolutionId}` : '',
+      typeof record.previousResolutionId === 'string' ? `previous=${record.previousResolutionId}` : '',
+      record.resolution && typeof record.resolution === 'object' && typeof (record.resolution as Record<string, unknown>).resolutionId === 'string'
+        ? `next=${String((record.resolution as Record<string, unknown>).resolutionId)}`
+        : '',
+    ].filter(Boolean);
+    return parts.join(' ');
   }
   if (tool === 'finish_turn') {
     if (mode === 'summary') {
@@ -860,6 +936,10 @@ function formatToolName(tool: string, mode: 'summary' | 'raw'): string {
       return 'consulting a specialist';
     case 'propose_events':
       return 'considering world changes';
+    case 'resolve_mechanics':
+      return 'mechanics resolution';
+    case 'review_mechanics_resolution':
+      return 'mechanics review';
     case 'finish_turn':
       return 'finalizing reply';
     default:
@@ -899,6 +979,13 @@ function formatLocationId(locationId: string): string {
     .split('-')
     .map(part => part ? part[0]!.toUpperCase() + part.slice(1) : part)
     .join(' ');
+}
+
+function formatConfidence(value: number | null): string | null {
+  if (value == null) return null;
+  if (value >= 0.85) return 'high';
+  if (value >= 0.6) return 'medium';
+  return 'low';
 }
 
 function formatRawPayload(value: unknown): string {

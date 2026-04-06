@@ -240,7 +240,7 @@ describe('TurnEngine', () => {
     }
   });
 
-  it('injects recent turn digests and bounded player transcript tail into GM and narrator context', async () => {
+  it('injects the persisted opening, recent turn digests, and bounded player transcript tail into GM and narrator context', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
@@ -289,8 +289,12 @@ describe('TurnEngine', () => {
 
       assert.equal(firstGMInput[0]?.role, 'system');
       assert.equal(secondGMInput[0]?.role, 'system');
+      assert.equal(firstContext.world.opening.narration, init.opening);
+      assert.equal(firstContext.world.opening.focalActorId, 'tamar-vane');
+      assert.equal(firstContext.world.opening.focusLocationId, 'the-landing');
       assert.deepEqual(firstContext.world.recentTurns, []);
       assert.deepEqual(firstContext.world.playerTranscriptTail, []);
+      assert.deepEqual(secondContext.world.opening, firstContext.world.opening);
       assert.deepEqual(secondContext.world.recentTurns, [
         {
           turn: 1,
@@ -303,6 +307,7 @@ describe('TurnEngine', () => {
       assert.deepEqual(secondContext.world.playerTranscriptTail, [
         { turn: 1, playerId: 'player-1', playerText: 'I sit' },
       ]);
+      assert.deepEqual(secondNarratorInput.opening, firstContext.world.opening);
       assert.deepEqual(secondNarratorInput.recentTurns, secondContext.world.recentTurns);
     } finally {
       await removeDir(rootDir);
@@ -457,7 +462,7 @@ describe('TurnEngine', () => {
       assert.equal(turnOne.narration, 'The Rib Market is a longer walk. Set out now?');
       const afterTurnOne = await store.loadSession(init.sessionId);
       const turnLogAfterTurnOne = await store.loadTurnLog(init.sessionId);
-      // pendingPrompt is no longer stored in the snapshot — only in TurnRecord
+      assert.equal(afterTurnOne?.meta.pendingPrompt?.id, 'confirm-rib-market');
       assert.equal(turnLogAfterTurnOne[0]?.pendingPrompt?.id, 'confirm-rib-market');
       assert.equal(turnLogAfterTurnOne[0]?.trace, undefined);
 
@@ -468,13 +473,11 @@ describe('TurnEngine', () => {
         apiKey: 'test-key',
       });
 
-      const secondGMInput = llm.calls[1]?.input as Array<Record<string, unknown>>;
-      const secondContext = JSON.parse(String(secondGMInput[0]?.content));
-      assert.equal(secondContext.world.pendingPrompt?.id, 'confirm-rib-market');
-
-      // After travel confirmation, the second TurnRecord should have no pendingPrompt
+      const afterTurnTwo = await store.loadSession(init.sessionId);
+      assert.equal(afterTurnTwo?.meta.pendingPrompt, undefined);
       const turnLogAfterTurnTwo = await store.loadTurnLog(init.sessionId);
       assert.equal(turnLogAfterTurnTwo[1]?.pendingPrompt, undefined);
+      assert.equal(llm.calls.length, 2);
     } finally {
       await removeDir(rootDir);
     }
@@ -824,6 +827,9 @@ describe('TurnEngine', () => {
       assert.equal(firstInput.openingContext.focusLocation.id, 'the-landing');
       assert.equal(resumedInput.openingMode, 'resume');
       assert.equal(resumedInput.openingContext, null);
+
+      const state = await store.loadSession(init.sessionId);
+      assert.equal(state?.meta.openingNarration, 'First opener.');
     } finally {
       await removeDir(rootDir);
     }
@@ -852,5 +858,481 @@ describe('TurnEngine', () => {
       world.ledger[2]?.text,
       'Tamar Vane halts the dawn rope-check, staring at a weed-line wrapped too high on the outer pilings.',
     );
+  });
+
+  it('can resolve mechanics and apply approved candidate events through review_mechanics_resolution', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'resolve_mechanics',
+              arguments: '{"objective":"resolve the player inspecting the mug"}',
+              call_id: 'gm-mechanics',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'mechanics-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_mechanics_resolution',
+              arguments:
+                '{"interpretation":"inspect","summary":"inspect the mug","actions":[{"type":"inspect","actorId":"player-1","subject":"mug","note":"Inspect the mug."}],"pendingPrompt":null,"touchedEntities":["player-1","mug"],"confidence":0.92,"warnings":[]}',
+              call_id: 'mechanics-tool',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-2',
+          output: [
+            {
+              type: 'function_call',
+              name: 'review_mechanics_resolution',
+              arguments: '{"resolutionId":"11111111-1111-4111-8111-111111111111","action":"approve","feedback":null}',
+              call_id: 'gm-review',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-3',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-finish' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'You inspect the mug.',
+        },
+      ]);
+
+      const originalUUID = globalThis.crypto.randomUUID;
+      Object.defineProperty(globalThis.crypto, 'randomUUID', {
+        value: (() => '11111111-1111-4111-8111-111111111111') as typeof globalThis.crypto.randomUUID,
+        configurable: true,
+      });
+      try {
+        const engine = new TurnEngine({ store, llm });
+        const init = await engine.initSession({});
+        const before = await store.loadSession(init.sessionId);
+
+        const turn = await engine.runTurn({
+          sessionId: init.sessionId,
+          playerId: 'player-1',
+          playerText: 'I inspect the mug',
+          apiKey: 'test-key',
+          debug: { includeTrace: true },
+        });
+
+        assert.equal(turn.acceptedEvents.length, 1);
+        assert.equal(turn.acceptedEvents[0]?.type, 'Inspect');
+        assert.deepEqual(turn.telemetry.player.pos, before?.actors['player-1']?.pos);
+        assert.ok(llm.calls.some(call => call.model === 'gpt-5.4-mini'));
+      } finally {
+        Object.defineProperty(globalThis.crypto, 'randomUUID', {
+          value: originalUUID,
+          configurable: true,
+        });
+      }
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('resolves obvious fuzzy travel commands deterministically before falling back to the mechanics model', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'resolve_mechanics',
+              arguments: '{"objective":"resolve the player traveling to the tavern"}',
+              call_id: 'gm-mechanics',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-2',
+          output: [
+            {
+              type: 'function_call',
+              name: 'review_mechanics_resolution',
+              arguments: '{"resolutionId":"12121212-1212-4212-8212-121212121212","action":"approve","feedback":null}',
+              call_id: 'gm-review',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-3',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-finish' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'You head for the tavern.',
+        },
+      ]);
+
+      const originalUUID = globalThis.crypto.randomUUID;
+      Object.defineProperty(globalThis.crypto, 'randomUUID', {
+        value: (() => '12121212-1212-4212-8212-121212121212') as typeof globalThis.crypto.randomUUID,
+        configurable: true,
+      });
+      try {
+        const engine = new TurnEngine({ store, llm });
+        const init = await engine.initSession({});
+
+        const turn = await engine.runTurn({
+          sessionId: init.sessionId,
+          playerId: 'player-1',
+          playerText: 'i go the tavern',
+          apiKey: 'test-key',
+          debug: { includeTrace: true },
+        });
+
+        assert.equal(turn.acceptedEvents.length, 1);
+        assert.equal(turn.acceptedEvents[0]?.type, 'TravelToLocation');
+        assert.equal((turn.acceptedEvents[0] as { locationId?: string }).locationId, 'the-drunken-vertebra');
+        assert.equal(llm.calls.some(call => call.model === 'gpt-5.4-mini'), false);
+        const resolution = turn.trace?.mechanicsResolutions?.[0];
+        assert.equal(resolution?.debug?.selectedModel, 'deterministic');
+      } finally {
+        Object.defineProperty(globalThis.crypto, 'randomUUID', {
+          value: originalUUID,
+          configurable: true,
+        });
+      }
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('can revise or reject a mechanics draft without applying world changes', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-1',
+          output: [{ type: 'function_call', name: 'resolve_mechanics', arguments: '{}', call_id: 'gm-mechanics' }],
+          output_text: '',
+        },
+        {
+          id: 'mechanics-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_mechanics_resolution',
+              arguments:
+                '{"interpretation":"inspect","summary":"inspect the mug","actions":[{"type":"inspect","actorId":"player-1","subject":"mug","note":"Inspect the mug."}],"pendingPrompt":null,"touchedEntities":["player-1","mug"],"confidence":0.71,"warnings":[]}',
+              call_id: 'mechanics-tool-1',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-2',
+          output: [
+            {
+              type: 'function_call',
+              name: 'review_mechanics_resolution',
+              arguments: '{"resolutionId":"22222222-2222-4222-8222-222222222222","action":"revise","feedback":"It should wait, not inspect."}',
+              call_id: 'gm-review',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'mechanics-2',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_mechanics_resolution',
+              arguments:
+                '{"interpretation":"wait","summary":"wait for one minute","actions":[{"type":"wait","minutes":1,"note":"One minute passes."}],"pendingPrompt":null,"touchedEntities":["player-1"],"confidence":0.89,"warnings":[]}',
+              call_id: 'mechanics-tool-2',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-3',
+          output: [
+            {
+              type: 'function_call',
+              name: 'review_mechanics_resolution',
+              arguments: '{"resolutionId":"33333333-3333-4333-8333-333333333333","action":"reject","feedback":null}',
+              call_id: 'gm-reject',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-4',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-finish' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'Nothing changes.',
+        },
+      ]);
+
+      const ids = [
+        '22222222-2222-4222-8222-222222222222',
+        '33333333-3333-4333-8333-333333333333',
+      ];
+      const originalUUID = globalThis.crypto.randomUUID;
+      Object.defineProperty(globalThis.crypto, 'randomUUID', {
+        value: (() => ids.shift() || '44444444-4444-4444-8444-444444444444') as typeof globalThis.crypto.randomUUID,
+        configurable: true,
+      });
+      try {
+        const engine = new TurnEngine({ store, llm });
+        const init = await engine.initSession({});
+        const before = await store.loadSession(init.sessionId);
+
+        const turn = await engine.runTurn({
+          sessionId: init.sessionId,
+          playerId: 'player-1',
+          playerText: 'I look at the mug',
+          apiKey: 'test-key',
+          debug: { includeTrace: true },
+        });
+
+        assert.equal(turn.acceptedEvents.length, 0);
+        assert.deepEqual(turn.telemetry.player.pos, before?.actors['player-1']?.pos);
+        const reviewCalls = turn.trace?.toolCalls.filter(call => call.tool === 'review_mechanics_resolution') || [];
+        assert.equal(reviewCalls.length, 2);
+        const revised = reviewCalls[0]?.output as Record<string, unknown>;
+        assert.equal(revised.status, 'revised');
+      } finally {
+        Object.defineProperty(globalThis.crypto, 'randomUUID', {
+          value: originalUUID,
+          configurable: true,
+        });
+      }
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('requires the GM to review an active mechanics draft before manual mechanics events or finish_turn', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-1',
+          output: [{ type: 'function_call', name: 'resolve_mechanics', arguments: '{}', call_id: 'gm-mechanics' }],
+          output_text: '',
+        },
+        {
+          id: 'mechanics-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_mechanics_resolution',
+              arguments:
+                '{"interpretation":"none","summary":"no safe action found","actions":[],"pendingPrompt":null,"touchedEntities":[],"confidence":0.2,"warnings":[]}',
+              call_id: 'mechanics-tool',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-2',
+          output: [
+            {
+              type: 'function_call',
+              name: 'propose_events',
+              arguments:
+                '{"events":[{"type":"MoveActor","actorId":"player-1","to":{"x":35,"y":45,"z":0},"toLocationId":null,"mode":"walk","itemId":null,"item":null,"fromActorId":null,"at":null,"text":null,"toActorId":null,"minutes":null,"entity":null,"key":null,"value":null,"locationId":null,"pace":null,"confirmId":null,"area":null,"direction":null,"subject":null,"note":"Head toward the market."}]}',
+              call_id: 'gm-propose-blocked',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-3',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done too early"}', call_id: 'gm-finish-blocked' }],
+          output_text: '',
+        },
+        {
+          id: 'gm-4',
+          output: [
+            {
+              type: 'function_call',
+              name: 'review_mechanics_resolution',
+              arguments: '{"resolutionId":"55555555-5555-4555-8555-555555555555","action":"reject","feedback":null}',
+              call_id: 'gm-review',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-5',
+          output: [
+            {
+              type: 'function_call',
+              name: 'propose_events',
+              arguments:
+                '{"events":[{"type":"MoveActor","actorId":"player-1","to":{"x":35,"y":45,"z":0},"toLocationId":null,"mode":"walk","itemId":null,"item":null,"fromActorId":null,"at":null,"text":null,"toActorId":null,"minutes":null,"entity":null,"key":null,"value":null,"locationId":null,"pace":null,"confirmId":null,"area":null,"direction":null,"subject":null,"note":"Head toward the market."}]}',
+              call_id: 'gm-propose-accepted',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-6',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-finish' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'You head toward the market.',
+        },
+      ]);
+
+      const originalUUID = globalThis.crypto.randomUUID;
+      Object.defineProperty(globalThis.crypto, 'randomUUID', {
+        value: (() => '55555555-5555-4555-8555-555555555555') as typeof globalThis.crypto.randomUUID,
+        configurable: true,
+      });
+      try {
+        const engine = new TurnEngine({ store, llm });
+        const init = await engine.initSession({});
+
+        const turn = await engine.runTurn({
+          sessionId: init.sessionId,
+          playerId: 'player-1',
+          playerText: 'i got to the rib market',
+          apiKey: 'test-key',
+          debug: { includeTrace: true },
+        });
+
+        assert.equal(turn.acceptedEvents.length, 1);
+        assert.equal(turn.acceptedEvents[0]?.type, 'MoveActor');
+        const proposeCalls = turn.trace?.toolCalls.filter(call => call.tool === 'propose_events') || [];
+        const firstPropose = proposeCalls[0]?.output as Record<string, unknown>;
+        assert.equal(firstPropose.error, 'mechanics_review_required');
+        const finishCalls = turn.trace?.toolCalls.filter(call => call.tool === 'finish_turn') || [];
+        const blockedFinish = finishCalls[0]?.output as Record<string, unknown>;
+        assert.equal(blockedFinish.error, 'mechanics_review_required');
+      } finally {
+        Object.defineProperty(globalThis.crypto, 'randomUUID', {
+          value: originalUUID,
+          configurable: true,
+        });
+      }
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('consumes confirm_travel replies deterministically and travels on yes without invoking the GM', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'You set out for the Heartspring.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const state = await store.loadSession(init.sessionId);
+      assert.ok(state);
+      state.meta.pendingPrompt = {
+        id: 'confirm-heartspring',
+        kind: 'confirm_travel',
+        question: 'Travel to The Heartspring?',
+        options: [{ key: 'yes', label: 'Yes' }, { key: 'no', label: 'No' }],
+        data: { locationId: 'the-heartspring', estimatedMinutes: 42 },
+        createdTurn: 1,
+      };
+      await store.saveSnapshot(init.sessionId, state);
+
+      const debugEvents: DebugEvent[] = [];
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'yes',
+        apiKey: 'test-key',
+        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 1);
+      assert.equal(turn.acceptedEvents[0]?.type, 'TravelToLocation');
+      assert.equal((turn.acceptedEvents[0] as { locationId?: string }).locationId, 'the-heartspring');
+      assert.equal((turn.acceptedEvents[0] as { confirmId?: string }).confirmId, 'confirm-heartspring');
+      assert.equal(turn.telemetry.location.id, 'the-heartspring');
+      assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), false);
+      const persisted = await store.loadSession(init.sessionId);
+      assert.equal(persisted?.meta.pendingPrompt, undefined);
+      const pendingTrace = turn.trace?.toolCalls.find(call => call.tool === 'resolve_pending_prompt');
+      assert.equal((pendingTrace?.output as { handled?: string } | undefined)?.handled, 'confirm_travel_yes');
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('consumes confirm_travel replies deterministically and clears the prompt on no', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'You decide not to make the trip.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const before = await store.loadSession(init.sessionId);
+      assert.ok(before);
+      before.meta.pendingPrompt = {
+        id: 'confirm-heartspring',
+        kind: 'confirm_travel',
+        question: 'Travel to The Heartspring?',
+        options: [{ key: 'yes', label: 'Yes' }, { key: 'no', label: 'No' }],
+        data: { locationId: 'the-heartspring', estimatedMinutes: 42 },
+        createdTurn: 1,
+      };
+      await store.saveSnapshot(init.sessionId, before);
+
+      const debugEvents: DebugEvent[] = [];
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'no',
+        apiKey: 'test-key',
+        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 0);
+      assert.deepEqual(turn.telemetry.player.pos, before.actors['player-1']?.pos);
+      assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), false);
+      const persisted = await store.loadSession(init.sessionId);
+      assert.equal(persisted?.meta.pendingPrompt, undefined);
+      const pendingTrace = turn.trace?.toolCalls.find(call => call.tool === 'resolve_pending_prompt');
+      assert.equal((pendingTrace?.output as { handled?: string } | undefined)?.handled, 'confirm_travel_no');
+    } finally {
+      await removeDir(rootDir);
+    }
   });
 });

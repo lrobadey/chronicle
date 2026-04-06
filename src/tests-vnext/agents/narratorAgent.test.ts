@@ -204,4 +204,36 @@ describe('narrator streaming', () => {
       },
     ]);
   });
+
+  it('includes the opening recap in narrator input for later turns', async () => {
+    const llm = new QueueLLM([
+      {
+        output: [],
+        output_text: 'The bones answer with silence.',
+      },
+    ]);
+
+    await narrateTurn({
+      apiKey: 'test-key',
+      playerText: 'look around',
+      telemetry,
+      diff,
+      opening: {
+        narration: 'At first light you come onto the Landing beneath the great ribs.',
+        focalActorId: 'tamar-vane',
+        focusLocationId: 'the-landing',
+        playerQuestion: 'Why has Tamar Vane broken his routine at the docks?',
+      },
+      recentTurns: [],
+      llm,
+    });
+
+    const input = JSON.parse(String(llm.calls[0]?.input));
+    assert.deepEqual(input.opening, {
+      narration: 'At first light you come onto the Landing beneath the great ribs.',
+      focalActorId: 'tamar-vane',
+      focusLocationId: 'the-landing',
+      playerQuestion: 'Why has Tamar Vane broken his routine at the docks?',
+    });
+  });
 });

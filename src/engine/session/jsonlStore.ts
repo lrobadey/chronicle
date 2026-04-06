@@ -56,6 +56,14 @@ export class JsonlSessionStore implements SessionStore {
     await this.writeState(snapshotPath, state);
   }
 
+  async saveInitialState(sessionId: string, state: WorldState): Promise<void> {
+    const dir = this.sessionDir(sessionId);
+    await fs.mkdir(dir, { recursive: true });
+    this.assertCompatibleState(sessionId, state);
+    const initialPath = path.join(dir, INITIAL_FILE);
+    await this.writeState(initialPath, state);
+  }
+
   async appendTurn(sessionId: string, record: TurnRecord): Promise<void> {
     const dir = this.sessionDir(sessionId);
     await fs.mkdir(dir, { recursive: true });
@@ -150,9 +158,6 @@ function normalizeLoadedState(state: WorldState): WorldState {
     introductionOpportunities: Array.isArray(state.agendas.world?.introductionOpportunities) ? state.agendas.world.introductionOpportunities : [],
     escalationHooks: Array.isArray(state.agendas.world?.escalationHooks) ? state.agendas.world.escalationHooks : [],
   };
-
-  // Strip legacy pendingPrompt if present in old snapshots (now tracked in TurnRecord, not WorldState)
-  delete (state.meta as unknown as Record<string, unknown>)['pendingPrompt'];
 
   return syncWorldSpine(state);
 }

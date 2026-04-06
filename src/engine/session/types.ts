@@ -2,6 +2,7 @@ import type { PendingPrompt, WorldState } from '../../sim/state';
 import type { WorldEvent } from '../../sim/events';
 import type { Telemetry } from '../../sim/views/telemetry';
 import type { NpcAgentOutput } from '../../agents/npc/npcAgent';
+import type { MechanicsDebugRecord, MechanicsResolution } from '../../agents/mechanics';
 import type { SpecialistConsultation, SpecialistType } from '../../agents/specialists';
 
 export interface RejectedEventRecord {
@@ -36,9 +37,11 @@ export interface TurnRecord {
 
 export interface TurnTrace {
   toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
+  mechanicsResolutions?: MechanicsResolution[];
+  mechanicsDebug?: MechanicsDebugRecord[];
   specialistOutputs?: SpecialistConsultation[];
   llmCalls?: Array<{
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;
@@ -56,6 +59,7 @@ export interface SessionStore {
   ensureSession(sessionId: string | undefined, worldFactory: () => WorldState): Promise<{ sessionId: string; created: boolean; state: WorldState }>;
   loadSession(sessionId: string): Promise<WorldState | null>;
   loadTurnLog(sessionId: string): Promise<TurnRecord[]>;
+  saveInitialState(sessionId: string, state: WorldState): Promise<void>;
   saveSnapshot(sessionId: string, state: WorldState): Promise<void>;
   appendTurn(sessionId: string, record: TurnRecord): Promise<void>;
 }

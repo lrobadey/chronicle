@@ -43,7 +43,7 @@ export interface NpcAgentParams {
   debug?: DebugSink;
   trace?: {
     llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator' | 'specialist';
+      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -172,7 +172,7 @@ function isFunctionCallItem(item: ResponseOutputItem): item is {
 function pushLLMTrace(
   trace: NpcAgentParams['trace'] | undefined,
   entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;
