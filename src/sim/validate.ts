@@ -1,5 +1,5 @@
 import type { WorldEvent } from './events';
-import type { WorldState } from './state';
+import type { PendingPrompt, WorldState } from './state';
 import { getItemPlacement } from './spine';
 import { deriveTide, isTideBlocked } from './systems/tide';
 import { deriveConstraints } from './systems/constraints';
@@ -11,7 +11,7 @@ export interface ValidationResult {
   reason?: string;
 }
 
-export function validateEvent(state: WorldState, event: WorldEvent): ValidationResult {
+export function validateEvent(state: WorldState, event: WorldEvent, pendingPrompt?: PendingPrompt): ValidationResult {
   switch (event.type) {
     case 'MoveActor': {
       const actor = getActor(state, event.actorId);
@@ -74,7 +74,7 @@ export function validateEvent(state: WorldState, event: WorldEvent): ValidationR
       const location = state.locations[event.locationId];
       if (!location) return { ok: false, reason: 'location_not_found' };
       const estimate = estimateTravel(state, actor.pos, location.anchor, event.pace || 'walk');
-      if (estimate.minutes > LONG_TRAVEL_MINUTES && !hasMatchingTravelConfirmation(state, event.locationId, event.confirmId)) {
+      if (estimate.minutes > LONG_TRAVEL_MINUTES && !hasMatchingTravelConfirmation(pendingPrompt, event.locationId, event.confirmId)) {
         return { ok: false, reason: 'travel_requires_confirmation' };
       }
       return { ok: true };
@@ -116,11 +116,10 @@ export function resolveMoveTarget(state: WorldState, event: Extract<WorldEvent, 
   return event.to;
 }
 
-function hasMatchingTravelConfirmation(state: WorldState, locationId: string, confirmId: string | undefined) {
+function hasMatchingTravelConfirmation(pendingPrompt: PendingPrompt | undefined, locationId: string, confirmId: string | undefined) {
   if (!confirmId) return false;
-  const pending = state.meta.pendingPrompt;
-  if (!pending || pending.kind !== 'confirm_travel' || pending.id !== confirmId) return false;
-  const pendingLocationId = pending.data?.locationId;
+  if (!pendingPrompt || pendingPrompt.kind !== 'confirm_travel' || pendingPrompt.id !== confirmId) return false;
+  const pendingLocationId = pendingPrompt.data?.locationId;
   return typeof pendingLocationId === 'string' && pendingLocationId === locationId;
 }
 

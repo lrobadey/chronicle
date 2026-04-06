@@ -105,6 +105,7 @@ export function buildGMWorldContext(params: {
   playerText: string;
   nextTurn: number;
   turnHistory: TurnRecord[];
+  pendingPrompt: PendingPrompt | null;
 }): GMWorldContext {
   const { state, playerId, turnHistory } = params;
   const player = state.actors[playerId];
@@ -161,7 +162,7 @@ export function buildGMWorldContext(params: {
     observation,
     telemetry,
     agendas: state.agendas,
-    pendingPrompt: state.meta.pendingPrompt || null,
+    pendingPrompt: params.pendingPrompt,
     landmarks,
     nearby: {
       actors: nearbyActors,
@@ -186,6 +187,7 @@ export function buildStaffInterviewContext(params: {
     playerText: '',
     nextTurn: state.meta.turn,
     turnHistory,
+    pendingPrompt: turnHistory[turnHistory.length - 1]?.pendingPrompt ?? null,
   });
   const recentTurnDetails = turnHistory.slice(-6).map(turn => ({
     turn: turn.turn,
@@ -238,6 +240,7 @@ export function buildSpecialistContext(params: {
   nextTurn: number;
   turnHistory: TurnRecord[];
   specialistType: SpecialistType;
+  pendingPrompt: PendingPrompt | null;
 }) {
   const { state, playerId, playerText, nextTurn, turnHistory, specialistType } = params;
   const telemetry = buildTelemetry(state, playerId);
@@ -247,7 +250,7 @@ export function buildSpecialistContext(params: {
   if (specialistType === 'scene') {
     return {
       agendas: state.agendas.scene,
-      pendingPrompt: state.meta.pendingPrompt || null,
+      pendingPrompt: params.pendingPrompt,
       telemetry,
       observation,
       playerText,
@@ -257,7 +260,7 @@ export function buildSpecialistContext(params: {
 
   return {
     agendas: state.agendas.world,
-    pendingPrompt: state.meta.pendingPrompt || null,
+    pendingPrompt: params.pendingPrompt,
     telemetry,
     worldSnapshot: buildGMWorldContext({
       state,
@@ -265,6 +268,7 @@ export function buildSpecialistContext(params: {
       playerText,
       nextTurn,
       turnHistory,
+      pendingPrompt: params.pendingPrompt,
     }),
     playerText,
     recentTurns,
@@ -311,7 +315,7 @@ function summarizeInterviewHeuristics(state: WorldState, turnHistory: TurnRecord
     rejectedEventCount: turnHistory.reduce((sum, turn) => sum + turn.rejectedEvents.length, 0),
     noAcceptedTurnCount: turnHistory.filter(turn => turn.acceptedEvents.length === 0).length,
     specialistConsultCount: turnHistory.reduce((sum, turn) => sum + (turn.specialistOutputs?.length || 0), 0),
-    pendingPromptActive: Boolean(state.meta.pendingPrompt),
+    pendingPromptActive: Boolean(turnHistory[turnHistory.length - 1]?.pendingPrompt),
     scenePressureCount: state.agendas.scene.pressures.length + state.agendas.scene.immediateTensions.length,
     worldThreadCount: state.agendas.world.activeThreads.length + state.agendas.world.escalationHooks.length,
   };

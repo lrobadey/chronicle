@@ -151,6 +151,9 @@ function normalizeLoadedState(state: WorldState): WorldState {
     escalationHooks: Array.isArray(state.agendas.world?.escalationHooks) ? state.agendas.world.escalationHooks : [],
   };
 
+  // Strip legacy pendingPrompt if present in old snapshots (now tracked in TurnRecord, not WorldState)
+  delete (state.meta as unknown as Record<string, unknown>)['pendingPrompt'];
+
   return syncWorldSpine(state);
 }
 

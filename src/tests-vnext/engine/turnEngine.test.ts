@@ -457,7 +457,7 @@ describe('TurnEngine', () => {
       assert.equal(turnOne.narration, 'The Rib Market is a longer walk. Set out now?');
       const afterTurnOne = await store.loadSession(init.sessionId);
       const turnLogAfterTurnOne = await store.loadTurnLog(init.sessionId);
-      assert.equal(afterTurnOne?.meta.pendingPrompt?.id, 'confirm-rib-market');
+      // pendingPrompt is no longer stored in the snapshot — only in TurnRecord
       assert.equal(turnLogAfterTurnOne[0]?.pendingPrompt?.id, 'confirm-rib-market');
       assert.equal(turnLogAfterTurnOne[0]?.trace, undefined);
 
@@ -472,8 +472,9 @@ describe('TurnEngine', () => {
       const secondContext = JSON.parse(String(secondGMInput[0]?.content));
       assert.equal(secondContext.world.pendingPrompt?.id, 'confirm-rib-market');
 
-      const afterTurnTwo = await store.loadSession(init.sessionId);
-      assert.equal(afterTurnTwo?.meta.pendingPrompt, undefined);
+      // After travel confirmation, the second TurnRecord should have no pendingPrompt
+      const turnLogAfterTurnTwo = await store.loadTurnLog(init.sessionId);
+      assert.equal(turnLogAfterTurnTwo[1]?.pendingPrompt, undefined);
     } finally {
       await removeDir(rootDir);
     }
