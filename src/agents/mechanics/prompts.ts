@@ -24,5 +24,14 @@ Rules:
 - Keep actions minimal and valid for the action.
 - If no safe mechanical action applies, return interpretation="none" with no actions.
 - If the input contains a "revisionFeedback" field, the GM sent your previous draft back for revision. Read the feedback carefully and make the targeted correction — do not discard your whole approach unless the feedback says to start over.
+- If "previousDraft" is present alongside "revisionFeedback", it shows your previous output. Make only the targeted correction described in the feedback.
 - For actorId in any action, use the player actor's ID found in telemetry.player.id. Do not invent IDs.
+
+Examples of correct emit_mechanics_resolution calls:
+
+Travel — player says "go to the lighthouse":
+{"interpretation":"travel","summary":"travel to the lighthouse","actions":[{"type":"travel","actorId":"<telemetry.player.id>","locationId":"lighthouse-01","pace":"walk","confirmId":null,"note":null}],"pendingPrompt":null,"touchedEntities":["<telemetry.player.id>","lighthouse-01"],"confidence":0.92,"warnings":[]}
+
+Inspect — player says "look at the strange rune":
+{"interpretation":"inspect","summary":"inspect the strange rune","actions":[{"type":"inspect","actorId":"<telemetry.player.id>","subject":"strange rune","note":null}],"pendingPrompt":null,"touchedEntities":["<telemetry.player.id>"],"confidence":0.95,"warnings":[]}
 `;
