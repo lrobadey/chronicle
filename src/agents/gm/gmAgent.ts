@@ -186,6 +186,14 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
 
     const nextInput: ResponseInputItem[] = [];
 
+    const dispatch: Record<string, (args: Record<string, unknown>) => Promise<unknown>> = {
+      observe_world:      (args) => runtime.observe_world(args as Parameters<GMToolRuntime['observe_world']>[0]),
+      consult_npc:        (args) => runtime.consult_npc(args as Parameters<GMToolRuntime['consult_npc']>[0]),
+      consult_specialist: (args) => runtime.consult_specialist(args as Parameters<GMToolRuntime['consult_specialist']>[0]),
+      propose_events:     (args) => runtime.propose_events(args as Parameters<GMToolRuntime['propose_events']>[0]),
+      finish_turn:        (args) => runtime.finish_turn(args as unknown as GMFinishTurnInput),
+    };
+
     for (let idx = 0; idx < toolCalls.length; idx++) {
       const call = toolCalls[idx];
       const callId = call.call_id || `missing-call-id-${i}-${idx}`;
@@ -205,171 +213,26 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       if (parsed.ok === false) {
         const output = { error: 'invalid_tool_arguments', details: parsed.error };
         trace?.toolCalls.push({ tool: call.name, input: call.arguments, output });
-        emitDebugEvent(debug, {
-          type: 'tool.result',
-          iteration,
-          tool: call.name,
-          callId,
-          callIndex,
-          callCount,
-          output,
-          ok: deriveToolResultOk(output),
-        });
-        nextInput.push({
-          type: 'function_call_output',
-          call_id: callId,
-          output: safeJSONStringify(output),
-        });
+        emitDebugEvent(debug, { type: 'tool.result', iteration, tool: call.name, callId, callIndex, callCount, output, ok: deriveToolResultOk(output) });
+        nextInput.push({ type: 'function_call_output', call_id: callId, output: safeJSONStringify(output) });
         continue;
       }
 
       const args = parsed.value;
+      let output: unknown;
 
       try {
-        if (call.name === 'observe_world') {
-          const output = await runtime.observe_world(args as { perspective: 'gm' | 'player' });
-          trace?.toolCalls.push({ tool: call.name, input: args, output });
-          emitDebugEvent(debug, {
-            type: 'tool.result',
-            iteration,
-            tool: call.name,
-            callId,
-            callIndex,
-            callCount,
-            output,
-            ok: deriveToolResultOk(output),
-          });
-          nextInput.push({
-            type: 'function_call_output',
-            call_id: callId,
-            output: safeJSONStringify(output),
-          });
-          continue;
-        }
-
-        if (call.name === 'consult_npc') {
-          const output = await runtime.consult_npc(args as { npcId: string; topic?: string });
-          trace?.toolCalls.push({ tool: call.name, input: args, output });
-          emitDebugEvent(debug, {
-            type: 'tool.result',
-            iteration,
-            tool: call.name,
-            callId,
-            callIndex,
-            callCount,
-            output,
-            ok: deriveToolResultOk(output),
-          });
-          nextInput.push({
-            type: 'function_call_output',
-            call_id: callId,
-            output: safeJSONStringify(output),
-          });
-          continue;
-        }
-
-        if (call.name === 'consult_specialist') {
-          const output = await runtime.consult_specialist(args as { specialistType: SpecialistType; question: string; focus?: string | null });
-          trace?.toolCalls.push({ tool: call.name, input: args, output });
-          emitDebugEvent(debug, {
-            type: 'tool.result',
-            iteration,
-            tool: call.name,
-            callId,
-            callIndex,
-            callCount,
-            output,
-            ok: deriveToolResultOk(output),
-          });
-          nextInput.push({
-            type: 'function_call_output',
-            call_id: callId,
-            output: safeJSONStringify(output),
-          });
-          continue;
-        }
-
-        if (call.name === 'propose_events') {
-          const output = await runtime.propose_events(args as { events: WorldEvent[] });
-          trace?.toolCalls.push({ tool: call.name, input: args, output });
-          emitDebugEvent(debug, {
-            type: 'tool.result',
-            iteration,
-            tool: call.name,
-            callId,
-            callIndex,
-            callCount,
-            output,
-            ok: deriveToolResultOk(output),
-          });
-          nextInput.push({
-            type: 'function_call_output',
-            call_id: callId,
-            output: safeJSONStringify(output),
-          });
-          continue;
-        }
-
-        if (call.name === 'finish_turn') {
-          const output = await runtime.finish_turn(args as unknown as GMFinishTurnInput);
-          trace?.toolCalls.push({ tool: call.name, input: args, output });
-          emitDebugEvent(debug, {
-            type: 'tool.result',
-            iteration,
-            tool: call.name,
-            callId,
-            callIndex,
-            callCount,
-            output,
-            ok: deriveToolResultOk(output),
-          });
-          nextInput.push({
-            type: 'function_call_output',
-            call_id: callId,
-            output: safeJSONStringify(output),
-          });
-          return { finished: true };
-        }
-
-        const output = { error: 'unknown_tool', name: call.name };
-        trace?.toolCalls.push({ tool: call.name, input: args, output });
-        emitDebugEvent(debug, {
-          type: 'tool.result',
-          iteration,
-          tool: call.name,
-          callId,
-          callIndex,
-          callCount,
-          output,
-          ok: deriveToolResultOk(output),
-        });
-        nextInput.push({
-          type: 'function_call_output',
-          call_id: callId,
-          output: safeJSONStringify(output),
-        });
+        const handler = dispatch[call.name];
+        output = handler ? await handler(args) : { error: 'unknown_tool', name: call.name };
       } catch (error) {
-        const output = {
-          error: 'tool_runtime_error',
-          details: classifyLLMError(error),
-        };
-        trace?.toolCalls.push({ tool: call.name, input: args, output });
-        emitDebugEvent(debug, {
-          type: 'tool.result',
-          iteration,
-          tool: call.name,
-          callId,
-          callIndex,
-          callCount,
-          output,
-          ok: deriveToolResultOk(output),
-        });
-        nextInput.push({
-          type: 'function_call_output',
-          call_id: callId,
-          output: safeJSONStringify(output),
-        });
+        output = { error: 'tool_runtime_error', details: classifyLLMError(error) };
       }
+
+      trace?.toolCalls.push({ tool: call.name, input: args, output });
+      emitDebugEvent(debug, { type: 'tool.result', iteration, tool: call.name, callId, callIndex, callCount, output, ok: deriveToolResultOk(output) });
+      nextInput.push({ type: 'function_call_output', call_id: callId, output: safeJSONStringify(output) });
+
+      if (call.name === 'finish_turn' && dispatch[call.name]) return { finished: true };
     }
 
     pendingInput = nextInput;
