@@ -9,6 +9,7 @@ import type { GMReasoningEffort } from '../agents/gm/gmAgent';
 import type { NarratorStyle } from '../agents/narrator/narratorAgent';
 import type { WorldEvent } from '../sim/events';
 import { ThinkingAnimation, type ThinkingPhase } from './thinkingAnimation';
+import { parseCommand } from './commandParsing';
 
 export type DebugDetail = 'summary' | 'raw';
 export type CliApiMode = 'auto' | 'fallback' | 'live';
@@ -489,11 +490,6 @@ function resolveStartupApiKey(apiMode: CliApiMode, env: NodeJS.ProcessEnv): stri
     throw new Error('Live mode requires OPENAI_API_KEY or VITE_OPENAI_API_KEY');
   }
   return apiKey;
-}
-
-function parseCommand(line: string): { name: string; args: string[] } {
-  const [name, ...args] = line.slice(1).trim().split(/\s+/);
-  return { name: (name || '').toLowerCase(), args };
 }
 
 function helpText() {
