@@ -29,7 +29,7 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
   {
     type: 'function',
     name: 'observe_world',
-    description: 'Get current world observation (player or GM view).',
+    description: 'Re-read world state after propose_events has changed it. Do not call this before proposing events — the current observation and telemetry are already in your initial context.',
     parameters: {
       ...strictObjectSchema({
         perspective: { type: 'string', enum: ['gm', 'player'] },
