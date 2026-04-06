@@ -46,7 +46,13 @@ Run the browser UI (served by Vite):
 npm run web
 ```
 
-The web app defaults to calling the API server at `http://localhost:3001`, so run `npm run server` in another terminal first (or change API Base in the UI).
+Or run both API + web app in one command (also auto-opens your browser):
+
+```bash
+npm run web:dev
+```
+
+The web app defaults to calling the API server at `http://localhost:3001` (or change API Base in the UI).
 
 By default the server listens on `http://localhost:3001` or the `PORT` environment variable if set.
 
@@ -55,6 +61,7 @@ By default the server listens on `http://localhost:3001` or the `PORT` environme
 - `npm run cli`: start the interactive CLI.
 - `npm run server`: start the HTTP API server.
 - `npm run web`: start the browser app with live reload (Vite).
+- `npm run web:dev`: start API server + browser app together and open the app in your browser.
 - `npm run web:build`: build the browser app for static hosting.
 - `npm run web:preview`: preview the built browser app.
 - `npm test`: run the active vNext test suite.

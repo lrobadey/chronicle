@@ -17,7 +17,8 @@
     "lint:eslint": "eslint src --ext .ts",
     "web": "vite src",
     "web:build": "vite build src",
-    "web:preview": "vite preview --host"
+    "web:preview": "vite preview --host",
+    "web:dev": "tsx src/dev/webDev.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
