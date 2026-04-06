@@ -34,4 +34,10 @@ Travel — player says "go to the lighthouse":
 
 Inspect — player says "look at the strange rune":
 {"interpretation":"inspect","summary":"inspect the strange rune","actions":[{"type":"inspect","actorId":"<telemetry.player.id>","subject":"strange rune","note":null}],"pendingPrompt":null,"touchedEntities":["<telemetry.player.id>"],"confidence":0.95,"warnings":[]}
+
+Explore — player says "search the abandoned warehouse":
+{"interpretation":"explore","summary":"explore the abandoned warehouse","actions":[{"type":"explore","actorId":"<telemetry.player.id>","area":"abandoned warehouse","direction":null,"note":null}],"pendingPrompt":null,"touchedEntities":["<telemetry.player.id>"],"confidence":0.9,"warnings":[]}
+
+Handoff — player says "accept the coin from the innkeeper":
+{"interpretation":"handoff","summary":"accept coin from innkeeper","actions":[{"type":"handoff","itemId":"coin-01","fromActorId":"<npc-id>","toActorId":"<telemetry.player.id>","at":null,"note":null}],"pendingPrompt":null,"touchedEntities":["coin-01","<npc-id>","<telemetry.player.id>"],"confidence":0.88,"warnings":[]}
 `;
