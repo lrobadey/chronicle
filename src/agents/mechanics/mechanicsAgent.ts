@@ -132,7 +132,9 @@ export async function runMechanicsAgent(params: MechanicsAgentParams): Promise<M
   } = params;
 
   if (!apiKey) {
-    const deterministic = resolveDeterministicMechanics(request);
+    const deterministic = !request.revisionFeedback
+      ? resolveDeterministicMechanics(request)
+      : null;
     if (deterministic) {
       return {
         ...deterministic,
@@ -148,7 +150,9 @@ export async function runMechanicsAgent(params: MechanicsAgentParams): Promise<M
     return failedMechanicsOutput(request, 'missing_api_key', undefined, fallbackModel);
   }
 
-  const deterministic = resolveDeterministicMechanics(request);
+  const deterministic = !request.revisionFeedback
+    ? resolveDeterministicMechanics(request)
+    : null;
   if (deterministic) {
     return {
       ...deterministic,

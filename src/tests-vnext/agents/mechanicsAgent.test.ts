@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { MECHANICS_FALLBACK_MODEL, MECHANICS_MODEL } from '../../agents/llm/defaults';
 import { attachResolutionMetadata, runMechanicsAgent } from '../../agents/mechanics';
+import { MECHANICS_SYSTEM_PROMPT } from '../../agents/mechanics/prompts';
 import { QueueLLM } from '../helpers/queueLLM';
 
 describe('mechanics agent', () => {
@@ -11,7 +12,7 @@ describe('mechanics agent', () => {
     const result = await runMechanicsAgent({
       apiKey: 'test-key',
       request: {
-        playerText: 'I got the dock approach',
+        playerText: 'I got to the dock approach',
         pendingPrompt: null,
         telemetry: { turn: 1, player: { id: 'player-1' } },
         travelCandidates: [{ id: 'dock-approach', name: 'Dock Approach', aliases: ['dock approach', 'docks'], distanceMeters: 140, estimatedWalkMinutes: 1, blockedNow: false, requiresConfirm: false }],
@@ -178,6 +179,127 @@ describe('mechanics agent', () => {
 
     assert.equal(noSafeAction.status, 'no_safe_action');
     assert.equal(noSafeAction.summary, 'no safe action found');
+  });
+
+  it('skips deterministic resolution when revisionFeedback is present', async () => {
+    const llm = new QueueLLM([
+      {
+        id: 'resp-revision-1',
+        output: [
+          {
+            type: 'function_call',
+            name: 'emit_mechanics_resolution',
+            arguments:
+              '{"interpretation":"travel","summary":"travel to lighthouse-02","actions":[{"type":"travel","actorId":"player-1","locationId":"lighthouse-02","pace":"walk","confirmId":null,"note":null}],"pendingPrompt":null,"touchedEntities":["player-1","lighthouse-02"],"confidence":0.91,"warnings":[]}',
+            call_id: 'revision-call-1',
+          },
+        ],
+        output_text: '',
+      },
+    ]);
+
+    const result = await runMechanicsAgent({
+      apiKey: 'test-key',
+      request: {
+        playerText: 'go to the lighthouse',
+        revisionFeedback: 'locationId should be lighthouse-02, not lighthouse-01',
+        pendingPrompt: null,
+        telemetry: { turn: 1, player: { id: 'player-1' } },
+        travelCandidates: [
+          { id: 'lighthouse-01', name: 'Lighthouse', aliases: ['lighthouse'], distanceMeters: 400, estimatedWalkMinutes: 5, blockedNow: false, requiresConfirm: false },
+          { id: 'lighthouse-02', name: 'Old Lighthouse', aliases: ['old lighthouse'], distanceMeters: 600, estimatedWalkMinutes: 8, blockedNow: false, requiresConfirm: false },
+        ],
+        nearby: { actors: [], itemsOnGround: [] },
+        landmarks: [],
+        observation: {},
+      },
+      llm,
+      trace: { llmCalls: [] },
+    });
+
+    assert.equal(llm.calls.length, 1, 'must call LLM, not use deterministic path');
+    assert.notEqual(result.debug?.selectedModel, 'deterministic');
+    assert.equal(result.status, 'ok');
+    assert.equal(result.interpretation, 'travel');
+    assert.equal((result.actions[0] as { locationId?: string })?.locationId, 'lighthouse-02');
+  });
+
+  it('does not deterministically resolve travel to a blocked location', async () => {
+    const llm = new QueueLLM([]);
+
+    const result = await runMechanicsAgent({
+      apiKey: 'test-key',
+      request: {
+        playerText: 'go to the market',
+        pendingPrompt: null,
+        telemetry: { turn: 1, player: { id: 'player-1' } },
+        travelCandidates: [
+          { id: 'market-01', name: 'Market', aliases: ['market'], distanceMeters: 100, estimatedWalkMinutes: 1, blockedNow: true, requiresConfirm: false },
+        ],
+        nearby: { actors: [], itemsOnGround: [] },
+        landmarks: [],
+        observation: {},
+      },
+      llm,
+      trace: { llmCalls: [] },
+    });
+
+    assert.notEqual(result.debug?.selectedModel, 'deterministic');
+  });
+
+  it('selects unblocked candidate deterministically when a blocked candidate also matches', async () => {
+    const llm = new QueueLLM([]);
+
+    const result = await runMechanicsAgent({
+      apiKey: 'test-key',
+      request: {
+        playerText: 'go to the tavern',
+        pendingPrompt: null,
+        telemetry: { turn: 1, player: { id: 'player-1' } },
+        travelCandidates: [
+          { id: 'old-tavern', name: 'Old Tavern', aliases: ['tavern'], distanceMeters: 50, estimatedWalkMinutes: 1, blockedNow: true, requiresConfirm: false },
+          { id: 'new-tavern', name: 'New Tavern', aliases: ['tavern'], distanceMeters: 80, estimatedWalkMinutes: 1, blockedNow: false, requiresConfirm: false },
+        ],
+        nearby: { actors: [], itemsOnGround: [] },
+        landmarks: [],
+        observation: {},
+      },
+      llm,
+      trace: { llmCalls: [] },
+    });
+
+    assert.equal(result.debug?.selectedModel, 'deterministic');
+    assert.equal(result.status, 'ok');
+    assert.equal(result.interpretation, 'travel');
+    assert.equal((result.actions[0] as { locationId?: string })?.locationId, 'new-tavern');
+  });
+
+  it('mechanics prompt includes explore and handoff examples', () => {
+    assert.ok(MECHANICS_SYSTEM_PROMPT.includes('"type":"explore"'), 'missing explore example');
+    assert.ok(MECHANICS_SYSTEM_PROMPT.includes('"type":"handoff"'), 'missing handoff example');
+  });
+
+  it('does not trigger travel when player says "I got [item]" without directional to', async () => {
+    const llm = new QueueLLM([]);
+
+    const result = await runMechanicsAgent({
+      apiKey: 'test-key',
+      request: {
+        playerText: 'I got the sword',
+        pendingPrompt: null,
+        telemetry: { turn: 1, player: { id: 'player-1' } },
+        travelCandidates: [
+          { id: 'sword-shrine', name: 'Sword', aliases: ['sword'], distanceMeters: 300, estimatedWalkMinutes: 4, blockedNow: false, requiresConfirm: false },
+        ],
+        nearby: { actors: [], itemsOnGround: [] },
+        landmarks: [],
+        observation: {},
+      },
+      llm,
+      trace: { llmCalls: [] },
+    });
+
+    assert.notEqual(result.debug?.selectedModel, 'deterministic');
   });
 
   it('materializes pending prompt metadata and converts actions to world events when attaching a resolution id', () => {

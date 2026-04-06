@@ -17,7 +17,10 @@ function resolveDeterministicTravel(request: MechanicsWorkerRequest): MechanicsR
   const target = extractTravelTarget(request.playerText);
   if (!target || !request.travelCandidates.length) return null;
 
-  const ranked = rankTravelCandidates(target, request.travelCandidates);
+  const unblocked = request.travelCandidates.filter(c => !c.blockedNow);
+  if (!unblocked.length) return null;
+
+  const ranked = rankTravelCandidates(target, unblocked);
   const best = ranked[0];
   const second = ranked[1];
   if (!best) return null;
@@ -146,7 +149,6 @@ function extractTravelTarget(text: string): string | null {
 
   const rewrites = [
     [/^i got to\s+/, 'i go to '],
-    [/^i got\s+/, 'i go to '],
     [/^got to\s+/, 'go to '],
     [/^got\s+/, 'go to '],
   ] as const;
