@@ -438,7 +438,8 @@ export class TurnEngine {
               trace.mechanicsDebug.push(resolution.debug);
             }
           }
-          return resolution;
+          const { debug: _debug, ...resolutionForGM } = resolution;
+          return resolutionForGM;
         },
         review_mechanics_resolution: async (input: {
           resolutionId: string;
@@ -517,11 +518,12 @@ export class TurnEngine {
             resolution,
           });
           activeMechanicsResolutionId = nextResolutionId;
+          const { debug: _debug, ...resolutionForGM } = resolution;
           return {
             ok: true,
             status: 'revised',
             previousResolutionId: input.resolutionId,
-            resolution,
+            resolution: resolutionForGM,
           };
         },
         finish_turn: async (input: GMFinishTurnInput) => {

@@ -21,4 +21,23 @@ describe('GM prompt', () => {
       /Never submit Speak with a missing or made-up actorId\./,
     );
   });
+
+  it('tells the GM to immediately reject unrevisionable mechanics statuses and review before proposing events', () => {
+    assert.match(
+      GM_SYSTEM_PROMPT,
+      /worker_contract_failed/,
+    );
+    assert.match(
+      GM_SYSTEM_PROMPT,
+      /no_safe_action/,
+    );
+    assert.match(
+      GM_SYSTEM_PROMPT,
+      /reject it immediately/,
+    );
+    assert.match(
+      GM_SYSTEM_PROMPT,
+      /review_mechanics_resolution before you manually propose/,
+    );
+  });
 });

@@ -23,5 +23,6 @@ Rules:
 - Return small mechanics actions, not full Chronicle world events.
 - Keep actions minimal and valid for the action.
 - If no safe mechanical action applies, return interpretation="none" with no actions.
-- If the input contains a "revisionFeedback" field, a previous draft was rejected by the GM. Read that feedback carefully and correct your response before emitting a new resolution.
+- If the input contains a "revisionFeedback" field, the GM sent your previous draft back for revision. Read the feedback carefully and make the targeted correction — do not discard your whole approach unless the feedback says to start over.
+- For actorId in any action, use the player actor's ID found in telemetry.player.id. Do not invent IDs.
 `;
