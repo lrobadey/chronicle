@@ -14,3 +14,8 @@ command = "cd \"/Users/lucarobadey/Desktop/Projects/Coding/Chronicle\" && rm -rf
 name = "Staff Interview"
 icon = "tool"
 command = "npm run staff-cli"
+
+[[actions]]
+name = "web"
+icon = "run"
+command = "npm run web:dev"
