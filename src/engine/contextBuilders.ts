@@ -15,6 +15,20 @@ export interface PlayerTranscriptEntry {
   playerText: string;
 }
 
+export interface ConversationTranscriptEntry {
+  turn: number;
+  role: 'opening' | 'player' | 'npc' | 'narrator';
+  speakerId?: string;
+  speakerName?: string;
+  text: string;
+  source: 'openingNarration' | 'playerText' | 'npcPublicUtterance' | 'turnNarration';
+}
+
+export interface NPCConversationContext {
+  conversationHistory: ConversationTranscriptEntry[];
+  olderTurnsSummary?: string;
+}
+
 export interface GMWorldContext {
   observation: ReturnType<typeof buildObservation>;
   telemetry: ReturnType<typeof buildTelemetry>;
@@ -372,6 +386,69 @@ export function buildPlayerTranscript(
   return transcript;
 }
 
+export function buildNPCConversationContext(params: {
+  state: WorldState;
+  turnHistory: TurnRecord[];
+  playerId: string;
+  playerText: string;
+  nextTurn: number;
+}): NPCConversationContext {
+  const { state, turnHistory, playerId, playerText, nextTurn } = params;
+  const conversationHistory: ConversationTranscriptEntry[] = [];
+  const openingNarration = state.meta.openingNarration?.trim();
+
+  if (openingNarration) {
+    conversationHistory.push({
+      turn: 0,
+      role: 'opening',
+      speakerName: 'Narrator',
+      text: openingNarration,
+      source: 'openingNarration',
+    });
+  }
+
+  for (const turn of turnHistory) {
+    pushTranscriptEntry(conversationHistory, {
+      turn: turn.turn,
+      role: 'player',
+      speakerId: turn.playerId,
+      speakerName: state.actors[turn.playerId]?.name,
+      text: turn.playerText,
+      source: 'playerText',
+    });
+
+    for (const npcOutput of turn.npcOutputs || []) {
+      pushTranscriptEntry(conversationHistory, {
+        turn: turn.turn,
+        role: 'npc',
+        speakerId: npcOutput.npcId,
+        speakerName: state.actors[npcOutput.npcId]?.name,
+        text: npcOutput.publicUtterance,
+        source: 'npcPublicUtterance',
+      });
+    }
+
+    pushTranscriptEntry(conversationHistory, {
+      turn: turn.turn,
+      role: 'narrator',
+      speakerName: 'Narrator',
+      text: turn.narration,
+      source: 'turnNarration',
+    });
+  }
+
+  pushTranscriptEntry(conversationHistory, {
+    turn: nextTurn,
+    role: 'player',
+    speakerId: playerId,
+    speakerName: state.actors[playerId]?.name,
+    text: playerText,
+    source: 'playerText',
+  });
+
+  return { conversationHistory };
+}
+
 function summarizeInterviewHeuristics(state: WorldState, turnHistory: TurnRecord[]): StaffInterviewHeuristics {
   const repeatedClarificationCount = turnHistory.filter(turn => {
     const kind = getTurnPromptKind(turn);
@@ -426,6 +503,21 @@ function summarizeAcceptedEvent(state: WorldState, event: WorldEvent): string {
       return `Picked up ${state.items[event.itemId]?.name || event.itemId}`;
     case 'DropItem':
       return `Dropped ${state.items[event.itemId]?.name || event.itemId}`;
+    case 'AffectItem': {
+      const itemName = state.items[event.itemId]?.name || event.itemId;
+      switch (event.effect) {
+        case 'pick_up':
+          return `Picked up ${itemName}`;
+        case 'drop':
+          return `Dropped ${itemName}`;
+        case 'transfer':
+          return event.targetActorId
+            ? `Transferred ${itemName} to ${state.actors[event.targetActorId]?.name || event.targetActorId}`
+            : `Placed ${itemName} nearby`;
+        default:
+          return `Affected ${itemName}: ${event.effect.replace('_', ' ')}`;
+      }
+    }
     case 'TransferItem': {
       const itemName = event.itemId
         ? state.items[event.itemId]?.name || event.itemId
@@ -480,4 +572,16 @@ function formatExploreArea(area: string): string {
 
 function clipText(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function pushTranscriptEntry(
+  history: ConversationTranscriptEntry[],
+  entry: Omit<ConversationTranscriptEntry, 'text'> & { text?: string },
+) {
+  const trimmed = entry.text?.trim();
+  if (!trimmed) return;
+  history.push({
+    ...entry,
+    text: trimmed,
+  });
 }

@@ -1,5 +1,17 @@
-import type { Actor, ActorId, GridPos, ItemId, ItemLocationInput, LocationPOI } from './state';
+import type { Actor, ActorId, GridPos, ItemId, ItemLifecycleState, ItemLocationInput, LocationPOI } from './state';
 import type { ItemComponents } from './archetypes';
+
+export type AffectItemEffect =
+  | 'pick_up'
+  | 'drop'
+  | 'transfer'
+  | 'open'
+  | 'close'
+  | 'break'
+  | 'consume'
+  | 'empty'
+  | 'fill'
+  | 'ruin';
 
 export interface EventMeta {
   id: string;
@@ -31,6 +43,19 @@ export type WorldEvent =
       actorId: ActorId;
       itemId: ItemId;
       at?: GridPos;
+      note?: string;
+    }
+  | {
+      meta?: EventMeta;
+      type: 'AffectItem';
+      actorId: ActorId;
+      itemId: ItemId;
+      effect: AffectItemEffect;
+      at?: GridPos;
+      targetActorId?: ActorId;
+      targetContainerId?: string;
+      instrumentItemId?: ItemId;
+      nextLifecycle?: ItemLifecycleState;
       note?: string;
     }
   | {

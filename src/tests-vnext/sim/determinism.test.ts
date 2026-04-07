@@ -7,7 +7,9 @@ import { validateEvent } from '../../sim/validate';
 import { applyEvent } from '../../sim/reducer';
 import { distance } from '../../sim/utils';
 import { buildTelemetry } from '../../sim/views/telemetry';
+import { buildObservation } from '../../sim/views/observe';
 import { computeTurnDiff } from '../../sim/views/diff';
+import { getItemPlacement } from '../../sim/spine';
 
 const FIXED_ANCHOR = '2025-01-01T14:00:00Z';
 
@@ -184,5 +186,72 @@ describe('sim determinism', () => {
       toActorId: 'player-1',
     });
     assert.equal(servedToPlayer.ok, true);
+  });
+
+  it('keeps break effects coherent across lifecycle, placement, telemetry, and observation', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    world.actors['player-1'].pos = { x: 0, y: 1200, z: 15 };
+
+    const held = applyEvent(world, {
+      type: 'AffectItem',
+      actorId: 'player-1',
+      itemId: 'heartwater-jar',
+      effect: 'pick_up',
+    });
+
+    const broken = applyEvent(held, {
+      type: 'AffectItem',
+      actorId: 'player-1',
+      itemId: 'heartwater-jar',
+      effect: 'break',
+      at: { x: 0, y: 1200, z: 15 },
+    });
+
+    assert.equal(broken.items['heartwater-jar']?.components?.lifecycle?.state, 'broken');
+    assert.equal(broken.items['heartwater-jar']?.components?.condition?.broken, true);
+
+    const placement = getItemPlacement(broken.spine, 'heartwater-jar');
+    assert.equal(placement?.type, 'located_in');
+    if (placement?.type === 'located_in') {
+      assert.deepEqual(placement.anchor, { x: 0, y: 1200, z: 15 });
+    }
+
+    const telemetry = buildTelemetry(broken, 'player-1');
+    const observation = buildObservation(broken, 'player-1');
+    assert.equal(telemetry.player.inventory.some(item => item.id === 'heartwater-jar'), false);
+    const observedJar = observation.nearbyItems.find(item => item.id === 'heartwater-jar');
+    assert.ok(observedJar);
+    assert.equal(observedJar?.components?.condition, 'broken');
+  });
+
+  it('hides consumed items from telemetry and observation after affect_item consume', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+
+    const stocked = applyEvent(world, {
+      type: 'CreateEntity',
+      entity: {
+        kind: 'item',
+        data: {
+          id: 'sample-bread',
+          name: 'Sample Bread',
+          location: { kind: 'inventory', actorId: 'player-1' },
+          tags: ['food'],
+        },
+      },
+    });
+
+    const consumed = applyEvent(stocked, {
+      type: 'AffectItem',
+      actorId: 'player-1',
+      itemId: 'sample-bread',
+      effect: 'consume',
+      at: { x: 0, y: 0, z: 0 },
+    });
+
+    assert.equal(consumed.items['sample-bread']?.components?.lifecycle?.state, 'consumed');
+    const telemetry = buildTelemetry(consumed, 'player-1');
+    const observation = buildObservation(consumed, 'player-1');
+    assert.equal(telemetry.player.inventory.some(item => item.id === 'sample-bread'), false);
+    assert.equal(observation.nearbyItems.some(item => item.id === 'sample-bread'), false);
   });
 });

@@ -27,6 +27,7 @@ export interface GridMap {
 export type ActorId = string;
 export type ItemId = string;
 export type LocationId = string;
+export type ItemLifecycleState = 'intact' | 'opened' | 'broken' | 'empty' | 'consumed' | 'ruined';
 
 export interface Actor {
   id: ActorId;

@@ -894,6 +894,19 @@ function summarizeWorldEvent(event: WorldEvent): string {
       return `pick up ${event.itemId}`;
     case 'DropItem':
       return `drop ${event.itemId}`;
+    case 'AffectItem': {
+      const itemName = event.itemId;
+      switch (event.effect) {
+        case 'pick_up':
+          return `pick up ${itemName}`;
+        case 'drop':
+          return `drop ${itemName}`;
+        case 'transfer':
+          return event.targetActorId ? `transfer ${itemName} to ${event.targetActorId}` : `place ${itemName} at ${formatGridPos(event.at || { x: 0, y: 0, z: 0 })}`;
+        default:
+          return `${event.effect.replaceAll('_', ' ')} ${itemName}`;
+      }
+    }
     case 'TransferItem': {
       const itemName = event.itemId || event.item?.id || 'item';
       return event.toActorId ? `transfer ${itemName} to ${event.toActorId}` : `place ${itemName} at ${formatGridPos(event.at || { x: 0, y: 0, z: 0 })}`;
@@ -910,6 +923,13 @@ function summarizeWorldEvent(event: WorldEvent): string {
       return event.area === 'around_here' ? 'explore nearby area' : `explore ${event.area.replaceAll('-', ' ').replaceAll('_', ' ')}`;
     case 'Inspect':
       return `inspect ${event.subject}`;
+    case 'RecordClue': {
+      const subject = event.subject?.trim();
+      if (subject) return `record clue about ${subject}`;
+      return `record clue: ${clipDebugText(event.text)}`;
+    }
+    default:
+      return fallbackWorldEventSummary(event as { type: string });
   }
 }
 
@@ -970,8 +990,18 @@ function renderNarratorPreview(text: string | undefined): string {
   const trimmed = text?.trim();
   if (!trimmed) return '[narrator] reply ready';
   const maxChars = 72;
-  const preview = trimmed.length > maxChars ? `${trimmed.slice(0, maxChars - 3)}...` : trimmed;
+  const preview = clipDebugText(trimmed, maxChars);
   return `[narrator] ${JSON.stringify(preview)}`;
+}
+
+function clipDebugText(text: string | undefined, maxChars = 48): string {
+  const trimmed = text?.trim();
+  if (!trimmed) return 'unknown';
+  return trimmed.length > maxChars ? `${trimmed.slice(0, maxChars - 3)}...` : trimmed;
+}
+
+function fallbackWorldEventSummary(event: { type: string }): string {
+  return event.type.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
 }
 
 function formatLocationId(locationId: string): string {

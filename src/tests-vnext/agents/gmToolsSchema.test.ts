@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { GM_TOOL_DEFS } from '../../agents/gm/tools';
+import { EVENT_ITEM_SCHEMA } from '../../agents/sharedSchemas';
 
 describe('GM tool schemas', () => {
   it('closes every object node in strict tool schemas', () => {
@@ -12,6 +13,23 @@ describe('GM tool schemas', () => {
     }
 
     assert.deepEqual(issues, []);
+  });
+
+  it('uses discriminated event variants and requires non-null RecordClue text', () => {
+    assert.ok(Array.isArray(EVENT_ITEM_SCHEMA.anyOf));
+    assert.equal(EVENT_ITEM_SCHEMA.anyOf.length > 0, true);
+
+    const recordClueBranch = EVENT_ITEM_SCHEMA.anyOf.find(
+      branch => {
+        if (!branch || typeof branch !== 'object' || Array.isArray(branch)) return false;
+        const properties = (branch as { properties?: Record<string, unknown> }).properties;
+        const typeSchema = properties?.type as { enum?: unknown[] } | undefined;
+        return Array.isArray(typeSchema?.enum) && typeSchema.enum.includes('RecordClue');
+      },
+    ) as { properties: Record<string, unknown> } | undefined;
+
+    assert.ok(recordClueBranch);
+    assert.deepEqual(recordClueBranch.properties.text, { type: 'string', minLength: 1 });
   });
 });
 
@@ -56,5 +74,11 @@ function walkSchema(schema: unknown, path: string, issues: string[]) {
 
   if (record.items && !types.includes('array')) {
     walkSchema(record.items, `${path}.items`, issues);
+  }
+
+  if (Array.isArray(record.anyOf)) {
+    for (const [index, option] of record.anyOf.entries()) {
+      walkSchema(option, `${path}.anyOf[${index}]`, issues);
+    }
   }
 }

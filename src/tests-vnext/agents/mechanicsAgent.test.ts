@@ -19,6 +19,7 @@ describe('mechanics agent', () => {
         nearby: { actors: [], itemsOnGround: [] },
         landmarks: [{ id: 'dock-approach', name: 'Dock Approach' }],
         observation: { nearbyLocations: [] },
+        localAffordances: { carriedItems: [], nearbyItems: [], nearbyActors: [], obviousOffers: [] },
       },
       llm,
       trace: { llmCalls: [] },
@@ -58,6 +59,7 @@ describe('mechanics agent', () => {
         nearby: { actors: [], itemsOnGround: [] },
         landmarks: [],
         observation: { nearbyItems: [{ id: 'mug' }] },
+        localAffordances: { carriedItems: [], nearbyItems: [], nearbyActors: [], obviousOffers: [] },
       },
       llm,
       trace: { llmCalls: [] },
@@ -104,6 +106,7 @@ describe('mechanics agent', () => {
         nearby: { actors: [], itemsOnGround: [] },
         landmarks: [],
         observation: { nearbyItems: [{ id: 'mug' }] },
+        localAffordances: { carriedItems: [], nearbyItems: [], nearbyActors: [], obviousOffers: [] },
       },
       llm,
     });
@@ -139,6 +142,7 @@ describe('mechanics agent', () => {
         nearby: { actors: [], itemsOnGround: [] },
         landmarks: [],
         observation: { nearbyItems: [{ id: 'mug', name: 'Tin Mug' }] },
+        localAffordances: { carriedItems: [], nearbyItems: [], nearbyActors: [], obviousOffers: [] },
       },
       llm: contractFailureLLM,
     });
@@ -173,6 +177,7 @@ describe('mechanics agent', () => {
         nearby: { actors: [], itemsOnGround: [] },
         landmarks: [],
         observation: {},
+        localAffordances: { carriedItems: [], nearbyItems: [], nearbyActors: [], obviousOffers: [] },
       },
       llm: noneLLM,
     });
@@ -212,6 +217,7 @@ describe('mechanics agent', () => {
         nearby: { actors: [], itemsOnGround: [] },
         landmarks: [],
         observation: {},
+        localAffordances: { carriedItems: [], nearbyItems: [], nearbyActors: [], obviousOffers: [] },
       },
       llm,
       trace: { llmCalls: [] },
@@ -239,6 +245,7 @@ describe('mechanics agent', () => {
         nearby: { actors: [], itemsOnGround: [] },
         landmarks: [],
         observation: {},
+        localAffordances: { carriedItems: [], nearbyItems: [], nearbyActors: [], obviousOffers: [] },
       },
       llm,
       trace: { llmCalls: [] },
@@ -263,6 +270,7 @@ describe('mechanics agent', () => {
         nearby: { actors: [], itemsOnGround: [] },
         landmarks: [],
         observation: {},
+        localAffordances: { carriedItems: [], nearbyItems: [], nearbyActors: [], obviousOffers: [] },
       },
       llm,
       trace: { llmCalls: [] },
@@ -274,9 +282,15 @@ describe('mechanics agent', () => {
     assert.equal((result.actions[0] as { locationId?: string })?.locationId, 'new-tavern');
   });
 
-  it('mechanics prompt includes explore and handoff examples', () => {
+  it('mechanics prompt includes expanded local-action examples and hard exclusions', () => {
     assert.ok(MECHANICS_SYSTEM_PROMPT.includes('"type":"explore"'), 'missing explore example');
-    assert.ok(MECHANICS_SYSTEM_PROMPT.includes('"type":"handoff"'), 'missing handoff example');
+    assert.ok(MECHANICS_SYSTEM_PROMPT.includes('"type":"affect_item"'), 'missing affect_item example');
+    assert.ok(MECHANICS_SYSTEM_PROMPT.includes('"effect":"transfer"'), 'missing transfer effect example');
+    assert.ok(MECHANICS_SYSTEM_PROMPT.includes('"effect":"pick_up"'), 'missing pickup effect example');
+    assert.ok(MECHANICS_SYSTEM_PROMPT.includes('"effect":"drop"'), 'missing drop effect example');
+    assert.ok(MECHANICS_SYSTEM_PROMPT.includes('localAffordances'), 'missing affordances guidance');
+    assert.ok(MECHANICS_SYSTEM_PROMPT.includes('Do not create new entities.'), 'missing entity exclusion');
+    assert.ok(MECHANICS_SYSTEM_PROMPT.includes('record clues, or update agendas'), 'missing authorship exclusion');
   });
 
   it('does not trigger travel when player says "I got [item]" without directional to', async () => {
@@ -294,6 +308,7 @@ describe('mechanics agent', () => {
         nearby: { actors: [], itemsOnGround: [] },
         landmarks: [],
         observation: {},
+        localAffordances: { carriedItems: [], nearbyItems: [], nearbyActors: [], obviousOffers: [] },
       },
       llm,
       trace: { llmCalls: [] },
@@ -328,5 +343,198 @@ describe('mechanics agent', () => {
     assert.equal(resolution.pendingPrompt?.createdTurn, 3);
     assert.equal(resolution.pendingPrompt?.kind, 'clarify_target');
     assert.equal(resolution.candidateEvents[0]?.type, 'TravelToLocation');
+  });
+
+  it('deterministically resolves obvious pickup commands before calling the model', async () => {
+    const llm = new QueueLLM([]);
+
+    const result = await runMechanicsAgent({
+      apiKey: 'test-key',
+      request: {
+        playerText: 'pick up the lantern',
+        pendingPrompt: null,
+        telemetry: { turn: 1, player: { id: 'player-1' } },
+        travelCandidates: [],
+        nearby: { actors: [], itemsOnGround: [] },
+        landmarks: [],
+        observation: { nearbyItems: [{ id: 'lantern-01' }] },
+        localAffordances: {
+          carriedItems: [],
+          nearbyItems: [{ id: 'lantern-01', name: 'Lantern', distanceMeters: 2, portable: true }],
+          nearbyActors: [],
+          obviousOffers: [],
+        },
+      },
+      llm,
+      trace: { llmCalls: [] },
+    });
+
+    assert.equal(llm.calls.length, 0);
+    assert.equal(result.debug?.selectedModel, 'deterministic');
+    assert.equal(result.interpretation, 'affect_item');
+    assert.equal(result.actions[0]?.type, 'affect_item');
+    assert.equal((result.actions[0] as { effect?: string })?.effect, 'pick_up');
+  });
+
+  it('deterministically resolves obvious drop commands before calling the model', async () => {
+    const llm = new QueueLLM([]);
+
+    const result = await runMechanicsAgent({
+      apiKey: 'test-key',
+      request: {
+        playerText: 'drop the lantern',
+        pendingPrompt: null,
+        telemetry: { turn: 1, player: { id: 'player-1' } },
+        travelCandidates: [],
+        nearby: { actors: [], itemsOnGround: [] },
+        landmarks: [],
+        observation: {},
+        localAffordances: {
+          carriedItems: [{ id: 'lantern-01', name: 'Lantern' }],
+          nearbyItems: [],
+          nearbyActors: [],
+          obviousOffers: [],
+        },
+      },
+      llm,
+      trace: { llmCalls: [] },
+    });
+
+    assert.equal(llm.calls.length, 0);
+    assert.equal(result.debug?.selectedModel, 'deterministic');
+    assert.equal(result.interpretation, 'affect_item');
+    assert.equal(result.actions[0]?.type, 'affect_item');
+    assert.equal((result.actions[0] as { effect?: string })?.effect, 'drop');
+  });
+
+  it('can resolve a model-authored pickup when deterministic parsing does not apply', async () => {
+    const llm = new QueueLLM([
+      {
+        id: 'resp-pickup-1',
+        output: [
+          {
+            type: 'function_call',
+            name: 'emit_mechanics_resolution',
+            arguments:
+              '{"interpretation":"affect_item","summary":"pick up the lantern","actions":[{"type":"affect_item","actorId":"player-1","itemId":"lantern-01","effect":"pick_up","targetActorId":null,"targetContainerId":null,"instrumentItemId":null,"at":null,"note":"Pick up the lantern."}],"pendingPrompt":null,"touchedEntities":["player-1","lantern-01"],"confidence":0.81,"warnings":[]}',
+            call_id: 'pickup-call-1',
+          },
+        ],
+        output_text: '',
+      },
+    ]);
+
+    const result = await runMechanicsAgent({
+      apiKey: 'test-key',
+      request: {
+        playerText: 'could I take that lantern',
+        pendingPrompt: null,
+        telemetry: { turn: 1, player: { id: 'player-1' } },
+        travelCandidates: [],
+        nearby: { actors: [], itemsOnGround: [] },
+        landmarks: [],
+        observation: { nearbyItems: [{ id: 'lantern-01', name: 'Lantern' }] },
+        localAffordances: {
+          carriedItems: [],
+          nearbyItems: [{ id: 'lantern-01', name: 'Lantern', distanceMeters: 2, portable: true }],
+          nearbyActors: [],
+          obviousOffers: [],
+        },
+      },
+      llm,
+      trace: { llmCalls: [] },
+    });
+
+    assert.equal(llm.calls[0]?.model, MECHANICS_MODEL);
+    assert.equal(result.interpretation, 'affect_item');
+    assert.equal(result.actions[0]?.type, 'affect_item');
+    assert.equal((result.actions[0] as { effect?: string })?.effect, 'pick_up');
+  });
+
+  it('accepts a two-step local bundle from the model', async () => {
+    const llm = new QueueLLM([
+      {
+        id: 'resp-bundle-1',
+        output: [
+          {
+            type: 'function_call',
+            name: 'emit_mechanics_resolution',
+            arguments:
+              '{"interpretation":"affect_item","summary":"hand the lantern to Mara","actions":[{"type":"affect_item","actorId":"player-1","itemId":"lantern-01","effect":"pick_up","targetActorId":null,"targetContainerId":null,"instrumentItemId":null,"at":null,"note":"Take the lantern first."},{"type":"affect_item","actorId":"player-1","itemId":"lantern-01","effect":"transfer","targetActorId":"mara","targetContainerId":null,"instrumentItemId":null,"at":null,"note":"Hand the lantern to Mara."}],"pendingPrompt":null,"touchedEntities":["player-1","lantern-01","mara"],"confidence":0.84,"warnings":[]}',
+            call_id: 'bundle-call-1',
+          },
+        ],
+        output_text: '',
+      },
+    ]);
+
+    const result = await runMechanicsAgent({
+      apiKey: 'test-key',
+      request: {
+        playerText: 'hand the lantern to Mara',
+        pendingPrompt: null,
+        telemetry: { turn: 1, player: { id: 'player-1' } },
+        travelCandidates: [],
+        nearby: { actors: [], itemsOnGround: [] },
+        landmarks: [],
+        observation: {},
+        localAffordances: {
+          carriedItems: [],
+          nearbyItems: [{ id: 'lantern-01', name: 'Lantern', distanceMeters: 2, portable: true }],
+          nearbyActors: [{ id: 'mara', name: 'Mara', distanceMeters: 1, inventory: [] }],
+          obviousOffers: [],
+        },
+      },
+      llm,
+    });
+
+    assert.equal(result.actions.length, 2);
+    assert.equal(result.actions[0]?.type, 'affect_item');
+    assert.equal((result.actions[0] as { effect?: string })?.effect, 'pick_up');
+    assert.equal(result.actions[1]?.type, 'affect_item');
+    assert.equal((result.actions[1] as { effect?: string })?.effect, 'transfer');
+  });
+
+  it('accepts a simple service completion draft from the model', async () => {
+    const llm = new QueueLLM([
+      {
+        id: 'resp-service-1',
+        output: [
+          {
+            type: 'function_call',
+            name: 'emit_mechanics_resolution',
+            arguments:
+              '{"interpretation":"affect_item","summary":"buy the bread","actions":[{"type":"affect_item","actorId":"baker","itemId":"bread-01","effect":"transfer","targetActorId":"player-1","targetContainerId":null,"instrumentItemId":null,"at":null,"note":"The baker hands over the bread."},{"type":"wait","minutes":1,"note":"The purchase takes a moment."}],"pendingPrompt":null,"touchedEntities":["bread-01","baker","player-1"],"confidence":0.78,"warnings":[]}',
+            call_id: 'service-call-1',
+          },
+        ],
+        output_text: '',
+      },
+    ]);
+
+    const result = await runMechanicsAgent({
+      apiKey: 'test-key',
+      request: {
+        playerText: 'I buy the bread',
+        pendingPrompt: null,
+        telemetry: { turn: 1, player: { id: 'player-1' } },
+        travelCandidates: [],
+        nearby: { actors: [], itemsOnGround: [] },
+        landmarks: [],
+        observation: {},
+        localAffordances: {
+          carriedItems: [],
+          nearbyItems: [],
+          nearbyActors: [{ id: 'baker', name: 'Baker', distanceMeters: 1, inventory: [{ id: 'bread-01', name: 'Bread' }] }],
+          obviousOffers: [{ kind: 'item', actorId: 'baker', actorName: 'Baker', itemId: 'bread-01', itemName: 'Bread', summary: 'The baker can hand over a loaf immediately.' }],
+        },
+      },
+      llm,
+    });
+
+    assert.equal(result.actions.length, 2);
+    assert.equal(result.actions[0]?.type, 'affect_item');
+    assert.equal((result.actions[0] as { effect?: string })?.effect, 'transfer');
+    assert.equal(result.actions[1]?.type, 'wait');
   });
 });

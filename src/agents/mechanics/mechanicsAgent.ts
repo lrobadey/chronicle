@@ -72,10 +72,13 @@ const MECHANICS_ACTION_SCHEMA = {
       note: { type: ['string', 'null'] },
     }),
     strictObjectSchema({
-      type: { type: 'string', enum: ['handoff'] },
-      itemId: { type: ['string', 'null'] },
-      fromActorId: { type: ['string', 'null'] },
-      toActorId: { type: ['string', 'null'] },
+      type: { type: 'string', enum: ['affect_item'] },
+      actorId: { type: 'string' },
+      itemId: { type: 'string' },
+      effect: { type: 'string', enum: ['pick_up', 'drop', 'transfer', 'open', 'close', 'break', 'consume', 'empty', 'fill', 'ruin'] },
+      targetActorId: { type: ['string', 'null'] },
+      targetContainerId: { type: ['string', 'null'] },
+      instrumentItemId: { type: ['string', 'null'] },
       at: { ...NULLABLE_GRID_POS_SCHEMA, type: ['object', 'null'] },
       note: { type: ['string', 'null'] },
     }),
@@ -88,9 +91,9 @@ const MECHANICS_OUTPUT_TOOL: ResponseToolDefinition = {
   description: 'Return the mechanical interpretation and small mechanics actions for the latest simple player action.',
   strict: true,
   parameters: strictObjectSchema({
-    interpretation: { type: 'string', enum: ['move', 'travel', 'inspect', 'explore', 'wait', 'handoff', 'clarify', 'none'] },
+    interpretation: { type: 'string', enum: ['move', 'travel', 'inspect', 'explore', 'wait', 'affect_item', 'clarify', 'none'] },
     summary: { type: 'string' },
-    actions: { type: 'array', items: MECHANICS_ACTION_SCHEMA },
+    actions: { type: 'array', items: MECHANICS_ACTION_SCHEMA, maxItems: 2 },
     pendingPrompt: MECHANICS_PENDING_PROMPT_DRAFT_SCHEMA,
     touchedEntities: { type: 'array', items: { type: 'string' } },
     confidence: { type: 'number' },
@@ -350,13 +353,16 @@ export function convertMechanicsActionsToEvents(actions: MechanicsAction[]): Wor
           note: action.note,
         });
         break;
-      case 'handoff':
+      case 'affect_item':
         events.push({
-          type: 'TransferItem',
+          type: 'AffectItem',
+          actorId: action.actorId,
           itemId: action.itemId,
-          fromActorId: action.fromActorId,
-          toActorId: action.toActorId,
+          effect: action.effect,
           at: action.at,
+          targetActorId: action.targetActorId,
+          targetContainerId: action.targetContainerId,
+          instrumentItemId: action.instrumentItemId,
           note: action.note,
         });
         break;
@@ -459,6 +465,7 @@ function parseMechanicsOutput(argumentsJSON: string):
 
 function parseActions(value: unknown): { ok: true; actions: MechanicsAction[] } | { ok: false; reason: string } {
   if (!Array.isArray(value)) return { ok: false, reason: 'actions_not_array' };
+  if (value.length > 2) return { ok: false, reason: 'too_many_actions' };
   const actions: MechanicsAction[] = [];
 
   for (const action of value) {
@@ -551,15 +558,35 @@ function parseAction(value: unknown): { ok: true; action: MechanicsAction } | { 
           note: typeof record.note === 'string' ? record.note : undefined,
         },
       };
-    case 'handoff': {
+    case 'affect_item': {
+      if (typeof record.actorId !== 'string' || typeof record.itemId !== 'string' || !record.itemId.trim()) {
+        return { ok: false, reason: 'invalid_affect_item_action' };
+      }
+      if (
+        record.effect !== 'pick_up' &&
+        record.effect !== 'drop' &&
+        record.effect !== 'transfer' &&
+        record.effect !== 'open' &&
+        record.effect !== 'close' &&
+        record.effect !== 'break' &&
+        record.effect !== 'consume' &&
+        record.effect !== 'empty' &&
+        record.effect !== 'fill' &&
+        record.effect !== 'ruin'
+      ) {
+        return { ok: false, reason: 'invalid_affect_item_effect' };
+      }
       const at = parseGridPos(record.at);
       return {
         ok: true,
         action: {
-          type: 'handoff',
-          itemId: typeof record.itemId === 'string' ? record.itemId : undefined,
-          fromActorId: typeof record.fromActorId === 'string' ? record.fromActorId : undefined,
-          toActorId: typeof record.toActorId === 'string' ? record.toActorId : undefined,
+          type: 'affect_item',
+          actorId: record.actorId,
+          itemId: record.itemId.trim(),
+          effect: record.effect,
+          targetActorId: typeof record.targetActorId === 'string' ? record.targetActorId : undefined,
+          targetContainerId: typeof record.targetContainerId === 'string' ? record.targetContainerId : undefined,
+          instrumentItemId: typeof record.instrumentItemId === 'string' ? record.instrumentItemId : undefined,
           at: at || undefined,
           note: typeof record.note === 'string' ? record.note : undefined,
         },
@@ -653,7 +680,7 @@ function isInterpretation(value: unknown): value is MechanicsInterpretation {
     value === 'inspect' ||
     value === 'explore' ||
     value === 'wait' ||
-    value === 'handoff' ||
+    value === 'affect_item' ||
     value === 'clarify' ||
     value === 'none';
 }

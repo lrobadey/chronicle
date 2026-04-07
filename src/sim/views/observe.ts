@@ -1,5 +1,5 @@
 import type { WorldState, ActorId } from '../state';
-import { getItemPlacement, summarizeItemComponents, type ItemComponentSummary } from '../spine';
+import { getItemPlacement, isItemVisible, summarizeItemComponents, type ItemComponentSummary } from '../spine';
 import { deriveTime } from '../systems/time';
 import { deriveTide } from '../systems/tide';
 import { deriveWeather } from '../systems/weather';
@@ -54,6 +54,7 @@ export function buildObservation(state: WorldState, playerId: ActorId): Observat
 
   const nearbyItems = Object.values(state.items)
     .flatMap(item => {
+      if (!isItemVisible(state.spine, item.id)) return [];
       const placement = getItemPlacement(state.spine, item.id);
       if (!placement || placement.type !== 'located_in') return [];
       const itemDistance = distance(player.pos, placement.anchor);

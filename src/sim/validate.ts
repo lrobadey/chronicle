@@ -1,6 +1,7 @@
 import type { WorldEvent } from './events';
 import type { PendingPrompt, WorldState } from './state';
 import { getItemPlacement } from './spine';
+import { validateAffectItem } from './itemEffects';
 import { deriveTide, isTideBlocked } from './systems/tide';
 import { deriveConstraints } from './systems/constraints';
 import { distance, findNearestLocation, getActor, isWithinBounds } from './utils';
@@ -57,6 +58,8 @@ export function validateEvent(state: WorldState, event: WorldEvent, pendingPromp
       }
       return { ok: true };
     }
+    case 'AffectItem':
+      return validateAffectItem(state, event);
     case 'TransferItem':
       return validateTransferItem(state, event);
     case 'Speak': {

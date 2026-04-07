@@ -18,7 +18,7 @@ import { buildTelemetry } from '../sim/views/telemetry';
 import { computeTurnDiff } from '../sim/views/diff';
 import { deriveTide } from '../sim/systems/tide';
 import { estimateTravel, LONG_TRAVEL_MINUTES } from '../sim/systems/travel';
-import { getItemPlacement } from '../sim/spine';
+import { getItemPlacement, isItemInteractable, isItemVisible, summarizeItemComponents } from '../sim/spine';
 import { distance } from '../sim/utils';
 import { OpenAIClient } from '../agents/llm/openaiClient';
 import type { LLMClient } from '../agents/llm/types';
@@ -48,6 +48,7 @@ import {
   buildOpeningContext,
   buildOpeningRecap,
   buildGMWorldContext,
+  buildNPCConversationContext,
   buildRecentTurnDigests,
   buildSpecialistContext,
   buildStaffInterviewContext,
@@ -335,12 +336,21 @@ export class TurnEngine {
             return { error: 'npc_not_found' };
           }
           const observation = buildObservation(draft, playerId);
+          const npcConversation = buildNPCConversationContext({
+            state: draft,
+            turnHistory,
+            playerId,
+            playerText,
+            nextTurn,
+          });
           const output = await runNpcAgent({
             apiKey,
             npcId: npc.id,
             persona: { name: npc.name, tagline: npc.persona.tagline, background: npc.persona.background, voice: npc.persona.voice, goals: npc.persona.goals },
             observation,
-            playerText,
+            conversationHistory: npcConversation.conversationHistory,
+            olderTurnsSummary: npcConversation.olderTurnsSummary,
+            currentTurn: { turn: nextTurn, playerId },
             llm: this.llm,
             debug: emit,
             trace,
@@ -413,6 +423,7 @@ export class TurnEngine {
             nearby: gmWorldContext.nearby,
             landmarks: gmWorldContext.landmarks,
             observation: gmWorldContext.observation,
+            localAffordances: buildMechanicsLocalAffordances(draft, playerId),
           };
           const draftResolution = await runMechanicsAgent({
             apiKey,
@@ -706,6 +717,9 @@ function createRuntimeId(): string {
 function isSimpleMechanicsEvent(event: WorldEvent): boolean {
   return (
     event.type === 'MoveActor' ||
+    event.type === 'PickUpItem' ||
+    event.type === 'DropItem' ||
+    event.type === 'AffectItem' ||
     event.type === 'TravelToLocation' ||
     event.type === 'Explore' ||
     event.type === 'Inspect' ||
@@ -716,6 +730,68 @@ function isSimpleMechanicsEvent(event: WorldEvent): boolean {
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function buildMechanicsLocalAffordances(state: WorldState, playerId: string) {
+  const player = state.actors[playerId];
+  const carriedItems = player.inventory
+    .filter(itemId => isItemVisible(state.spine, itemId))
+    .map(itemId => ({
+      id: itemId,
+      name: state.items[itemId]?.name || itemId,
+      components: summarizeItemComponents(state.spine, itemId),
+    }));
+
+  const nearbyItems = Object.values(state.items)
+    .flatMap(item => {
+      if (!isItemVisible(state.spine, item.id) || !isItemInteractable(state.spine, item.id)) return [];
+      const placement = getItemPlacement(state.spine, item.id);
+      if (!placement || placement.type !== 'located_in') return [];
+      const distanceMeters = Math.round(distance(player.pos, placement.anchor) * state.map.cellSizeMeters);
+      if (distanceMeters > 120) return [];
+      return [{
+        id: item.id,
+        name: item.name,
+        distanceMeters,
+        portable: state.spine.entities[item.id]?.components.physical?.anchored !== true,
+        components: summarizeItemComponents(state.spine, item.id),
+      }];
+    })
+    .sort((a, b) => a.distanceMeters - b.distanceMeters)
+    .slice(0, 20);
+
+  const nearbyActors = Object.values(state.actors)
+    .filter(actor => actor.id !== playerId)
+    .map(actor => ({
+      id: actor.id,
+      name: actor.name,
+      distanceMeters: Math.round(distance(player.pos, actor.pos) * state.map.cellSizeMeters),
+      inventory: actor.inventory
+        .filter(itemId => isItemVisible(state.spine, itemId))
+        .slice(0, 8)
+        .map(itemId => ({
+          id: itemId,
+          name: state.items[itemId]?.name || itemId,
+        })),
+    }))
+    .filter(actor => actor.distanceMeters <= 200)
+    .sort((a, b) => a.distanceMeters - b.distanceMeters)
+    .slice(0, 12);
+
+  return {
+    carriedItems,
+    nearbyItems,
+    nearbyActors,
+    // Offer/service state is not first-class yet, so keep derivation conservative.
+    obviousOffers: [] as Array<{
+      kind: 'item' | 'service';
+      actorId: string;
+      actorName: string;
+      summary: string;
+      itemId?: string;
+      itemName?: string;
+    }>,
+  };
 }
 
 function assertNoInvariantIssues(state: WorldState, message: string) {

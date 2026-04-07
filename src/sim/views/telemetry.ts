@@ -1,5 +1,5 @@
 import type { WorldState, ActorId } from '../state';
-import { summarizeItemComponents, type ItemComponentSummary } from '../spine';
+import { isItemVisible, summarizeItemComponents, type ItemComponentSummary } from '../spine';
 import { deriveTime } from '../systems/time';
 import { deriveTide } from '../systems/tide';
 import { deriveWeather } from '../systems/weather';
@@ -58,11 +58,13 @@ export function buildTelemetry(state: WorldState, playerId: ActorId): Telemetry 
       id: player.id,
       name: player.name,
       pos: player.pos,
-      inventory: player.inventory.map(id => ({
-        id,
-        name: state.items[id]?.name || id,
-        components: summarizeItemComponents(state.spine, id),
-      })),
+      inventory: player.inventory
+        .filter(id => isItemVisible(state.spine, id))
+        .map(id => ({
+          id,
+          name: state.items[id]?.name || id,
+          components: summarizeItemComponents(state.spine, id),
+        })),
     },
     location: {
       id: insideNearest ? nearest!.id : null,

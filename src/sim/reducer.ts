@@ -1,6 +1,7 @@
 import type { WorldEvent } from './events';
 import type { KnowledgeState, WorldState } from './state';
 import { getItemPlacement, setItemPlacement, syncWorldSpine } from './spine';
+import { applyAffectItem } from './itemEffects';
 import { deriveTide, isTideBlocked } from './systems/tide';
 import { deriveConstraints } from './systems/constraints';
 import { distance, locationsWithinRadius } from './utils';
@@ -37,6 +38,8 @@ function applyEventBase(state: WorldState, event: WorldEvent): WorldState {
       return applyPickUpItem(state, event);
     case 'DropItem':
       return applyDropItem(state, event);
+    case 'AffectItem':
+      return applyAffectItemEvent(state, event);
     case 'TransferItem':
       return applyTransferItem(state, event);
     case 'Speak':
@@ -50,6 +53,12 @@ function applyEventBase(state: WorldState, event: WorldEvent): WorldState {
     default:
       return state;
   }
+}
+
+function applyAffectItemEvent(state: WorldState, event: Extract<WorldEvent, { type: 'AffectItem' }>): WorldState {
+  const next = applyAffectItem(state, event);
+  if (next === state) return state;
+  return addLedger(next, event.note || `Item ${event.itemId} affected: ${event.effect}`);
 }
 
 function applyMoveActor(state: WorldState, event: Extract<WorldEvent, { type: 'MoveActor' }>): WorldState {

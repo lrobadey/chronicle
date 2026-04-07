@@ -568,6 +568,21 @@ describe('CLI app', () => {
     assert.ok(rawCalled.includes('clear_prompt=true'));
   });
 
+  it('renders rejected RecordClue events with a readable summary', () => {
+    const rejected = renderDebugEvent({
+      type: 'event.rejected',
+      event: {
+        type: 'RecordClue',
+        actorId: 'player-1',
+        text: '',
+        subject: 'outer pilings',
+      },
+      reason: 'clue_text_required',
+    }, 'summary');
+
+    assert.equal(rejected, '[event] rejected record clue about outer pilings reason=clue_text_required\n');
+  });
+
   it('renders narrator summary preview with truncation', () => {
     const preview = renderDebugEvent({
       type: 'narrator.completed',

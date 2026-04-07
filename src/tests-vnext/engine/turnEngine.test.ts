@@ -148,6 +148,141 @@ describe('TurnEngine', () => {
     }
   });
 
+  it('injects full player-facing conversation history into NPC context without leaking internal fields', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-1',
+          output: [{ type: 'function_call', name: 'consult_npc', arguments: '{"npcId":"mira-salt"}', call_id: 'gm1' }],
+          output_text: '',
+        },
+        {
+          id: 'npc-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_npc_turn',
+              arguments: '{"publicUtterance":"I was watching the tide-line.","privateIntent":"answer","emotionalTone":"measured"}',
+              call_id: 'npc1',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-2',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm2' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'Mira glances back toward the docks.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const state = await store.loadSession(init.sessionId);
+      assert.ok(state);
+      state.meta.turn = 1;
+      await store.saveSnapshot(init.sessionId, state);
+      await store.appendTurn(init.sessionId, {
+        sessionId: init.sessionId,
+        turn: 1,
+        atIso: new Date().toISOString(),
+        playerId: 'player-1',
+        playerText: 'Ask Tamar about the weed-line',
+        acceptedEvents: [],
+        rejectedEvents: [],
+        npcOutputs: [
+          {
+            npcId: 'tamar-vane',
+            publicUtterance: 'Fresh drag marks. Not from this tide.',
+            privateIntent: 'warn_player',
+          },
+        ],
+        specialistOutputs: [
+          {
+            specialistType: 'scene',
+            question: 'hidden',
+            output: {
+              specialistType: 'scene',
+              summary: 'secret specialist note',
+              recommendations: [],
+              candidateEvents: [],
+              risks: [],
+            },
+            usedSuggestion: false,
+            usedCandidateEvents: [],
+          },
+        ],
+        narration: 'Tamar points at the higher pilings.',
+        trace: {
+          toolCalls: [{ tool: 'consult_specialist', input: { note: 'internal trace detail' }, output: {} }],
+          llmCalls: [],
+        },
+      });
+
+      await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'What did you see after that?',
+        apiKey: 'test-key',
+      });
+
+      const npcCall = llm.calls[1];
+      const npcPayloadRaw = String(npcCall?.input);
+      const npcPayload = JSON.parse(npcPayloadRaw);
+
+      assert.deepEqual(npcPayload.conversationHistory, [
+        {
+          turn: 0,
+          role: 'opening',
+          speakerName: 'Narrator',
+          text: init.opening,
+          source: 'openingNarration',
+        },
+        {
+          turn: 1,
+          role: 'player',
+          speakerId: 'player-1',
+          speakerName: 'You',
+          text: 'Ask Tamar about the weed-line',
+          source: 'playerText',
+        },
+        {
+          turn: 1,
+          role: 'npc',
+          speakerId: 'tamar-vane',
+          speakerName: 'Tamar Vane',
+          text: 'Fresh drag marks. Not from this tide.',
+          source: 'npcPublicUtterance',
+        },
+        {
+          turn: 1,
+          role: 'narrator',
+          speakerName: 'Narrator',
+          text: 'Tamar points at the higher pilings.',
+          source: 'turnNarration',
+        },
+        {
+          turn: 2,
+          role: 'player',
+          speakerId: 'player-1',
+          speakerName: 'You',
+          text: 'What did you see after that?',
+          source: 'playerText',
+        },
+      ]);
+      assert.equal(npcPayload.currentTurn.turn, 2);
+      assert.equal(npcPayloadRaw.includes('warn_player'), false);
+      assert.equal(npcPayloadRaw.includes('secret specialist note'), false);
+      assert.equal(npcPayloadRaw.includes('internal trace detail'), false);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
   it('persists specialist consultations, agenda updates, and rich entity creation', async () => {
     const { rootDir, store } = await createStore();
     try {
@@ -935,6 +1070,84 @@ describe('TurnEngine', () => {
         assert.equal(turn.acceptedEvents[0]?.type, 'Inspect');
         assert.deepEqual(turn.telemetry.player.pos, before?.actors['player-1']?.pos);
         assert.ok(llm.calls.some(call => call.model === 'gpt-5.4-mini'));
+      } finally {
+        Object.defineProperty(globalThis.crypto, 'randomUUID', {
+          value: originalUUID,
+          configurable: true,
+        });
+      }
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('can resolve a deterministic pickup draft and apply it through mechanics review', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-pickup-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'resolve_mechanics',
+              arguments: '{"objective":"resolve the player picking up the heartwater jar"}',
+              call_id: 'gm-pickup-resolve',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-pickup-2',
+          output: [
+            {
+              type: 'function_call',
+              name: 'review_mechanics_resolution',
+              arguments: '{"resolutionId":"abababab-abab-4bab-8bab-abababababab","action":"approve","feedback":null}',
+              call_id: 'gm-pickup-review',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-pickup-3',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-pickup-finish' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-pickup-1',
+          output: [],
+          output_text: 'You scoop up the sealed jar.',
+        },
+      ]);
+
+      const originalUUID = globalThis.crypto.randomUUID;
+      Object.defineProperty(globalThis.crypto, 'randomUUID', {
+        value: (() => 'abababab-abab-4bab-8bab-abababababab') as typeof globalThis.crypto.randomUUID,
+        configurable: true,
+      });
+      try {
+        const engine = new TurnEngine({ store, llm });
+        const init = await engine.initSession({});
+        const state = await store.loadSession(init.sessionId);
+        if (!state) throw new Error('expected session state');
+        state.actors['player-1'].pos = { x: 0, y: 1200, z: 15 };
+        state.items['heartwater-jar'].name = 'Heartwater Jar';
+        await store.saveSnapshot(init.sessionId, state);
+
+        const turn = await engine.runTurn({
+          sessionId: init.sessionId,
+          playerId: 'player-1',
+          playerText: 'pick up the heartwater jar',
+          apiKey: 'test-key',
+          debug: { includeTrace: true },
+        });
+
+        assert.equal(turn.acceptedEvents.length, 1);
+        assert.equal(turn.acceptedEvents[0]?.type, 'AffectItem');
+        assert.equal(turn.telemetry.player.inventory.some(item => item.id === 'heartwater-jar'), true);
+        const resolution = turn.trace?.mechanicsResolutions?.[0];
+        assert.equal(resolution?.debug?.selectedModel, 'deterministic');
       } finally {
         Object.defineProperty(globalThis.crypto, 'randomUUID', {
           value: originalUUID,

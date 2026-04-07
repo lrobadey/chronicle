@@ -1,4 +1,4 @@
-import type { Actor, GridPos, Item, ItemLocationInput, LocationPOI, WorldState } from './state';
+import type { Actor, GridPos, Item, ItemLifecycleState, ItemLocationInput, LocationPOI, WorldState } from './state';
 import {
   SpineIntegrityError,
   type SpineIntegrityIssue,
@@ -72,6 +72,9 @@ export interface SpineEntity {
     decay?: {
       class?: 'indoor_stable' | 'outdoor_weathering' | 'organic_rot';
       lastSimulatedAtTurn?: number;
+    };
+    lifecycle?: {
+      state?: ItemLifecycleState;
     };
   };
 }
@@ -325,6 +328,32 @@ export function setItemPlacement(
   });
 }
 
+export function clearItemPlacement(
+  spine: SpineState,
+  itemId: string,
+  locations: Record<string, LocationPOI>,
+) {
+  for (const relation of getItemPlacementRelations(spine, itemId)) {
+    delete spine.relations[relation.id];
+  }
+
+  const entity = spine.entities[itemId] || {
+    id: itemId,
+    kind: 'item',
+    archetype: 'item.generic',
+    name: itemId,
+    components: {},
+  };
+  entity.components.location = undefined;
+  spine.entities[itemId] = entity;
+  spine.indexes = buildIndexes(spine.entities, spine.relations);
+  validateSpineOrThrow(spine, {
+    itemIds: collectEntityIdsByKind(spine, 'item'),
+    actorIds: collectEntityIdsByKind(spine, 'actor'),
+    locationIds: Object.keys(locations),
+  });
+}
+
 export function validateSpine(
   spine: SpineState,
   context: SpineValidationContext = {},
@@ -434,6 +463,7 @@ export function validateSpineOrThrow(
 }
 
 export interface ItemComponentSummary {
+  lifecycle?: ItemLifecycleState;
   material?: string;
   condition?: string;
   sealed?: boolean;
@@ -452,6 +482,12 @@ export function summarizeItemComponents(spine: SpineState, itemId: string): Item
   const summary: ItemComponentSummary = {};
   let populated = false;
 
+  const lifecycle = getItemLifecycleState(spine, itemId);
+  if (lifecycle !== 'intact') {
+    summary.lifecycle = lifecycle;
+    populated = true;
+  }
+
   if (entity.components.material?.primary) {
     summary.material = entity.components.material.primary;
     populated = true;
@@ -459,9 +495,17 @@ export function summarizeItemComponents(spine: SpineState, itemId: string): Item
 
   if (entity.components.condition) {
     const c = entity.components.condition;
-    if (c.broken) {
+    if (lifecycle === 'consumed') {
+      summary.condition = 'consumed';
+    } else if (lifecycle === 'ruined') {
+      summary.condition = 'ruined';
+    } else if (c.broken || lifecycle === 'broken') {
       summary.condition = 'broken';
       summary.broken = true;
+    } else if (lifecycle === 'opened') {
+      summary.condition = 'opened';
+    } else if (lifecycle === 'empty') {
+      summary.condition = 'empty';
     } else if (c.durability !== undefined) {
       if (c.durability >= 80) summary.condition = 'good';
       else if (c.durability >= 50) summary.condition = 'worn';
@@ -482,6 +526,23 @@ export function summarizeItemComponents(spine: SpineState, itemId: string): Item
   }
 
   return populated ? summary : undefined;
+}
+
+export function getItemLifecycleState(spine: SpineState, itemId: string): ItemLifecycleState {
+  const entity = spine.entities[itemId];
+  const explicit = entity?.components.lifecycle?.state;
+  if (explicit) return explicit;
+  if (entity?.components.condition?.broken) return 'broken';
+  return 'intact';
+}
+
+export function isItemVisible(spine: SpineState, itemId: string): boolean {
+  return getItemLifecycleState(spine, itemId) !== 'consumed';
+}
+
+export function isItemInteractable(spine: SpineState, itemId: string): boolean {
+  const lifecycle = getItemLifecycleState(spine, itemId);
+  return lifecycle !== 'consumed' && lifecycle !== 'broken' && lifecycle !== 'ruined';
 }
 
 // ---------------------------------------------------------------------------

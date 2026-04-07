@@ -29,7 +29,17 @@ describe('NPC agent', () => {
       npcId: 'mira-salt',
       persona: { name: 'Mira Salt' },
       observation: { nearbyActors: [] },
-      playerText: 'What do you see?',
+      conversationHistory: [
+        {
+          turn: 1,
+          role: 'player',
+          speakerId: 'player-1',
+          speakerName: 'You',
+          text: 'What do you see?',
+          source: 'playerText',
+        },
+      ],
+      currentTurn: { turn: 1, playerId: 'player-1' },
       llm,
       debug: event => debugEvents.push(event),
       trace,
@@ -41,6 +51,9 @@ describe('NPC agent', () => {
     assert.equal(result.emotionalTone, 'grim');
     assert.equal(trace.llmCalls.length, 1);
     assert.equal(llm.calls[0]?.model, DEFAULT_MODEL);
+    const input = JSON.parse(String(llm.calls[0]?.input));
+    assert.equal(input.conversationHistory[0]?.text, 'What do you see?');
+    assert.equal(input.currentTurn.turn, 1);
     assert.deepEqual(debugEvents.map(event => event.type), ['npc.started', 'npc.completed']);
   });
 
@@ -58,11 +71,63 @@ describe('NPC agent', () => {
       npcId: 'mira-salt',
       persona: { name: 'Mira Salt' },
       observation: { nearbyActors: [] },
-      playerText: 'What do you see?',
+      conversationHistory: [
+        {
+          turn: 1,
+          role: 'player',
+          speakerId: 'player-1',
+          speakerName: 'You',
+          text: 'What do you see?',
+          source: 'playerText',
+        },
+      ],
+      currentTurn: { turn: 1, playerId: 'player-1' },
       llm,
     });
 
     assert.equal(result.npcId, 'mira-salt');
     assert.equal(result.privateIntent, 'wait');
+  });
+
+  it('summarizes older turns when the transcript exceeds the NPC context budget', async () => {
+    const llm = new QueueLLM([
+      {
+        id: 'resp-npc-3',
+        output: [
+          {
+            type: 'function_call',
+            name: 'emit_npc_turn',
+            arguments: '{"publicUtterance":"I remember enough.","privateIntent":"answer","emotionalTone":"steady"}',
+            call_id: 'npc-call-3',
+          },
+        ],
+        output_text: '',
+      },
+    ]);
+
+    const conversationHistory = Array.from({ length: 8 }, (_, index) => ({
+      turn: index + 1,
+      role: 'player' as const,
+      speakerId: 'player-1',
+      speakerName: 'You',
+      text: `Turn ${index + 1} ${'x'.repeat(2400)}`,
+      source: 'playerText' as const,
+    }));
+
+    await runNpcAgent({
+      apiKey: 'test-key',
+      npcId: 'mira-salt',
+      persona: { name: 'Mira Salt' },
+      observation: { nearbyActors: [] },
+      conversationHistory,
+      currentTurn: { turn: 8, playerId: 'player-1' },
+      llm,
+    });
+
+    const input = JSON.parse(String(llm.calls[0]?.input));
+    assert.equal(typeof input.olderTurnsSummary, 'string');
+    assert.equal(input.olderTurnsSummary.includes('Earlier conversation from turns 1-'), true);
+    assert.equal(input.conversationHistory.some((entry: { turn: number }) => entry.turn === 1), false);
+    assert.equal(input.conversationHistory.some((entry: { turn: number }) => entry.turn === 8), true);
   });
 });

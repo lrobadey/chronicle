@@ -14,7 +14,15 @@ describe('GM prompt', () => {
     );
     assert.match(
       GM_SYSTEM_PROMPT,
-      /Prefer TransferItem for simple handoffs or served items\./,
+      /Prefer AffectItem with effect="transfer" for simple handoffs or served items\./,
+    );
+    assert.match(
+      GM_SYSTEM_PROMPT,
+      /affecting an item through pickup, drop, transfer, opening, breaking, consuming, or another simple local change/,
+    );
+    assert.match(
+      GM_SYSTEM_PROMPT,
+      /Let it draft affect_item operations or short local two-step completions/,
     );
     assert.match(
       GM_SYSTEM_PROMPT,

@@ -10,6 +10,10 @@ export function resolveDeterministicMechanics(request: MechanicsWorkerRequest): 
   if (travel) return travel;
   const wait = resolveDeterministicWait(request);
   if (wait) return wait;
+  const pickup = resolveDeterministicPickup(request);
+  if (pickup) return pickup;
+  const drop = resolveDeterministicDrop(request);
+  if (drop) return drop;
   return null;
 }
 
@@ -102,6 +106,63 @@ function resolveDeterministicWait(request: MechanicsWorkerRequest): MechanicsRes
   };
 }
 
+function resolveDeterministicPickup(request: MechanicsWorkerRequest): MechanicsResolutionDraft | null {
+  const target = extractPickupTarget(request.playerText);
+  const affordances = getLocalAffordances(request);
+  if (!target || !affordances.nearbyItems.length) return null;
+
+  const portableItems = affordances.nearbyItems.filter(item => item.portable);
+  if (!portableItems.length) return null;
+
+  const match = findUniqueItemMatch(target, portableItems);
+  if (!match) return null;
+
+  const playerId = String((request.telemetry as { player?: { id?: string } })?.player?.id || 'player-1');
+  return {
+    status: 'ok',
+    interpretation: 'affect_item',
+    summary: `pick up ${match.name}`,
+    actions: [{
+      type: 'affect_item',
+      actorId: playerId,
+      itemId: match.id,
+      effect: 'pick_up',
+      note: `Pick up ${match.name}.`,
+    }],
+    pendingPromptDraft: null,
+    touchedEntities: [playerId, match.id],
+    confidence: 0.94,
+    warnings: [`deterministic_pickup_match:${normalizeCandidate(match.name)}`],
+  };
+}
+
+function resolveDeterministicDrop(request: MechanicsWorkerRequest): MechanicsResolutionDraft | null {
+  const target = extractDropTarget(request.playerText);
+  const affordances = getLocalAffordances(request);
+  if (!target || !affordances.carriedItems.length) return null;
+
+  const match = findUniqueItemMatch(target, affordances.carriedItems);
+  if (!match) return null;
+
+  const playerId = String((request.telemetry as { player?: { id?: string } })?.player?.id || 'player-1');
+  return {
+    status: 'ok',
+    interpretation: 'affect_item',
+    summary: `drop ${match.name}`,
+    actions: [{
+      type: 'affect_item',
+      actorId: playerId,
+      itemId: match.id,
+      effect: 'drop',
+      note: `Drop ${match.name}.`,
+    }],
+    pendingPromptDraft: null,
+    touchedEntities: [playerId, match.id],
+    confidence: 0.94,
+    warnings: [`deterministic_drop_match:${normalizeCandidate(match.name)}`],
+  };
+}
+
 function extractWaitMinutes(text: string): number | null {
   const normalized = normalizeInput(text);
   if (!normalized) return null;
@@ -124,6 +185,44 @@ function extractWaitMinutes(text: string): number | null {
     const unit = match[2]!.toLowerCase();
     if (unit.startsWith('h')) return value * 60;
     return value;
+  }
+
+  return null;
+}
+
+function extractPickupTarget(text: string): string | null {
+  const normalized = normalizeInput(text);
+  if (!normalized) return null;
+
+  const patterns = [
+    /^(?:i\s+)?(?:pick up|pickup|take|grab|collect)\s+(.+)$/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match?.[1]) {
+      const target = match[1].replace(/^(the|a|an)\s+/, '').trim();
+      return target || null;
+    }
+  }
+
+  return null;
+}
+
+function extractDropTarget(text: string): string | null {
+  const normalized = normalizeInput(text);
+  if (!normalized) return null;
+
+  const patterns = [
+    /^(?:i\s+)?(?:drop|put down|set down|leave)\s+(.+)$/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match?.[1]) {
+      const target = match[1].replace(/^(the|a|an)\s+/, '').trim();
+      return target || null;
+    }
   }
 
   return null;
@@ -192,6 +291,34 @@ function rankTravelCandidates(target: string, candidates: MechanicsTravelCandida
       return { candidate, score: bestScore, alias: bestAlias };
     })
     .sort((left, right) => right.score - left.score || left.candidate.distanceMeters - right.candidate.distanceMeters);
+}
+
+function rankNamedCandidates<T extends { name: string }>(target: string, candidates: T[]) {
+  return candidates
+    .map(candidate => ({
+      candidate,
+      score: scoreCandidate(target, candidate.name, 0),
+      alias: normalizeCandidate(candidate.name),
+    }))
+    .sort((left, right) => right.score - left.score || left.candidate.name.localeCompare(right.candidate.name));
+}
+
+function findUniqueItemMatch<T extends { id: string; name: string }>(target: string, candidates: T[]): T | null {
+  const ranked = rankNamedCandidates(target, candidates);
+  const best = ranked[0];
+  const second = ranked[1];
+  if (!best || best.score < 0.9) return null;
+  if (second && second.score >= 0.9 && best.score - second.score < 0.08) return null;
+  return best.candidate;
+}
+
+function getLocalAffordances(request: MechanicsWorkerRequest) {
+  return request.localAffordances || {
+    carriedItems: [],
+    nearbyItems: [],
+    nearbyActors: [],
+    obviousOffers: [],
+  };
 }
 
 function scoreCandidate(targetRaw: string, aliasRaw: string, distanceMeters: number): number {

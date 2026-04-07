@@ -7,7 +7,7 @@ export type MechanicsInterpretation =
   | 'inspect'
   | 'explore'
   | 'wait'
-  | 'handoff'
+  | 'affect_item'
   | 'clarify'
   | 'none';
 
@@ -66,12 +66,15 @@ export type MechanicsAction =
       note?: string;
     }
   | {
-      type: 'handoff';
-      itemId?: string;
-      fromActorId?: string;
-      toActorId?: string;
-      at?: GridPos;
+      type: 'affect_item';
+      actorId: string;
+      itemId: string;
+      effect: 'pick_up' | 'drop' | 'transfer' | 'open' | 'close' | 'break' | 'consume' | 'empty' | 'fill' | 'ruin';
+      targetActorId?: string;
+      targetContainerId?: string;
+      instrumentItemId?: string;
       note?: string;
+      at?: GridPos;
     };
 
 export interface MechanicsDebugRecord {
@@ -118,6 +121,37 @@ export interface MechanicsWorkerRequest {
   };
   landmarks: unknown[];
   observation: unknown;
+  localAffordances?: {
+    carriedItems: Array<{
+      id: string;
+      name: string;
+      components?: unknown;
+    }>;
+    nearbyItems: Array<{
+      id: string;
+      name: string;
+      distanceMeters: number;
+      portable: boolean;
+      components?: unknown;
+    }>;
+    nearbyActors: Array<{
+      id: string;
+      name: string;
+      distanceMeters: number;
+      inventory: Array<{
+        id: string;
+        name: string;
+      }>;
+    }>;
+    obviousOffers: Array<{
+      kind: 'item' | 'service';
+      actorId: string;
+      actorName: string;
+      summary: string;
+      itemId?: string;
+      itemName?: string;
+    }>;
+  };
 }
 
 export interface MechanicsResolutionDraft {
