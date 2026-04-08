@@ -42,6 +42,7 @@ export function validateAffectItem(
       return { ok: true };
     case 'open':
       if (!isAccessibleToActor(event.itemId, event.actorId, state)) return { ok: false, reason: 'item_not_accessible' };
+      if (lifecycle === 'broken' || lifecycle === 'ruined') return { ok: false, reason: 'item_cannot_be_opened' };
       if (item.components?.container && item.components.container.sealed === false) {
         return { ok: false, reason: 'item_already_open' };
       }
@@ -63,10 +64,13 @@ export function validateAffectItem(
       if (lifecycle === 'broken' || lifecycle === 'ruined') return { ok: false, reason: 'item_not_consumable' };
       return { ok: true };
     case 'empty':
+      if (!isAccessibleToActor(event.itemId, event.actorId, state)) return { ok: false, reason: 'item_not_accessible' };
+      if (lifecycle === 'broken' || lifecycle === 'ruined') return { ok: false, reason: 'item_cannot_be_emptied' };
+      return { ok: true };
     case 'fill':
-      return isAccessibleToActor(event.itemId, event.actorId, state)
-        ? { ok: true }
-        : { ok: false, reason: 'item_not_accessible' };
+      if (!isAccessibleToActor(event.itemId, event.actorId, state)) return { ok: false, reason: 'item_not_accessible' };
+      if (lifecycle === 'broken' || lifecycle === 'ruined') return { ok: false, reason: 'item_cannot_be_filled' };
+      return { ok: true };
     default:
       return { ok: false, reason: 'unknown_item_effect' };
   }

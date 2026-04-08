@@ -224,6 +224,68 @@ describe('sim determinism', () => {
     assert.equal(observedJar?.components?.condition, 'broken');
   });
 
+  it('rejects open, fill, and empty on broken or ruined items', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    world.actors['player-1'].pos = { x: 0, y: 1200, z: 15 };
+
+    const held = applyEvent(world, {
+      type: 'AffectItem',
+      actorId: 'player-1',
+      itemId: 'heartwater-jar',
+      effect: 'pick_up',
+    });
+    const broken = applyEvent(held, {
+      type: 'AffectItem',
+      actorId: 'player-1',
+      itemId: 'heartwater-jar',
+      effect: 'break',
+      at: { x: 0, y: 1200, z: 15 },
+    });
+
+    const openBroken = validateEvent(broken, {
+      type: 'AffectItem',
+      actorId: 'player-1',
+      itemId: 'heartwater-jar',
+      effect: 'open',
+    });
+    assert.equal(openBroken.ok, false);
+    assert.equal(openBroken.reason, 'item_cannot_be_opened');
+
+    const fillBroken = validateEvent(broken, {
+      type: 'AffectItem',
+      actorId: 'player-1',
+      itemId: 'heartwater-jar',
+      effect: 'fill',
+    });
+    assert.equal(fillBroken.ok, false);
+    assert.equal(fillBroken.reason, 'item_cannot_be_filled');
+
+    const emptyBroken = validateEvent(broken, {
+      type: 'AffectItem',
+      actorId: 'player-1',
+      itemId: 'heartwater-jar',
+      effect: 'empty',
+    });
+    assert.equal(emptyBroken.ok, false);
+    assert.equal(emptyBroken.reason, 'item_cannot_be_emptied');
+
+    const ruined = applyEvent(broken, {
+      type: 'AffectItem',
+      actorId: 'player-1',
+      itemId: 'heartwater-jar',
+      effect: 'ruin',
+    });
+
+    const fillRuined = validateEvent(ruined, {
+      type: 'AffectItem',
+      actorId: 'player-1',
+      itemId: 'heartwater-jar',
+      effect: 'fill',
+    });
+    assert.equal(fillRuined.ok, false);
+    assert.equal(fillRuined.reason, 'item_cannot_be_filled');
+  });
+
   it('hides consumed items from telemetry and observation after affect_item consume', () => {
     const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
 
