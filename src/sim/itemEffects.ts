@@ -21,7 +21,7 @@ export function validateAffectItem(
 
   switch (event.effect) {
     case 'pick_up':
-      if (lifecycle === 'broken' || lifecycle === 'ruined') return { ok: false, reason: 'item_not_portable' };
+      if (lifecycle === 'broken' || lifecycle === 'ruined' || lifecycle === 'unusable') return { ok: false, reason: 'item_not_portable' };
       if (placement.type !== 'located_in') return { ok: false, reason: 'item_not_pickup_accessible' };
       if (distance(actor.pos, placement.anchor) > 2) return { ok: false, reason: 'item_too_far' };
       return { ok: true };
@@ -42,7 +42,7 @@ export function validateAffectItem(
       return { ok: true };
     case 'open':
       if (!isAccessibleToActor(event.itemId, event.actorId, state)) return { ok: false, reason: 'item_not_accessible' };
-      if (lifecycle === 'broken' || lifecycle === 'ruined') return { ok: false, reason: 'item_cannot_be_opened' };
+      if (lifecycle === 'broken' || lifecycle === 'ruined' || lifecycle === 'unusable') return { ok: false, reason: 'item_cannot_be_opened' };
       if (item.components?.container && item.components.container.sealed === false) {
         return { ok: false, reason: 'item_already_open' };
       }
@@ -50,7 +50,7 @@ export function validateAffectItem(
     case 'close':
       if (!isAccessibleToActor(event.itemId, event.actorId, state)) return { ok: false, reason: 'item_not_accessible' };
       if (item.components?.container?.sealed === true) return { ok: false, reason: 'item_already_closed' };
-      if (lifecycle === 'broken' || lifecycle === 'ruined') {
+      if (lifecycle === 'broken' || lifecycle === 'ruined' || lifecycle === 'unusable') {
         return { ok: false, reason: 'item_cannot_be_closed' };
       }
       return { ok: true };
@@ -61,15 +61,15 @@ export function validateAffectItem(
         : { ok: false, reason: 'item_not_accessible' };
     case 'consume':
       if (!isAccessibleToActor(event.itemId, event.actorId, state)) return { ok: false, reason: 'item_not_accessible' };
-      if (lifecycle === 'broken' || lifecycle === 'ruined') return { ok: false, reason: 'item_not_consumable' };
+      if (lifecycle === 'broken' || lifecycle === 'ruined' || lifecycle === 'unusable') return { ok: false, reason: 'item_not_consumable' };
       return { ok: true };
     case 'empty':
       if (!isAccessibleToActor(event.itemId, event.actorId, state)) return { ok: false, reason: 'item_not_accessible' };
-      if (lifecycle === 'broken' || lifecycle === 'ruined') return { ok: false, reason: 'item_cannot_be_emptied' };
+      if (lifecycle === 'broken' || lifecycle === 'ruined' || lifecycle === 'unusable') return { ok: false, reason: 'item_cannot_be_emptied' };
       return { ok: true };
     case 'fill':
       if (!isAccessibleToActor(event.itemId, event.actorId, state)) return { ok: false, reason: 'item_not_accessible' };
-      if (lifecycle === 'broken' || lifecycle === 'ruined') return { ok: false, reason: 'item_cannot_be_filled' };
+      if (lifecycle === 'broken' || lifecycle === 'ruined' || lifecycle === 'unusable') return { ok: false, reason: 'item_cannot_be_filled' };
       return { ok: true };
     default:
       return { ok: false, reason: 'unknown_item_effect' };

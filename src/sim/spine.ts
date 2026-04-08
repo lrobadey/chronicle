@@ -5,6 +5,7 @@ import {
   type SpinePlacementType,
 } from '../engine/errors';
 import { getArchetypePreset, mergeItemComponents } from './archetypes';
+import { runDecayCatchUp } from './systems/decay';
 
 export type SpineEntityId = string;
 export type SpineRelationId = string;
@@ -71,7 +72,7 @@ export interface SpineEntity {
     };
     decay?: {
       class?: 'indoor_stable' | 'outdoor_weathering' | 'organic_rot';
-      lastSimulatedAtTurn?: number;
+      lastSimulatedAtMinutes?: number;
     };
     lifecycle?: {
       state?: ItemLifecycleState;
@@ -242,6 +243,7 @@ export function syncWorldSpine(state: WorldState): WorldState {
     indexes: buildIndexes(entities, relations),
     schedules: previous.schedules || {},
   };
+  runDecayCatchUp(state);
   validateSpineOrThrow(state.spine, {
     actorIds: Object.keys(state.actors),
     itemIds: Object.keys(state.items),
@@ -497,6 +499,8 @@ export function summarizeItemComponents(spine: SpineState, itemId: string): Item
     const c = entity.components.condition;
     if (lifecycle === 'consumed') {
       summary.condition = 'consumed';
+    } else if (lifecycle === 'unusable') {
+      summary.condition = 'unusable';
     } else if (lifecycle === 'ruined') {
       summary.condition = 'ruined';
     } else if (c.broken || lifecycle === 'broken') {
@@ -507,10 +511,19 @@ export function summarizeItemComponents(spine: SpineState, itemId: string): Item
     } else if (lifecycle === 'empty') {
       summary.condition = 'empty';
     } else if (c.durability !== undefined) {
-      if (c.durability >= 80) summary.condition = 'good';
-      else if (c.durability >= 50) summary.condition = 'worn';
-      else if (c.durability >= 20) summary.condition = 'damaged';
-      else summary.condition = 'ruined';
+      const parts: string[] = [];
+      if ((c.rust ?? 0) >= 30) parts.push('rusty');
+      if ((c.rot ?? 0) >= 30) parts.push('rotting');
+      if (c.durability >= 80) parts.push(parts.length ? 'good' : 'good');
+      else if (c.durability >= 50) parts.push('worn');
+      else if (c.durability >= 20) parts.push('damaged');
+      else parts.push('ruined');
+      summary.condition = parts.join(', ');
+    } else {
+      const parts: string[] = [];
+      if ((c.rust ?? 0) >= 30) parts.push('rusty');
+      if ((c.rot ?? 0) >= 30) parts.push('rotting');
+      if (parts.length) summary.condition = parts.join(', ');
     }
     populated = true;
   }
@@ -542,7 +555,7 @@ export function isItemVisible(spine: SpineState, itemId: string): boolean {
 
 export function isItemInteractable(spine: SpineState, itemId: string): boolean {
   const lifecycle = getItemLifecycleState(spine, itemId);
-  return lifecycle !== 'consumed' && lifecycle !== 'broken' && lifecycle !== 'ruined';
+  return lifecycle !== 'consumed' && lifecycle !== 'broken' && lifecycle !== 'ruined' && lifecycle !== 'unusable';
 }
 
 // ---------------------------------------------------------------------------

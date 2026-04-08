@@ -115,7 +115,7 @@ const ITEM_COMPONENTS_SCHEMA = strictObjectSchema(
     ),
     lifecycle: strictObjectSchema(
       {
-        state: { type: ['string', 'null'], enum: ['intact', 'opened', 'broken', 'empty', 'consumed', 'ruined', null] },
+        state: { type: ['string', 'null'], enum: ['intact', 'opened', 'broken', 'empty', 'consumed', 'ruined', 'unusable', null] },
       },
       { nullable: true },
     ),
