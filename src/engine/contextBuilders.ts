@@ -33,7 +33,7 @@ export interface GMWorldContext {
   observation: ReturnType<typeof buildObservation>;
   telemetry: ReturnType<typeof buildTelemetry>;
   opening: OpeningRecap | null;
-  agendas: WorldState['agendas'];
+  agendas: WorldState['directorState'];
   pendingPrompt: PendingPrompt | null;
   travelCandidates: Array<{
     id: string;
@@ -206,7 +206,7 @@ export function buildGMWorldContext(params: {
     observation,
     telemetry,
     opening: buildOpeningRecap(state),
-    agendas: state.agendas,
+    agendas: state.directorState,
     pendingPrompt: params.pendingPrompt,
     travelCandidates,
     landmarks,
@@ -331,7 +331,7 @@ export function buildSpecialistContext(params: {
 
   if (specialistType === 'scene') {
     return {
-      agendas: state.agendas.scene,
+      agendas: state.directorState.scene,
       pendingPrompt: params.pendingPrompt,
       telemetry,
       observation,
@@ -341,7 +341,7 @@ export function buildSpecialistContext(params: {
   }
 
   return {
-    agendas: state.agendas.world,
+    agendas: state.directorState.world,
     pendingPrompt: params.pendingPrompt,
     telemetry,
     worldSnapshot: buildGMWorldContext({
@@ -461,8 +461,8 @@ function summarizeInterviewHeuristics(state: WorldState, turnHistory: TurnRecord
     noAcceptedTurnCount: turnHistory.filter(turn => turn.acceptedEvents.length === 0).length,
     specialistConsultCount: turnHistory.reduce((sum, turn) => sum + (turn.specialistOutputs?.length || 0), 0),
     pendingPromptActive: Boolean(turnHistory[turnHistory.length - 1]?.pendingPrompt),
-    scenePressureCount: state.agendas.scene.pressures.length + state.agendas.scene.immediateTensions.length,
-    worldThreadCount: state.agendas.world.activeThreads.length + state.agendas.world.escalationHooks.length,
+    scenePressureCount: state.directorState.scene.pressures.length + state.directorState.scene.immediateTensions.length,
+    worldThreadCount: state.directorState.world.activeThreads.length + state.directorState.world.escalationHooks.length,
   };
 }
 

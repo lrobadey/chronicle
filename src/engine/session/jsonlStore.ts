@@ -132,8 +132,15 @@ export class JsonlSessionStore implements SessionStore {
 }
 
 function normalizeLoadedState(state: WorldState): WorldState {
-  if (!state.agendas) {
-    state.agendas = {
+  // Migrate legacy 'agendas' field to 'directorState'
+  const raw = state as unknown as Record<string, unknown>;
+  if (!state.directorState && raw.agendas) {
+    state.directorState = raw.agendas as WorldState['directorState'];
+    delete raw.agendas;
+  }
+
+  if (!state.directorState) {
+    state.directorState = {
       scene: {
         pressures: [],
         unresolvedBeats: [],
@@ -144,20 +151,33 @@ function normalizeLoadedState(state: WorldState): WorldState {
         introductionOpportunities: [],
         escalationHooks: [],
       },
+      activeThreads: [],
+      heldBeats: [],
+      pendingWorldEvents: [],
+      playerBehaviorPatterns: {},
+      capabilityCandidates: [],
     };
   }
 
-  state.agendas.scene = {
-    currentFocus: state.agendas.scene?.currentFocus,
-    pressures: Array.isArray(state.agendas.scene?.pressures) ? state.agendas.scene.pressures : [],
-    unresolvedBeats: Array.isArray(state.agendas.scene?.unresolvedBeats) ? state.agendas.scene.unresolvedBeats : [],
-    immediateTensions: Array.isArray(state.agendas.scene?.immediateTensions) ? state.agendas.scene.immediateTensions : [],
+  state.directorState.scene = {
+    currentFocus: state.directorState.scene?.currentFocus,
+    pressures: Array.isArray(state.directorState.scene?.pressures) ? state.directorState.scene.pressures : [],
+    unresolvedBeats: Array.isArray(state.directorState.scene?.unresolvedBeats) ? state.directorState.scene.unresolvedBeats : [],
+    immediateTensions: Array.isArray(state.directorState.scene?.immediateTensions) ? state.directorState.scene.immediateTensions : [],
   };
-  state.agendas.world = {
-    activeThreads: Array.isArray(state.agendas.world?.activeThreads) ? state.agendas.world.activeThreads : [],
-    introductionOpportunities: Array.isArray(state.agendas.world?.introductionOpportunities) ? state.agendas.world.introductionOpportunities : [],
-    escalationHooks: Array.isArray(state.agendas.world?.escalationHooks) ? state.agendas.world.escalationHooks : [],
+  state.directorState.world = {
+    activeThreads: Array.isArray(state.directorState.world?.activeThreads) ? state.directorState.world.activeThreads : [],
+    introductionOpportunities: Array.isArray(state.directorState.world?.introductionOpportunities) ? state.directorState.world.introductionOpportunities : [],
+    escalationHooks: Array.isArray(state.directorState.world?.escalationHooks) ? state.directorState.world.escalationHooks : [],
   };
+
+  if (!Array.isArray(state.directorState.activeThreads)) state.directorState.activeThreads = [];
+  if (!Array.isArray(state.directorState.heldBeats)) state.directorState.heldBeats = [];
+  if (!Array.isArray(state.directorState.pendingWorldEvents)) state.directorState.pendingWorldEvents = [];
+  if (!state.directorState.playerBehaviorPatterns || typeof state.directorState.playerBehaviorPatterns !== 'object') {
+    state.directorState.playerBehaviorPatterns = {};
+  }
+  if (!Array.isArray(state.directorState.capabilityCandidates)) state.directorState.capabilityCandidates = [];
 
   return syncWorldSpine(state);
 }
