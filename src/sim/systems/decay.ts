@@ -70,7 +70,19 @@ export function runDecayCatchUp(state: WorldState, itemIds?: string[]): void {
     // Clone decay component to avoid mutating shared archetype preset references
     entity.components.decay = { ...entity.components.decay };
 
-    const deltaMinutes = currentElapsedMinutes - (entity.components.decay.lastSimulatedAtMinutes ?? 0);
+    // First encounter: initialize timestamp to now and skip — newly created items
+    // and items from old saves should not receive retroactive decay from time 0.
+    if (entity.components.decay.lastSimulatedAtMinutes == null) {
+      entity.components.decay.lastSimulatedAtMinutes = currentElapsedMinutes;
+      const item = state.items[itemId];
+      if (item) {
+        item.components = item.components || {};
+        item.components.decay = { ...entity.components.decay };
+      }
+      continue;
+    }
+
+    const deltaMinutes = currentElapsedMinutes - entity.components.decay.lastSimulatedAtMinutes;
     if (deltaMinutes <= 0) continue;
 
     const deltaHours = deltaMinutes / 60;
