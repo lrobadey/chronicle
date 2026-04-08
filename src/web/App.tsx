@@ -56,6 +56,10 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [advancedSessionOpen, setAdvancedSessionOpen] = useState(false);
+  const initialBootStartedRef = useRef(false);
+  const bootRequestIdRef = useRef(0);
+  const turnRequestIdRef = useRef(0);
+  const sessionEpochRef = useRef(0);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
   const activeTurn = useMemo(() => {
@@ -64,6 +68,8 @@ export default function App() {
   }, [entries, selectedTurn]);
 
   useEffect(() => {
+    if (initialBootStartedRef.current) return;
+    initialBootStartedRef.current = true;
     void bootSession();
   }, []);
 
@@ -82,6 +88,7 @@ export default function App() {
   }, []);
 
   async function bootSession(forceFresh = false) {
+    const bootRequestId = ++bootRequestIdRef.current;
     const storedSessionId = forceFresh ? null : readStoredSessionId();
     const shouldShowOpeningStream = !storedSessionId;
     setRuntimeState('booting');
@@ -89,9 +96,12 @@ export default function App() {
     setErrorDetails(null);
     setBootOpening('');
     if (forceFresh) {
+      sessionEpochRef.current += 1;
+      turnRequestIdRef.current += 1;
       setEntries([]);
       setSelectedTurn(null);
       setSessionId(null);
+      setTelemetry(undefined);
       writeStoredSessionId(null);
     }
 
@@ -103,12 +113,15 @@ export default function App() {
           stream: true,
         },
         onEvent: event => {
+          if (bootRequestId !== bootRequestIdRef.current) return;
           if (event.event === 'opening.delta' && shouldShowOpeningStream) {
             const delta = String((event.data as { delta?: string })?.delta || '');
             setBootOpening(current => current + delta);
           }
         },
       });
+
+      if (bootRequestId !== bootRequestIdRef.current) return;
 
       const nextEntries = buildTranscriptEntries({
         initialNarration: result.initialNarration,
@@ -124,6 +137,7 @@ export default function App() {
       const latest = latestTurnEntry(nextEntries);
       setSelectedTurn(latest?.turn || null);
     } catch (error) {
+      if (bootRequestId !== bootRequestIdRef.current) return;
       setRuntimeState('error');
       setErrorMessage('The Chronicle server did not answer.');
       setErrorDetails(normalizeError(error));
@@ -136,6 +150,8 @@ export default function App() {
     if (!playerText || runtimeState === 'booting' || runtimeState === 'sending' || !sessionId || !telemetry) return;
 
     const pendingTurn = telemetry.turn + 1;
+    const sessionEpoch = sessionEpochRef.current;
+    const turnRequestId = ++turnRequestIdRef.current;
     const pending = createPendingTurnEntry({
       turn: pendingTurn,
       playerText,
@@ -160,6 +176,7 @@ export default function App() {
           debug: { includeTrace: debugTrace },
         },
         onEvent: event => {
+          if (sessionEpoch !== sessionEpochRef.current || turnRequestId !== turnRequestIdRef.current) return;
           if (event.event === 'narration.delta') {
             const delta = String((event.data as { delta?: string })?.delta || '');
             setEntries(current => {
@@ -169,6 +186,8 @@ export default function App() {
           }
         },
       });
+
+      if (sessionEpoch !== sessionEpochRef.current || turnRequestId !== turnRequestIdRef.current) return;
 
       const finalized = finalizeTurnCard({
         turn: result.turn,
@@ -185,6 +204,7 @@ export default function App() {
       setSelectedTurn(result.turn);
       setRuntimeState('ready');
     } catch (error) {
+      if (sessionEpoch !== sessionEpochRef.current || turnRequestId !== turnRequestIdRef.current) return;
       setRuntimeState('ready');
       setEntries(current => current.filter(entry => entry.kind !== 'turn' || entry.turn !== pendingTurn));
       setErrorMessage('The turn could not be resolved.');
@@ -300,6 +320,7 @@ export default function App() {
           debugTrace={debugTrace}
           apiBase={apiBase}
           advancedOpen={advancedSessionOpen}
+          busy={isBusy}
           onNarratorStyleChange={value => setNarratorStyle(value)}
           onDebugTraceChange={value => setDebugTrace(value)}
           onApiBaseChange={value => setApiBase(value)}
@@ -593,6 +614,7 @@ function SessionDrawer(props: {
   debugTrace: boolean;
   apiBase: string;
   advancedOpen: boolean;
+  busy: boolean;
   onNarratorStyleChange: (value: NarratorStyle) => void;
   onDebugTraceChange: (value: boolean) => void;
   onApiBaseChange: (value: string) => void;
@@ -629,7 +651,7 @@ function SessionDrawer(props: {
         </label>
       </DrawerSection>
       <DrawerSection title="Fresh start">
-        <button type="button" className="primary-button" onClick={props.onStartFresh}>
+        <button type="button" className="primary-button" onClick={props.onStartFresh} disabled={props.busy}>
           Start a new session
         </button>
       </DrawerSection>
