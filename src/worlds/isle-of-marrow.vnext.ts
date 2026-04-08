@@ -239,7 +239,7 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
         goods: { salt_fish: 'abundant', silver: 'abundant', heartwater: 'scarce' },
       },
     },
-    agendas: {
+    directorState: {
       scene: {
         currentFocus: 'Dawn arrival at the Landing',
         pressures: [
@@ -254,6 +254,11 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
         introductionOpportunities: ['Tamar Vane can explain why the tide-mark on the pilings has the dockhands unsettled.'],
         escalationHooks: ['If the tide has left something out of pattern, the island routine will bend around it before noon.'],
       },
+      activeThreads: [],
+      heldBeats: [],
+      pendingWorldEvents: [],
+      playerBehaviorPatterns: {},
+      capabilityCandidates: [],
     },
     ledger: [
       { turn: 0, text: 'Isle of Marrow initialized' },

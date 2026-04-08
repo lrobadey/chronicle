@@ -16,6 +16,11 @@ describe('staff interview agent', () => {
     agendas: {
       scene: { currentFocus: 'Arrival', pressures: ['Be noticed'], unresolvedBeats: [], immediateTensions: [] },
       world: { activeThreads: ['Dock gossip'], introductionOpportunities: [], escalationHooks: [] },
+      activeThreads: [],
+      heldBeats: [],
+      pendingWorldEvents: [],
+      playerBehaviorPatterns: {},
+      capabilityCandidates: [],
     },
     pendingPrompt: null,
     landmarks: [],

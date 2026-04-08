@@ -32,6 +32,11 @@ class StubStaffCliEngine implements StaffCliEngine {
       agendas: {
         scene: { currentFocus: 'Arrival', pressures: [], unresolvedBeats: [], immediateTensions: [] },
         world: { activeThreads: [], introductionOpportunities: [], escalationHooks: [] },
+        activeThreads: [],
+        heldBeats: [],
+        pendingWorldEvents: [],
+        playerBehaviorPatterns: {},
+        capabilityCandidates: [],
       },
       pendingPrompt: null,
       landmarks: [],

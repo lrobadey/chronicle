@@ -164,9 +164,47 @@ export interface WorldAgenda {
   escalationHooks: string[];
 }
 
-export interface WorldAgendas {
+export interface ActiveThread {
+  id: string;
+  name: string;
+  pressure: number;
+  domain?: string;
+  status: 'rising' | 'stable' | 'cooling';
+  createdTurn: number;
+  lastUpdatedTurn: number;
+}
+
+export interface HeldBeat {
+  id: string;
+  note: string;
+  releaseConditions?: string[];
+  createdTurn: number;
+}
+
+export interface PendingWorldEvent {
+  id: string;
+  summary: string;
+  dueTurn?: number;
+  pressure?: number;
+  domain?: string;
+  createdTurn: number;
+}
+
+export interface DirectorState {
   scene: SceneAgenda;
   world: WorldAgenda;
+  activeThreads: ActiveThread[];
+  heldBeats: HeldBeat[];
+  pendingWorldEvents: PendingWorldEvent[];
+  playerBehaviorPatterns: {
+    favoredDomains?: string[];
+    favoredActions?: string[];
+  };
+  capabilityCandidates: Array<{
+    packId: string;
+    score: number;
+    reason: string;
+  }>;
 }
 
 export interface WorldState {
@@ -177,7 +215,7 @@ export interface WorldState {
   locations: Record<LocationId, LocationPOI>;
   spine: SpineState;
   systems: SystemsState;
-  agendas: WorldAgendas;
+  directorState: DirectorState;
   ledger: Array<{ turn: number; text: string; tags?: string[] }>;
   knowledge: Record<ActorId, KnowledgeState>;
 }

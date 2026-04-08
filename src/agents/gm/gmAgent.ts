@@ -17,6 +17,15 @@ export interface GMAgendaUpdates {
   world?: WorldAgenda | null;
 }
 
+export interface GMDirectorUpdates {
+  threadUpdates?: Array<{ id: string; pressure?: number; status?: string; remove?: boolean }> | null;
+  newThreads?: Array<{ name: string; pressure?: number; domain?: string; status?: string }> | null;
+  addHeldBeats?: Array<{ note: string; releaseConditions?: string[] }> | null;
+  removeHeldBeats?: string[] | null;
+  addPendingEvents?: Array<{ summary: string; dueTurn?: number; pressure?: number; domain?: string }> | null;
+  removePendingEvents?: string[] | null;
+}
+
 export interface GMFinishTurnInput {
   summary: string;
   playerPrompt?: {
@@ -24,6 +33,7 @@ export interface GMFinishTurnInput {
     clear?: boolean | null;
   } | null;
   agendaUpdates?: GMAgendaUpdates | null;
+  directorUpdates?: GMDirectorUpdates | null;
 }
 
 export interface GMToolRuntime {

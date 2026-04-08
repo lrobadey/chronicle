@@ -8,6 +8,9 @@ import type {
   SceneAgenda,
   WorldAgenda,
   WorldState,
+  ActiveThread,
+  HeldBeat,
+  PendingWorldEvent,
 } from '../sim/state';
 import { normalizeWorldEvent, type WorldEvent } from '../sim/events';
 import { checkInvariants } from '../sim/invariants';
@@ -580,6 +583,7 @@ export class TurnEngine {
             currentPendingPrompt = pending;
           }
           applyAgendaUpdates(draft, input.agendaUpdates);
+          applyDirectorUpdates(draft, input.directorUpdates, nextTurn);
           return { ok: true };
         },
       };
@@ -922,11 +926,11 @@ function applyAgendaUpdates(state: WorldState, updates: GMFinishTurnInput['agend
   if (!updates || typeof updates !== 'object') return;
   const scene = normalizeSceneAgenda(updates.scene);
   if (scene) {
-    state.agendas.scene = scene;
+    state.directorState.scene = scene;
   }
   const world = normalizeWorldAgenda(updates.world);
   if (world) {
-    state.agendas.world = world;
+    state.directorState.world = world;
   }
 }
 
@@ -966,4 +970,87 @@ function normalizeStringArray(value: unknown): string[] | null {
     .map(item => item.trim())
     .filter(Boolean);
   return normalized;
+}
+
+function applyDirectorUpdates(
+  state: WorldState,
+  updates: GMFinishTurnInput['directorUpdates'],
+  currentTurn: number,
+) {
+  if (!updates || typeof updates !== 'object') return;
+
+  if (Array.isArray(updates.threadUpdates)) {
+    for (const patch of updates.threadUpdates) {
+      if (!patch || typeof patch !== 'object' || typeof patch.id !== 'string') continue;
+      if ('remove' in patch && patch.remove === true) {
+        state.directorState.activeThreads = state.directorState.activeThreads.filter(t => t.id !== patch.id);
+        continue;
+      }
+      const existing = state.directorState.activeThreads.find(t => t.id === patch.id);
+      if (!existing) continue;
+      if (typeof patch.pressure === 'number') existing.pressure = Math.max(0, Math.min(1, patch.pressure));
+      if (patch.status === 'rising' || patch.status === 'stable' || patch.status === 'cooling') existing.status = patch.status;
+      existing.lastUpdatedTurn = currentTurn;
+    }
+  }
+
+  if (Array.isArray(updates.newThreads)) {
+    for (const raw of updates.newThreads) {
+      if (!raw || typeof raw !== 'object' || typeof raw.name !== 'string' || !raw.name.trim()) continue;
+      const thread: ActiveThread = {
+        id: randomUUID(),
+        name: raw.name.trim(),
+        pressure: typeof raw.pressure === 'number' ? Math.max(0, Math.min(1, raw.pressure)) : 0.5,
+        status: (raw.status === 'rising' || raw.status === 'stable' || raw.status === 'cooling') ? raw.status : 'stable',
+        domain: typeof raw.domain === 'string' && raw.domain.trim() ? raw.domain.trim() : undefined,
+        createdTurn: currentTurn,
+        lastUpdatedTurn: currentTurn,
+      };
+      state.directorState.activeThreads.push(thread);
+    }
+  }
+
+  if (Array.isArray(updates.addHeldBeats)) {
+    for (const raw of updates.addHeldBeats) {
+      if (!raw || typeof raw !== 'object' || typeof raw.note !== 'string' || !raw.note.trim()) continue;
+      const beat: HeldBeat = {
+        id: randomUUID(),
+        note: raw.note.trim(),
+        releaseConditions: Array.isArray(raw.releaseConditions)
+          ? raw.releaseConditions.filter((c: unknown) => typeof c === 'string').map((c: string) => c.trim()).filter(Boolean)
+          : undefined,
+        createdTurn: currentTurn,
+      };
+      state.directorState.heldBeats.push(beat);
+    }
+  }
+
+  if (Array.isArray(updates.removeHeldBeats)) {
+    const ids = new Set(updates.removeHeldBeats.filter((id: unknown) => typeof id === 'string'));
+    if (ids.size) {
+      state.directorState.heldBeats = state.directorState.heldBeats.filter(b => !ids.has(b.id));
+    }
+  }
+
+  if (Array.isArray(updates.addPendingEvents)) {
+    for (const raw of updates.addPendingEvents) {
+      if (!raw || typeof raw !== 'object' || typeof raw.summary !== 'string' || !raw.summary.trim()) continue;
+      const event: PendingWorldEvent = {
+        id: randomUUID(),
+        summary: raw.summary.trim(),
+        dueTurn: typeof raw.dueTurn === 'number' ? raw.dueTurn : undefined,
+        pressure: typeof raw.pressure === 'number' ? Math.max(0, Math.min(1, raw.pressure)) : undefined,
+        domain: typeof raw.domain === 'string' && raw.domain.trim() ? raw.domain.trim() : undefined,
+        createdTurn: currentTurn,
+      };
+      state.directorState.pendingWorldEvents.push(event);
+    }
+  }
+
+  if (Array.isArray(updates.removePendingEvents)) {
+    const ids = new Set(updates.removePendingEvents.filter((id: unknown) => typeof id === 'string'));
+    if (ids.size) {
+      state.directorState.pendingWorldEvents = state.directorState.pendingWorldEvents.filter(e => !ids.has(e.id));
+    }
+  }
 }

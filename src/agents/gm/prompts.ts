@@ -42,6 +42,7 @@ Clarification policy:
 
 State stewardship:
 - Use finish_turn.agendaUpdates to keep scene and world agendas current when they materially change.
+- Use finish_turn.directorUpdates to manage durable story threads. Threads persist between turns — adjust pressure and status incrementally rather than rebuilding from scratch. Add newThreads when a new story pressure emerges. Use threadUpdates to tune existing threads (raise/lower pressure, change status to rising/stable/cooling). Use addHeldBeats for things the world knows but should not surface yet. Use addPendingEvents for things that will happen at a future turn regardless of the player.
 - When introducing new characters, items, or locations, prefer rich CreateEntity payloads that include the details needed for future turns.
 - Prefer AffectItem with effect="transfer" for simple handoffs or served items. Use CreateEntity when you are introducing a more durable new world object that needs richer authored details.
 

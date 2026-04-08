@@ -25,6 +25,44 @@ const WORLD_AGENDA_UPDATE_SCHEMA = strictObjectSchema(
   { nullable: true },
 );
 
+const THREAD_UPDATE_SCHEMA = strictObjectSchema({
+  id: { type: 'string' },
+  pressure: { type: ['number', 'null'] },
+  status: { type: ['string', 'null'], enum: ['rising', 'stable', 'cooling', null] },
+  remove: { type: ['boolean', 'null'] },
+}, { nullable: false });
+
+const NEW_THREAD_SCHEMA = strictObjectSchema({
+  name: { type: 'string' },
+  pressure: { type: ['number', 'null'] },
+  domain: { type: ['string', 'null'] },
+  status: { type: ['string', 'null'], enum: ['rising', 'stable', 'cooling', null] },
+}, { nullable: false });
+
+const HELD_BEAT_SCHEMA = strictObjectSchema({
+  note: { type: 'string' },
+  releaseConditions: { type: ['array', 'null'], items: { type: 'string' } },
+}, { nullable: false });
+
+const PENDING_EVENT_SCHEMA = strictObjectSchema({
+  summary: { type: 'string' },
+  dueTurn: { type: ['number', 'null'] },
+  pressure: { type: ['number', 'null'] },
+  domain: { type: ['string', 'null'] },
+}, { nullable: false });
+
+const DIRECTOR_UPDATES_SCHEMA = strictObjectSchema(
+  {
+    threadUpdates: { type: ['array', 'null'], items: THREAD_UPDATE_SCHEMA },
+    newThreads: { type: ['array', 'null'], items: NEW_THREAD_SCHEMA },
+    addHeldBeats: { type: ['array', 'null'], items: HELD_BEAT_SCHEMA },
+    removeHeldBeats: { type: ['array', 'null'], items: { type: 'string' } },
+    addPendingEvents: { type: ['array', 'null'], items: PENDING_EVENT_SCHEMA },
+    removePendingEvents: { type: ['array', 'null'], items: { type: 'string' } },
+  },
+  { nullable: true },
+);
+
 const MECHANICS_RESOLUTION_ID_SCHEMA = { type: 'string' } as const;
 
 const MECHANICS_PENDING_PROMPT_SCHEMA = strictObjectSchema(
@@ -145,6 +183,7 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
           },
           { nullable: true },
         ),
+        directorUpdates: DIRECTOR_UPDATES_SCHEMA,
       }),
     },
     strict: true,

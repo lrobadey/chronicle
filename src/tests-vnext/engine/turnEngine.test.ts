@@ -364,8 +364,8 @@ describe('TurnEngine', () => {
       const state = await store.loadSession(init.sessionId);
       assert.equal(state?.actors['dock-eye']?.persona?.voice, 'Dry and suspicious.');
       assert.deepEqual(state?.actors['dock-eye']?.tags, ['dockworker', 'witness']);
-      assert.equal(state?.agendas.scene.currentFocus, 'A new witness at the Landing');
-      assert.equal(state?.agendas.world.activeThreads[0], 'New arrivals are noticed and remembered at the Landing.');
+      assert.equal(state?.directorState.scene.currentFocus, 'A new witness at the Landing');
+      assert.equal(state?.directorState.world.activeThreads[0], 'New arrivals are noticed and remembered at the Landing.');
 
       const log = await store.loadTurnLog(init.sessionId);
       assert.equal(log[0]?.specialistOutputs?.length, 1);
@@ -980,9 +980,9 @@ describe('TurnEngine', () => {
     assert.ok(world.meta.openingSpec?.hookText.includes('weed-line'));
     assert.ok(world.meta.openingSpec?.playerQuestion.includes('Why has Tamar Vane'));
     assert.equal(world.actors['tamar-vane']?.tags?.includes('dockhand'), true);
-    assert.equal(world.agendas.scene.currentFocus, 'Dawn arrival at the Landing');
+    assert.equal(world.directorState.scene.currentFocus, 'Dawn arrival at the Landing');
     assert.equal(
-      world.agendas.world.introductionOpportunities[0],
+      world.directorState.world.introductionOpportunities[0],
       'Tamar Vane can explain why the tide-mark on the pilings has the dockhands unsettled.',
     );
     assert.equal(
