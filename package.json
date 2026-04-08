@@ -21,8 +21,13 @@
     "web:dev": "tsx src/dev/webDev.ts"
   },
   "dependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.0.4",
     "dotenv": "^16.4.5",
-    "openai": "^4.67.0"
+    "openai": "^4.67.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",

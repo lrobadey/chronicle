@@ -65,6 +65,10 @@ describe('vNext API compatibility', () => {
     assert.equal(typeof initBody.created, 'boolean');
     assert.equal(typeof initBody.initialNarration, 'string');
     assert.ok(initBody.telemetry);
+    assert.deepEqual(initBody.history, {
+      totalTurns: 0,
+      recentTurns: [],
+    });
 
     const turnResponse = await fetch(`${baseUrl}/api/turn`, {
       method: 'POST',
@@ -82,6 +86,12 @@ describe('vNext API compatibility', () => {
     assert.equal(Array.isArray(turnBody.rejectedEvents), true);
     assert.equal(typeof turnBody.narration, 'string');
     assert.ok(turnBody.telemetry);
+    assert.deepEqual(turnBody.summary, {
+      headline: 'No major changes',
+      accepted: [],
+      rejected: [],
+      outcome: 'quiet',
+    });
   });
 
   it('returns deterministic 400 errors for invalid input', async () => {
@@ -119,6 +129,10 @@ describe('vNext API compatibility', () => {
     const completed = events[2]?.data as Record<string, unknown>;
     assert.equal(typeof completed.sessionId, 'string');
     assert.equal(typeof completed.initialNarration, 'string');
+    assert.deepEqual(completed.history, {
+      totalTurns: 0,
+      recentTurns: [],
+    });
   });
 
   it('streams /api/turn with SSE domain events', async () => {
@@ -152,5 +166,11 @@ describe('vNext API compatibility', () => {
     assert.equal(typeof completed.sessionId, 'string');
     assert.equal(typeof completed.narration, 'string');
     assert.equal(typeof completed.turn, 'number');
+    assert.deepEqual(completed.summary, {
+      headline: 'No major changes',
+      accepted: [],
+      rejected: [],
+      outcome: 'quiet',
+    });
   });
 });

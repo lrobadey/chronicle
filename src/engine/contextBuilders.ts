@@ -1,6 +1,14 @@
 import type { PendingPrompt, WorldState } from '../sim/state';
 import type { WorldEvent } from '../sim/events';
-import type { RecentTurnDigest, TurnRecord } from './session/types';
+import type {
+  RecentTurnDigest,
+  RejectedEventRecord,
+  TurnRecord,
+  WebHistorySummary,
+  WebTranscriptHistory,
+  WebTurnCard,
+  WebTurnSummary,
+} from './session/types';
 import { buildObservation } from '../sim/views/observe';
 import { buildTelemetry } from '../sim/views/telemetry';
 import { deriveTide } from '../sim/systems/tide';
@@ -367,6 +375,65 @@ export function buildRecentTurnDigests(state: WorldState, turnHistory: TurnRecor
   }));
 }
 
+export function buildWebTurnSummary(
+  state: WorldState,
+  params: {
+    acceptedEvents: WorldEvent[];
+    rejectedEvents: RejectedEventRecord[];
+    diffSummary?: string;
+  },
+): WebTurnSummary {
+  const accepted = params.acceptedEvents.map(event => summarizeAcceptedEvent(state, event));
+  const rejected = params.rejectedEvents.map(rejection => summarizeRejectedReason(rejection.reason));
+  const diffSummary = params.diffSummary?.trim();
+  const headline = diffSummary && diffSummary !== 'No major changes'
+    ? diffSummary
+    : accepted.length
+      ? accepted.slice(0, 2).join(' · ')
+      : rejected.length
+        ? 'No material change'
+        : 'No major changes';
+  const outcome: WebTurnSummary['outcome'] = accepted.length
+    ? 'progress'
+    : rejected.length
+      ? 'blocked'
+      : 'quiet';
+
+  return {
+    headline,
+    accepted,
+    rejected,
+    outcome,
+  };
+}
+
+export function buildWebTurnCard(state: WorldState, turn: TurnRecord): WebTurnCard {
+  return {
+    turn: turn.turn,
+    atIso: turn.atIso,
+    playerText: turn.playerText.trim(),
+    narration: turn.narration?.trim() || '',
+    summary: buildWebTurnSummary(state, {
+      acceptedEvents: turn.acceptedEvents,
+      rejectedEvents: turn.rejectedEvents,
+    }),
+    telemetry: turn.telemetry,
+    trace: turn.trace,
+  };
+}
+
+export function buildWebTranscriptHistory(state: WorldState, turnHistory: TurnRecord[]): WebTranscriptHistory {
+  const recentTurns = turnHistory.slice(-RECENT_TURN_LIMIT).map(turn => buildWebTurnCard(state, turn));
+  const olderTurns = turnHistory.slice(0, -RECENT_TURN_LIMIT);
+  const olderSummary = buildOlderHistorySummary(state, olderTurns);
+
+  return {
+    totalTurns: turnHistory.length,
+    recentTurns,
+    olderSummary,
+  };
+}
+
 export function buildPlayerTranscript(
   turnHistory: TurnRecord[],
   nextTurn?: number,
@@ -463,6 +530,27 @@ function summarizeInterviewHeuristics(state: WorldState, turnHistory: TurnRecord
     pendingPromptActive: Boolean(turnHistory[turnHistory.length - 1]?.pendingPrompt),
     scenePressureCount: state.directorState.scene.pressures.length + state.directorState.scene.immediateTensions.length,
     worldThreadCount: state.directorState.world.activeThreads.length + state.directorState.world.escalationHooks.length,
+  };
+}
+
+function buildOlderHistorySummary(state: WorldState, olderTurns: TurnRecord[]): WebHistorySummary | undefined {
+  if (!olderTurns.length) return undefined;
+
+  return {
+    fromTurn: olderTurns[0]!.turn,
+    toTurn: olderTurns[olderTurns.length - 1]!.turn,
+    turnCount: olderTurns.length,
+    headline: `${olderTurns.length} earlier turn${olderTurns.length === 1 ? '' : 's'} led here`,
+    highlights: olderTurns.slice(-3).map(turn => {
+      const summary = buildWebTurnSummary(state, {
+        acceptedEvents: turn.acceptedEvents,
+        rejectedEvents: turn.rejectedEvents,
+      });
+      const prompt = clipText(turn.playerText.trim(), 64);
+      return summary.outcome === 'quiet'
+        ? `Turn ${turn.turn}: ${prompt}`
+        : `Turn ${turn.turn}: ${prompt} -> ${summary.headline}`;
+    }),
   };
 }
 

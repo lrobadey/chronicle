@@ -19,6 +19,37 @@ export interface RecentTurnDigest {
   rejected: string[];
 }
 
+export interface WebTurnSummary {
+  headline: string;
+  accepted: string[];
+  rejected: string[];
+  outcome: 'progress' | 'blocked' | 'quiet';
+}
+
+export interface WebTurnCard {
+  turn: number;
+  atIso: string;
+  playerText: string;
+  narration: string;
+  summary: WebTurnSummary;
+  telemetry?: Telemetry;
+  trace?: TurnTrace;
+}
+
+export interface WebHistorySummary {
+  fromTurn: number;
+  toTurn: number;
+  turnCount: number;
+  headline: string;
+  highlights: string[];
+}
+
+export interface WebTranscriptHistory {
+  totalTurns: number;
+  recentTurns: WebTurnCard[];
+  olderSummary?: WebHistorySummary;
+}
+
 export interface TurnRecord {
   sessionId: string;
   turn: number;

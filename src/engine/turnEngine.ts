@@ -1,7 +1,14 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { JsonlSessionStore } from './session/jsonlStore';
-import type { RejectedEventRecord, SessionStore, TurnRecord, TurnTrace } from './session/types';
+import type {
+  RejectedEventRecord,
+  SessionStore,
+  TurnRecord,
+  TurnTrace,
+  WebTranscriptHistory,
+  WebTurnSummary,
+} from './session/types';
 import type {
   PendingPrompt,
   PendingPromptData,
@@ -55,6 +62,8 @@ import {
   buildRecentTurnDigests,
   buildSpecialistContext,
   buildStaffInterviewContext,
+  buildWebTranscriptHistory,
+  buildWebTurnSummary,
   type StaffInterviewContext,
 } from './contextBuilders';
 import {
@@ -77,6 +86,7 @@ export interface InitResult {
   created: boolean;
   telemetry: ReturnType<typeof buildTelemetry>;
   opening: string;
+  history?: WebTranscriptHistory;
 }
 
 export interface RunTurnInput {
@@ -100,6 +110,7 @@ export interface RunTurnOutput {
   rejectedEvents: RejectedEventRecord[];
   telemetry: ReturnType<typeof buildTelemetry>;
   narration: string;
+  summary?: WebTurnSummary;
   trace?: TurnTrace;
 }
 
@@ -129,9 +140,11 @@ export class TurnEngine {
     emitDebugEvent(emit, { type: 'init.started', sessionId });
     try {
       const ensured = await this.store.ensureSession(sessionId, this.worldFactory);
+      const turnHistory = await this.store.loadTurnLog(ensured.sessionId);
       emitDebugEvent(emit, { type: 'init.session_ready', sessionId: ensured.sessionId, created: ensured.created });
       assertNoInvariantIssues(ensured.state, 'Session initialized with invalid world state');
       const telemetry = buildTelemetry(ensured.state, 'player-1');
+      const history = buildWebTranscriptHistory(ensured.state, turnHistory);
       stream?.onOpeningStart?.(telemetry);
       const opening = await narrateOpening({
         apiKey,
@@ -149,7 +162,7 @@ export class TurnEngine {
         }
         await this.store.saveSnapshot(ensured.sessionId, ensured.state);
       }
-      return { sessionId: ensured.sessionId, created: ensured.created, telemetry, opening };
+      return { sessionId: ensured.sessionId, created: ensured.created, telemetry, opening, history };
     } catch (error) {
       emitDebugEvent(emit, { type: 'error', stage: 'init', message: error instanceof Error ? error.message : 'unknown' });
       throw error;
@@ -640,6 +653,11 @@ export class TurnEngine {
     const beforeTelemetry = buildTelemetry(state, playerId);
     const afterTelemetry = buildTelemetry(draft, playerId);
     const diff = computeTurnDiff(beforeTelemetry, afterTelemetry, acceptedEvents);
+    const summary = buildWebTurnSummary(draft, {
+      acceptedEvents,
+      rejectedEvents,
+      diffSummary: diff.summary,
+    });
     const recentTurns = buildRecentTurnDigests(draft, turnHistory);
     stream?.onNarrationStart?.(afterTelemetry);
     const narration = await narrateTurn({
@@ -690,6 +708,7 @@ export class TurnEngine {
       rejectedEvents,
       telemetry: afterTelemetry,
       narration,
+      summary,
       trace,
     };
   }

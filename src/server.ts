@@ -132,6 +132,7 @@ export function createChronicleServer(engine = new TurnEngine()) {
             created: result.created,
             initialNarration: result.opening,
             telemetry: result.telemetry,
+            history: result.history,
             runtime: 'vnext',
           });
           return;
@@ -159,6 +160,7 @@ export function createChronicleServer(engine = new TurnEngine()) {
           created: result.created,
           initialNarration: result.opening,
           telemetry: result.telemetry,
+          history: result.history,
           runtime: 'vnext',
         });
         res.end();

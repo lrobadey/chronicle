@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildNPCConversationContext } from '../../engine/contextBuilders';
+import {
+  buildNPCConversationContext,
+  buildWebTranscriptHistory,
+  buildWebTurnSummary,
+} from '../../engine/contextBuilders';
 import type { TurnRecord } from '../../engine/session/types';
 import { createIsleOfMarrowWorldVNext } from '../../worlds/isle-of-marrow.vnext';
 
@@ -161,5 +165,61 @@ describe('contextBuilders', () => {
         source: 'playerText',
       },
     ]);
+  });
+
+  it('builds web transcript history with bounded recent turns and a collapsed older summary', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: '2025-01-01T14:00:00Z' });
+    const turnHistory: TurnRecord[] = Array.from({ length: 12 }, (_, index) => ({
+      sessionId: 'session-3',
+      turn: index + 1,
+      atIso: `2025-01-01T14:${String(index).padStart(2, '0')}:00.000Z`,
+      playerId: 'player-1',
+      playerText: `action ${index + 1}`,
+      acceptedEvents: [],
+      rejectedEvents: index % 2 === 0 ? [] : [{ event: { type: 'Inspect', actorId: 'player-1', subject: 'pilings' }, reason: 'no_effect' }],
+      narration: `narration ${index + 1}`,
+    }));
+
+    const history = buildWebTranscriptHistory(world, turnHistory);
+
+    assert.equal(history.totalTurns, 12);
+    assert.equal(history.recentTurns.length, 10);
+    assert.equal(history.recentTurns[0]?.turn, 3);
+    assert.equal(history.recentTurns[9]?.turn, 12);
+    assert.deepEqual(history.olderSummary, {
+      fromTurn: 1,
+      toTurn: 2,
+      turnCount: 2,
+      headline: '2 earlier turns led here',
+      highlights: [
+        'Turn 1: action 1',
+        'Turn 2: action 2 -> No material change',
+      ],
+    });
+  });
+
+  it('prefers diff summaries for web result strips and falls back to subtle failure copy', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: '2025-01-01T14:00:00Z' });
+
+    assert.deepEqual(buildWebTurnSummary(world, {
+      acceptedEvents: [],
+      rejectedEvents: [],
+      diffSummary: 'Moved to the Bone Market',
+    }), {
+      headline: 'Moved to the Bone Market',
+      accepted: [],
+      rejected: [],
+      outcome: 'quiet',
+    });
+
+    assert.deepEqual(buildWebTurnSummary(world, {
+      acceptedEvents: [],
+      rejectedEvents: [{ event: { type: 'Inspect', actorId: 'player-1', subject: 'door' }, reason: 'blocked_by_tide' }],
+    }), {
+      headline: 'No material change',
+      accepted: [],
+      rejected: ['blocked_by_tide'],
+      outcome: 'blocked',
+    });
   });
 });
