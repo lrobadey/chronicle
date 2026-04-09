@@ -78,6 +78,21 @@ describe('classifyTurn', () => {
     assert.equal(drop.deterministicOwner, 'mechanics');
   });
 
+  it('routes directional movement to systems instead of deterministic travel', () => {
+    const turnPlan = classifyTurn({
+      playerText: 'go north',
+      directorState: createDirectorState(),
+      telemetry: {},
+      pendingPrompt: null,
+      turnNumber: 3,
+    });
+
+    assert.equal(turnPlan.classification, 'simple_council');
+    assert.equal(turnPlan.deterministicOwner, null);
+    assert.deepEqual(turnPlan.requiredDomains, ['systems']);
+    assert.deepEqual(turnPlan.optionalDomains, ['world']);
+  });
+
   it('routes observation to systems with world advisory', () => {
     const turnPlan = classifyTurn({
       playerText: 'look around',

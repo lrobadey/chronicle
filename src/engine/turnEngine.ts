@@ -442,8 +442,9 @@ export class TurnEngine {
         });
       }
 
+      const hasActivePendingPrompt = Boolean(currentPendingPrompt ?? draft.meta.pendingPrompt);
       let handledBySteward = false;
-      if (stewardResult.turnPlan.deterministicOwner === 'mechanics') {
+      if (!hasActivePendingPrompt && stewardResult.turnPlan.deterministicOwner === 'mechanics') {
         const request = buildMechanicsRequest({});
         emitDebugEvent(emit, {
           type: 'tool.called',

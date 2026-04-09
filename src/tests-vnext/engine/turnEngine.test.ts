@@ -1207,6 +1207,55 @@ describe('TurnEngine', () => {
     }
   });
 
+  it('does not preempt the GM for deterministic actions while a pending prompt is active', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-prompted-1',
+          output: [],
+          output_text: 'done',
+        },
+        {
+          id: 'narr-prompted-1',
+          output: [],
+          output_text: 'You pause instead of answering the question.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const state = await store.loadSession(init.sessionId);
+      assert.ok(state);
+      state.meta.pendingPrompt = {
+        id: 'confirm-heartspring',
+        kind: 'confirm_travel',
+        question: 'Travel to The Heartspring?',
+        options: [{ key: 'yes', label: 'Yes' }, { key: 'no', label: 'No' }],
+        data: { locationId: 'the-heartspring', estimatedMinutes: 42 },
+        createdTurn: 1,
+      };
+      await store.saveSnapshot(init.sessionId, state);
+
+      const debugEvents: DebugEvent[] = [];
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'wait 10 minutes',
+        apiKey: 'test-key',
+        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 0);
+      assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), true);
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'open_steward_turn'));
+      assert.equal(turn.trace?.toolCalls.some(call => call.tool === 'steward_preflight_mechanics'), false);
+      const persisted = await store.loadSession(init.sessionId);
+      assert.equal(persisted?.meta.pendingPrompt?.id, 'confirm-heartspring');
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
   it('does not short-circuit blocked travel and still falls through to the GM path', async () => {
     const { rootDir, store } = await createStore();
     try {

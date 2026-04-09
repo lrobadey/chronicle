@@ -67,10 +67,10 @@ const DROP_PATTERN =
   /^\s*(?:i\s+)?(?:drop|put down|set down|leave)\b/i;
 
 const TRAVEL_PATTERN =
-  /^\s*(?:i\s+)?(?:go|walk|run|head|travel)\b/i;
+  /^\s*(?:i\s+)?(?:go|walk|run|head|travel)\s+(?!(?:north|south|east|west)\b)/i;
 
 const MOVEMENT_PATTERN =
-  /^\s*(?:i\s+)?(?:go|walk|move|run|head|travel)\s+(?:to|toward|towards|north|south|east|west)\b/i;
+  /^\s*(?:i\s+)?(?:go|walk|move|run|head|travel)\s+(?:north|south|east|west)\b/i;
 
 const TRADE_PATTERN = /\b(buy|buying|sell|selling|trade|trading|barter|purchase|purchasing|offer|offering|haggle|haggling)\b/i;
 
@@ -143,6 +143,18 @@ export function classifyTurn(input: TurnPlanInput): TurnPlan {
     };
   }
 
+  if (MOVEMENT_PATTERN.test(text)) {
+    return {
+      classification: 'simple_council',
+      deterministicOwner: null,
+      requiredDomains: ['systems'],
+      optionalDomains: ['world'],
+      heldBeatsToConsider,
+      pendingEventsToCheck,
+      rationale: 'Movement intent detected; systems domain with world advisory.',
+    };
+  }
+
   if (
     WAIT_PATTERN.test(text) ||
     PICKUP_PATTERN.test(text) ||
@@ -157,18 +169,6 @@ export function classifyTurn(input: TurnPlanInput): TurnPlan {
       heldBeatsToConsider,
       pendingEventsToCheck,
       rationale: 'Intent appears mechanically owned by the existing deterministic mechanics resolver.',
-    };
-  }
-
-  if (MOVEMENT_PATTERN.test(text)) {
-    return {
-      classification: 'simple_council',
-      deterministicOwner: null,
-      requiredDomains: ['systems'],
-      optionalDomains: ['world'],
-      heldBeatsToConsider,
-      pendingEventsToCheck,
-      rationale: 'Movement intent detected; systems domain with world advisory.',
     };
   }
 
