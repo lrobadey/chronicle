@@ -9,7 +9,7 @@
  * It routes, decomposes, and synthesizes.
  */
 
-import type { DirectorState } from '../../sim/state';
+import type { DirectorState, PendingPrompt } from '../../sim/state';
 import type { WorldEvent } from '../../sim/events';
 import type { RejectedEventRecord } from '../../engine/session/types';
 import type { GMAgendaUpdates } from '../gm/gmAgent';
@@ -27,6 +27,8 @@ export interface StewardOpenInput {
   directorState: DirectorState;
   /** Bounded world context (currently the GMWorldContext shape). */
   worldContext: unknown;
+  pendingPrompt: PendingPrompt | null;
+  telemetry: unknown;
   turnNumber: number;
 }
 

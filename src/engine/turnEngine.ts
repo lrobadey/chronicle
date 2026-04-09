@@ -50,7 +50,10 @@ import {
   attachResolutionMetadata,
   runMechanicsAgent,
   type MechanicsResolutionRecord,
+  type MechanicsResolution,
+  type MechanicsWorkerRequest,
 } from '../agents/mechanics';
+import { openStewardTurn } from '../agents/steward';
 import { createIsleOfMarrowWorldVNext } from '../worlds/isle-of-marrow.vnext';
 import type { DebugSink } from './debug';
 import { emitDebugEvent } from './debug';
@@ -312,6 +315,54 @@ export class TurnEngine {
       return events.some(event => isSimpleMechanicsEvent(event));
     };
 
+    const buildMechanicsRequest = (input: {
+      playerText?: string | null;
+      objective?: string | null;
+      focus?: string | null;
+      pendingPrompt?: PendingPrompt | null;
+    }): MechanicsWorkerRequest => {
+      const gmWorldContext = buildGMWorldContext({
+        state: draft,
+        playerId,
+        playerText,
+        nextTurn,
+        turnHistory,
+        pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
+      });
+
+      return {
+        playerText: typeof input.playerText === 'string' && input.playerText.trim() ? input.playerText : playerText,
+        objective: typeof input.objective === 'string' && input.objective.trim() ? input.objective.trim() : undefined,
+        focus: typeof input.focus === 'string' && input.focus.trim() ? input.focus.trim() : undefined,
+        pendingPrompt: normalizePendingPrompt(input.pendingPrompt) || currentPendingPrompt || draft.meta.pendingPrompt || null,
+        telemetry: gmWorldContext.telemetry,
+        travelCandidates: gmWorldContext.travelCandidates,
+        nearby: gmWorldContext.nearby,
+        landmarks: gmWorldContext.landmarks,
+        observation: gmWorldContext.observation,
+        localAffordances: buildMechanicsLocalAffordances(draft, playerId),
+      };
+    };
+
+    const pushMechanicsTrace = (resolution: MechanicsResolution) => {
+      if (!trace) return;
+      trace.mechanicsResolutions = trace.mechanicsResolutions || [];
+      trace.mechanicsResolutions.push(resolution);
+      if (resolution.debug) {
+        trace.mechanicsDebug = trace.mechanicsDebug || [];
+        trace.mechanicsDebug.push(resolution.debug);
+      }
+    };
+
+    const applyApprovedMechanicsResolution = (resolution: MechanicsResolution) => {
+      const result = applyProposedEvents(resolution.candidateEvents || []);
+      if (resolution.pendingPrompt) {
+        draft.meta.pendingPrompt = resolution.pendingPrompt;
+        currentPendingPrompt = resolution.pendingPrompt;
+      }
+      return result;
+    };
+
     const pendingPromptResolution = resolvePendingPromptReply(currentPendingPrompt, playerText, playerId);
     if (pendingPromptResolution) {
       if (trace) {
@@ -339,6 +390,111 @@ export class TurnEngine {
         currentPendingPrompt = undefined;
       }
     } else {
+      const stewardWorldContext = buildGMWorldContext({
+        state: draft,
+        playerId,
+        playerText,
+        nextTurn,
+        turnHistory,
+        pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
+      });
+      const stewardResult = openStewardTurn({
+        playerText,
+        directorState: draft.directorState,
+        worldContext: stewardWorldContext,
+        pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
+        telemetry: stewardWorldContext.telemetry,
+        turnNumber: nextTurn,
+      });
+
+      emitDebugEvent(emit, {
+        type: 'tool.called',
+        iteration: 0,
+        tool: 'open_steward_turn',
+        callId: 'steward-open-turn',
+        callIndex: 1,
+        callCount: 1,
+        input: {
+          playerText,
+          turnNumber: nextTurn,
+          pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
+        },
+      });
+      emitDebugEvent(emit, {
+        type: 'tool.result',
+        iteration: 0,
+        tool: 'open_steward_turn',
+        callId: 'steward-open-turn',
+        callIndex: 1,
+        callCount: 1,
+        output: stewardResult,
+        ok: true,
+      });
+      if (trace) {
+        trace.toolCalls.push({
+          tool: 'open_steward_turn',
+          input: {
+            playerText,
+            turnNumber: nextTurn,
+            pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
+          },
+          output: stewardResult,
+        });
+      }
+
+      let handledBySteward = false;
+      if (stewardResult.turnPlan.deterministicOwner === 'mechanics') {
+        const request = buildMechanicsRequest({});
+        emitDebugEvent(emit, {
+          type: 'tool.called',
+          iteration: 0,
+          tool: 'steward_preflight_mechanics',
+          callId: 'steward-preflight-mechanics',
+          callIndex: 1,
+          callCount: 1,
+          input: request,
+        });
+        const deterministicDraft = await runMechanicsAgent({
+          apiKey: undefined,
+          request,
+          llm: this.llm,
+          debug: emit,
+          trace,
+        });
+        const deterministicResolution = attachResolutionMetadata(
+          deterministicDraft,
+          createRuntimeId(),
+          request.pendingPrompt,
+          nextTurn,
+        );
+        emitDebugEvent(emit, {
+          type: 'tool.result',
+          iteration: 0,
+          tool: 'steward_preflight_mechanics',
+          callId: 'steward-preflight-mechanics',
+          callIndex: 1,
+          callCount: 1,
+          output: deterministicResolution,
+          ok: deterministicResolution.debug?.selectedModel === 'deterministic',
+        });
+        if (trace) {
+          trace.toolCalls.push({
+            tool: 'steward_preflight_mechanics',
+            input: request,
+            output: deterministicResolution,
+          });
+        }
+
+        if (deterministicResolution.debug?.selectedModel === 'deterministic') {
+          pushMechanicsTrace(deterministicResolution);
+          const result = applyApprovedMechanicsResolution(deterministicResolution);
+          handledBySteward = result.ok;
+        }
+      }
+
+      if (handledBySteward) {
+        // Steward-owned deterministic mechanics already committed the turn state.
+      } else {
 
       const runtime = {
         observe_world: async (input: { perspective: 'gm' | 'player' }) => {
@@ -421,26 +577,7 @@ export class TurnEngine {
           focus?: string | null;
           pendingPrompt?: PendingPrompt | null;
         }) => {
-          const gmWorldContext = buildGMWorldContext({
-            state: draft,
-            playerId,
-            playerText,
-            nextTurn,
-            turnHistory,
-            pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
-          });
-          const request = {
-            playerText: typeof input.playerText === 'string' && input.playerText.trim() ? input.playerText : playerText,
-            objective: typeof input.objective === 'string' && input.objective.trim() ? input.objective.trim() : undefined,
-            focus: typeof input.focus === 'string' && input.focus.trim() ? input.focus.trim() : undefined,
-            pendingPrompt: normalizePendingPrompt(input.pendingPrompt) || currentPendingPrompt || draft.meta.pendingPrompt || null,
-            telemetry: gmWorldContext.telemetry,
-            travelCandidates: gmWorldContext.travelCandidates,
-            nearby: gmWorldContext.nearby,
-            landmarks: gmWorldContext.landmarks,
-            observation: gmWorldContext.observation,
-            localAffordances: buildMechanicsLocalAffordances(draft, playerId),
-          };
+          const request = buildMechanicsRequest(input);
           const draftResolution = await runMechanicsAgent({
             apiKey,
             request,
@@ -457,14 +594,7 @@ export class TurnEngine {
           );
           mechanicsResolutions.set(resolutionId, { request, resolution, revisionCount: 0 });
           activeMechanicsResolutionId = resolutionId;
-          if (trace) {
-            trace.mechanicsResolutions = trace.mechanicsResolutions || [];
-            trace.mechanicsResolutions.push(resolution);
-            if (resolution.debug) {
-              trace.mechanicsDebug = trace.mechanicsDebug || [];
-              trace.mechanicsDebug.push(resolution.debug);
-            }
-          }
+          pushMechanicsTrace(resolution);
           const { debug: _debug, ...resolutionForGM } = resolution;
           return resolutionForGM;
         },
@@ -479,11 +609,7 @@ export class TurnEngine {
           }
 
           if (input.action === 'approve') {
-            const result = applyProposedEvents(cached.resolution.candidateEvents || []);
-            if (cached.resolution.pendingPrompt) {
-              draft.meta.pendingPrompt = cached.resolution.pendingPrompt;
-              currentPendingPrompt = cached.resolution.pendingPrompt;
-            }
+            const result = applyApprovedMechanicsResolution(cached.resolution);
             mechanicsResolutions.delete(input.resolutionId);
             if (activeMechanicsResolutionId === input.resolutionId) {
               activeMechanicsResolutionId = null;
@@ -543,14 +669,7 @@ export class TurnEngine {
             cached.request.pendingPrompt,
             nextTurn,
           );
-          if (trace) {
-            trace.mechanicsResolutions = trace.mechanicsResolutions || [];
-            trace.mechanicsResolutions.push(resolution);
-            if (resolution.debug) {
-              trace.mechanicsDebug = trace.mechanicsDebug || [];
-              trace.mechanicsDebug.push(resolution.debug);
-            }
-          }
+          pushMechanicsTrace(resolution);
           mechanicsResolutions.delete(input.resolutionId);
           mechanicsResolutions.set(nextResolutionId, {
             request: {
@@ -645,6 +764,7 @@ export class TurnEngine {
         } else {
           delete draft.meta.pendingPrompt;
         }
+      }
       }
     }
 

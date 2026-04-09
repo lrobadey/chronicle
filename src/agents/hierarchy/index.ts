@@ -20,3 +20,4 @@ export type {
 } from './turnPlan';
 
 export { CouncilRegistry } from './registry';
+export { classifyTurn } from './turnPlan';

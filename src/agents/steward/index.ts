@@ -4,3 +4,5 @@ export type {
   StewardCloseInput,
   StewardCloseResult,
 } from './types';
+
+export { openStewardTurn } from './openTurn';

@@ -567,18 +567,6 @@ describe('TurnEngine', () => {
           output_text: '',
         },
         {
-          id: 'gm-2',
-          output: [
-            {
-              type: 'function_call',
-              name: 'finish_turn',
-              arguments: '{"summary":"confirmation received","playerPrompt":{"pending":null,"clear":true}}',
-              call_id: 'g2',
-            },
-          ],
-          output_text: '',
-        },
-        {
           id: 'narr-2',
           output: [],
           output_text: 'You set out north across the dark sand.',
@@ -590,15 +578,16 @@ describe('TurnEngine', () => {
       const turnOne = await engine.runTurn({
         sessionId: init.sessionId,
         playerId: 'player-1',
-        playerText: 'go to the rib market',
+        playerText: 'should I go to the rib market?',
         apiKey: 'test-key',
       });
 
       assert.equal(turnOne.narration, 'The Rib Market is a longer walk. Set out now?');
       const afterTurnOne = await store.loadSession(init.sessionId);
       const turnLogAfterTurnOne = await store.loadTurnLog(init.sessionId);
-      assert.equal(afterTurnOne?.meta.pendingPrompt?.id, 'confirm-rib-market');
-      assert.equal(turnLogAfterTurnOne[0]?.pendingPrompt?.id, 'confirm-rib-market');
+      assert.equal(afterTurnOne?.meta.pendingPrompt?.kind, 'confirm_travel');
+      assert.equal(afterTurnOne?.meta.pendingPrompt?.data?.locationId, 'the-rib-market');
+      assert.equal(turnLogAfterTurnOne[0]?.pendingPrompt?.kind, 'confirm_travel');
       assert.equal(turnLogAfterTurnOne[0]?.trace, undefined);
 
       await engine.runTurn({
@@ -1081,39 +1070,10 @@ describe('TurnEngine', () => {
     }
   });
 
-  it('can resolve a deterministic pickup draft and apply it through mechanics review', async () => {
+  it('preempts the GM for deterministic pickup and applies the mechanics result directly', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
-        {
-          id: 'gm-pickup-1',
-          output: [
-            {
-              type: 'function_call',
-              name: 'resolve_mechanics',
-              arguments: '{"objective":"resolve the player picking up the heartwater jar"}',
-              call_id: 'gm-pickup-resolve',
-            },
-          ],
-          output_text: '',
-        },
-        {
-          id: 'gm-pickup-2',
-          output: [
-            {
-              type: 'function_call',
-              name: 'review_mechanics_resolution',
-              arguments: '{"resolutionId":"abababab-abab-4bab-8bab-abababababab","action":"approve","feedback":null}',
-              call_id: 'gm-pickup-review',
-            },
-          ],
-          output_text: '',
-        },
-        {
-          id: 'gm-pickup-3',
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-pickup-finish' }],
-          output_text: '',
-        },
         {
           id: 'narr-pickup-1',
           output: [],
@@ -1129,6 +1089,7 @@ describe('TurnEngine', () => {
       try {
         const engine = new TurnEngine({ store, llm });
         const init = await engine.initSession({});
+        const debugEvents: DebugEvent[] = [];
         const state = await store.loadSession(init.sessionId);
         if (!state) throw new Error('expected session state');
         state.actors['player-1'].pos = { x: 0, y: 1200, z: 15 };
@@ -1140,12 +1101,15 @@ describe('TurnEngine', () => {
           playerId: 'player-1',
           playerText: 'pick up the heartwater jar',
           apiKey: 'test-key',
-          debug: { includeTrace: true },
+          debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
         });
 
         assert.equal(turn.acceptedEvents.length, 1);
         assert.equal(turn.acceptedEvents[0]?.type, 'AffectItem');
         assert.equal(turn.telemetry.player.inventory.some(item => item.id === 'heartwater-jar'), true);
+        assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), false);
+        assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'open_steward_turn'));
+        assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'steward_preflight_mechanics'));
         const resolution = turn.trace?.mechanicsResolutions?.[0];
         assert.equal(resolution?.debug?.selectedModel, 'deterministic');
       } finally {
@@ -1159,39 +1123,10 @@ describe('TurnEngine', () => {
     }
   });
 
-  it('resolves obvious fuzzy travel commands deterministically before falling back to the mechanics model', async () => {
+  it('preempts the GM for deterministic travel and applies the mechanics result directly', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
-        {
-          id: 'gm-1',
-          output: [
-            {
-              type: 'function_call',
-              name: 'resolve_mechanics',
-              arguments: '{"objective":"resolve the player traveling to the tavern"}',
-              call_id: 'gm-mechanics',
-            },
-          ],
-          output_text: '',
-        },
-        {
-          id: 'gm-2',
-          output: [
-            {
-              type: 'function_call',
-              name: 'review_mechanics_resolution',
-              arguments: '{"resolutionId":"12121212-1212-4212-8212-121212121212","action":"approve","feedback":null}',
-              call_id: 'gm-review',
-            },
-          ],
-          output_text: '',
-        },
-        {
-          id: 'gm-3',
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-finish' }],
-          output_text: '',
-        },
         {
           id: 'narr-1',
           output: [],
@@ -1207,19 +1142,23 @@ describe('TurnEngine', () => {
       try {
         const engine = new TurnEngine({ store, llm });
         const init = await engine.initSession({});
+        const debugEvents: DebugEvent[] = [];
 
         const turn = await engine.runTurn({
           sessionId: init.sessionId,
           playerId: 'player-1',
           playerText: 'i go the tavern',
           apiKey: 'test-key',
-          debug: { includeTrace: true },
+          debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
         });
 
         assert.equal(turn.acceptedEvents.length, 1);
         assert.equal(turn.acceptedEvents[0]?.type, 'TravelToLocation');
         assert.equal((turn.acceptedEvents[0] as { locationId?: string }).locationId, 'the-drunken-vertebra');
         assert.equal(llm.calls.some(call => call.model === 'gpt-5.4-mini'), false);
+        assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), false);
+        assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'open_steward_turn'));
+        assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'steward_preflight_mechanics'));
         const resolution = turn.trace?.mechanicsResolutions?.[0];
         assert.equal(resolution?.debug?.selectedModel, 'deterministic');
       } finally {
@@ -1228,6 +1167,78 @@ describe('TurnEngine', () => {
           configurable: true,
         });
       }
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('preempts the GM for deterministic wait commands', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'narr-wait-1',
+          output: [],
+          output_text: 'You wait a while in the salt wind.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const debugEvents: DebugEvent[] = [];
+      const before = await store.loadSession(init.sessionId);
+
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'wait 10 minutes',
+        apiKey: 'test-key',
+        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 1);
+      assert.equal(turn.acceptedEvents[0]?.type, 'AdvanceTime');
+      assert.equal(before?.systems.time.elapsedMinutes, 0);
+      assert.equal(turn.telemetry.time.elapsedMinutes, 10);
+      assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), false);
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'steward_preflight_mechanics'));
+      assert.equal(turn.trace?.mechanicsResolutions?.[0]?.debug?.selectedModel, 'deterministic');
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('does not short-circuit blocked travel and still falls through to the GM path', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-blocked-1',
+          output: [],
+          output_text: 'done',
+        },
+        {
+          id: 'narr-blocked-1',
+          output: [],
+          output_text: 'The Maw is cut off for now.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const debugEvents: DebugEvent[] = [];
+
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'go to the maw',
+        apiKey: 'test-key',
+        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 0);
+      assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), true);
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'open_steward_turn'));
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'steward_preflight_mechanics'));
+      assert.equal(turn.trace?.mechanicsResolutions?.length || 0, 0);
     } finally {
       await removeDir(rootDir);
     }
@@ -1544,6 +1555,54 @@ describe('TurnEngine', () => {
       assert.equal(persisted?.meta.pendingPrompt, undefined);
       const pendingTrace = turn.trace?.toolCalls.find(call => call.tool === 'resolve_pending_prompt');
       assert.equal((pendingTrace?.output as { handled?: string } | undefined)?.handled, 'confirm_travel_no');
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('falls through to the GM when a pending prompt reply does not match a deterministic handler', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-unmatched-1',
+          output: [],
+          output_text: 'done',
+        },
+        {
+          id: 'narr-unmatched-1',
+          output: [],
+          output_text: 'You hesitate instead of answering directly.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const state = await store.loadSession(init.sessionId);
+      assert.ok(state);
+      state.meta.pendingPrompt = {
+        id: 'confirm-heartspring',
+        kind: 'confirm_travel',
+        question: 'Travel to The Heartspring?',
+        options: [{ key: 'yes', label: 'Yes' }, { key: 'no', label: 'No' }],
+        data: { locationId: 'the-heartspring', estimatedMinutes: 42 },
+        createdTurn: 1,
+      };
+      await store.saveSnapshot(init.sessionId, state);
+
+      const debugEvents: DebugEvent[] = [];
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'maybe later',
+        apiKey: 'test-key',
+        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), true);
+      assert.equal(turn.trace?.toolCalls.some(call => call.tool === 'resolve_pending_prompt'), false);
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'open_steward_turn'));
+      const persisted = await store.loadSession(init.sessionId);
+      assert.equal(persisted?.meta.pendingPrompt?.id, 'confirm-heartspring');
     } finally {
       await removeDir(rootDir);
     }
