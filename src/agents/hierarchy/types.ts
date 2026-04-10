@@ -70,6 +70,8 @@ export interface CouncilResult<D extends CouncilDomain = CouncilDomain> {
   summary: string;
   /** Events the council agent proposes for commitment. */
   proposedEvents: WorldEvent[];
+  /** Domain-specific detail packet for Steward synthesis. */
+  detail?: unknown;
   confidence: number;
   warnings: string[];
 }

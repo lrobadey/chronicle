@@ -10,6 +10,7 @@ import { emitDebugEvent } from '../../engine/debug';
 import type { OpeningContext, OpeningRecap } from '../../engine/contextBuilders';
 import type { RecentTurnDigest } from '../../engine/session/types';
 import type { SpecialistType } from '../specialists';
+import type { SystemsNarratorPacket } from '../council';
 
 export type NarratorStyle = 'lyric' | 'cinematic' | 'michener';
 export type OpeningMode = 'first-world' | 'resume';
@@ -55,6 +56,39 @@ export interface NarratorOpeningParams {
   onOpeningDelta?: (delta: string) => void;
   debug?: DebugSink;
   trace?: NarratorParams['trace'];
+}
+
+export function buildNarratorParamsFromSystemsPacket(input: {
+  packet: SystemsNarratorPacket;
+  apiKey?: string;
+  model?: string;
+  style?: NarratorStyle;
+  diff: TurnDiff;
+  recentTurns: RecentTurnDigest[];
+  opening?: OpeningRecap | null;
+  pendingPrompt?: PendingPrompt | null;
+  rejectedEvents?: Array<{ reason: string; event?: unknown }>;
+  llm: LLMClient;
+  onNarrationDelta?: (delta: string) => void;
+  debug?: DebugSink;
+  trace?: NarratorParams['trace'];
+}): NarratorParams {
+  return {
+    apiKey: input.apiKey,
+    model: input.model,
+    style: input.style,
+    playerText: input.packet.playerText,
+    telemetry: input.packet.telemetry,
+    diff: input.diff,
+    recentTurns: input.recentTurns,
+    opening: input.opening,
+    pendingPrompt: input.pendingPrompt,
+    rejectedEvents: input.rejectedEvents,
+    llm: input.llm,
+    onNarrationDelta: input.onNarrationDelta,
+    debug: input.debug,
+    trace: input.trace,
+  };
 }
 
 export async function narrateTurn(params: NarratorParams): Promise<string> {
@@ -212,6 +246,11 @@ function fallbackNarration(
   diff: TurnDiff,
   rejectedEvents?: Array<{ reason: string; event?: unknown }>,
 ): string {
+  if (/^\s*(look\b|look around|observe|examine surroundings|where am i|inventory|check inventory|what do i (have|see|carry))/i.test(playerText)) {
+    return `${telemetry.location.description} Nearby: ${
+      telemetry.nearbyActors.slice(0, 2).map(actor => actor.name).join(', ') || 'no one close at hand'
+    }.`;
+  }
   if (diff.moved) return `You arrive at ${telemetry.location.name}. ${telemetry.location.description}`;
   if (diff.newItems.length) return `You now carry ${diff.newItems.join(', ')}. ${telemetry.location.description}`;
   if (diff.newClues?.length) return `You learn ${diff.newClues.join('; ')}. ${telemetry.location.description}`;

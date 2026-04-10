@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { DEFAULT_MODEL } from '../../agents/llm/defaults';
-import { narrateOpening, narrateTurn } from '../../agents/narrator/narratorAgent';
+import {
+  buildNarratorParamsFromSystemsPacket,
+  narrateOpening,
+  narrateTurn,
+} from '../../agents/narrator/narratorAgent';
 import { QueueLLM } from '../helpers/queueLLM';
 import type { LLMClient } from '../../agents/llm/types';
 import type { DebugEvent } from '../../engine/debug';
@@ -235,5 +239,26 @@ describe('narrator streaming', () => {
       focusLocationId: 'the-landing',
       playerQuestion: 'Why has Tamar Vane broken his routine at the docks?',
     });
+  });
+
+  it('bridges a systems narrator packet into the legacy narrator params shape', () => {
+    const params = buildNarratorParamsFromSystemsPacket({
+      packet: {
+        version: 'systems_v1',
+        intent: 'observation',
+        playerText: 'look around',
+        summary: 'Read-only observation of the player surroundings.',
+        telemetry: telemetry as any,
+        observation: { player: { id: 'player-1' } } as any,
+        warnings: [],
+      },
+      diff,
+      recentTurns: [],
+      llm: new QueueLLM([]),
+    });
+
+    assert.equal(params.playerText, 'look around');
+    assert.deepEqual(params.telemetry, telemetry);
+    assert.equal(params.diff, diff);
   });
 });

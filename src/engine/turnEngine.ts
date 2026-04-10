@@ -34,12 +34,18 @@ import { OpenAIClient } from '../agents/llm/openaiClient';
 import type { LLMClient } from '../agents/llm/types';
 import { runGMAgent, type GMFinishTurnInput, type GMReasoningEffort } from '../agents/gm/gmAgent';
 import { runNpcAgent, type NpcAgentOutput } from '../agents/npc/npcAgent';
-import { narrateOpening, narrateTurn, type NarratorStyle } from '../agents/narrator/narratorAgent';
+import {
+  buildNarratorParamsFromSystemsPacket,
+  narrateOpening,
+  narrateTurn,
+  type NarratorStyle,
+} from '../agents/narrator/narratorAgent';
 import {
   runStaffInterview as runStaffInterviewAgent,
   type StaffInterviewMessage,
   type StaffInterviewResult,
 } from '../agents/staffInterview';
+import { runSystemsDesignerTask, type SystemsDesignerResultDetail, type SystemsNarratorPacket } from '../agents/council';
 import {
   finalizeSpecialistConsultations,
   runSpecialistAgent,
@@ -53,7 +59,7 @@ import {
   type MechanicsResolution,
   type MechanicsWorkerRequest,
 } from '../agents/mechanics';
-import { openStewardTurn } from '../agents/steward';
+import { closeStewardTurn, openStewardTurn } from '../agents/steward';
 import { createIsleOfMarrowWorldVNext } from '../worlds/isle-of-marrow.vnext';
 import type { DebugSink } from './debug';
 import { emitDebugEvent } from './debug';
@@ -244,6 +250,7 @@ export class TurnEngine {
     const specialistOutputs: Array<Omit<SpecialistConsultation, 'usedSuggestion' | 'usedCandidateEvents'>> = [];
     const mechanicsResolutions = new Map<string, MechanicsResolutionRecord>();
     let activeMechanicsResolutionId: string | null = null;
+    let systemsNarratorPacket: SystemsNarratorPacket | null = null;
     const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [], llmCalls: [] } : undefined;
     draft.meta.turn = nextTurn;
     emitDebugEvent(emit, { type: 'turn.started', sessionId, turn: nextTurn, playerText });
@@ -490,6 +497,113 @@ export class TurnEngine {
           pushMechanicsTrace(deterministicResolution);
           const result = applyApprovedMechanicsResolution(deterministicResolution);
           handledBySteward = result.ok;
+        }
+      }
+
+      if (!hasActivePendingPrompt && !handledBySteward && stewardResult.councilTasks.length) {
+        const councilResults = [];
+        for (const packet of stewardResult.councilTasks) {
+          if (packet.task.domain !== 'systems') {
+            continue;
+          }
+          const systemsTask = packet.task as typeof packet.task & { domain: 'systems' };
+          const callId = `council-${packet.task.taskId}`;
+          emitDebugEvent(emit, {
+            type: 'tool.called',
+            iteration: 0,
+            tool: 'dispatch_council_task',
+            callId,
+            callIndex: 1,
+            callCount: stewardResult.councilTasks.length,
+            input: packet,
+          });
+
+          const startedAt = Date.now();
+          const result = await runSystemsDesignerTask(systemsTask, {
+            apiKey,
+            llm: this.llm,
+            turnNumber: nextTurn,
+          });
+          const councilPacket = {
+            result,
+            executionMs: Date.now() - startedAt,
+          };
+          councilResults.push(councilPacket);
+
+          emitDebugEvent(emit, {
+            type: 'tool.result',
+            iteration: 0,
+            tool: 'dispatch_council_task',
+            callId,
+            callIndex: 1,
+            callCount: stewardResult.councilTasks.length,
+            output: councilPacket,
+            ok: result.confidence > 0,
+          });
+          trace?.toolCalls.push({
+            tool: 'dispatch_council_task',
+            input: packet,
+            output: councilPacket,
+          });
+
+          const detail = (result.detail || null) as SystemsDesignerResultDetail | null;
+          if (detail?.mechanicsResolution) {
+            pushMechanicsTrace(detail.mechanicsResolution);
+          }
+        }
+
+        emitDebugEvent(emit, {
+          type: 'tool.called',
+          iteration: 0,
+          tool: 'close_steward_turn',
+          callId: 'steward-close-turn',
+          callIndex: 1,
+          callCount: 1,
+          input: {
+            turnPlan: stewardResult.turnPlan,
+            councilResults,
+          },
+        });
+        const closeResult = closeStewardTurn({
+          turnPlan: stewardResult.turnPlan,
+          councilResults,
+          directorState: draft.directorState,
+        });
+        emitDebugEvent(emit, {
+          type: 'tool.result',
+          iteration: 0,
+          tool: 'close_steward_turn',
+          callId: 'steward-close-turn',
+          callIndex: 1,
+          callCount: 1,
+          output: closeResult,
+          ok: closeResult.handled,
+        });
+        trace?.toolCalls.push({
+          tool: 'close_steward_turn',
+          input: {
+            turnPlan: stewardResult.turnPlan,
+            councilResults,
+          },
+          output: closeResult,
+        });
+
+        if (closeResult.handled) {
+          const result = applyProposedEvents(closeResult.proposedEvents);
+          handledBySteward = result.ok;
+          if (closeResult.narratorHandoff.kind === 'systems_v1') {
+            systemsNarratorPacket = closeResult.narratorHandoff.packet;
+          }
+        } else if (trace) {
+          trace.toolCalls.push({
+            tool: 'steward_fallback_to_gm',
+            input: {
+              turnPlan: stewardResult.turnPlan,
+            },
+            output: {
+              reason: closeResult.fallbackReason || 'steward_requested_gm_fallback',
+            },
+          });
         }
       }
 
@@ -781,21 +895,38 @@ export class TurnEngine {
     });
     const recentTurns = buildRecentTurnDigests(draft, turnHistory);
     stream?.onNarrationStart?.(afterTelemetry);
-    const narration = await narrateTurn({
-      apiKey,
-      style: narratorStyle,
-      playerText,
-      telemetry: afterTelemetry,
-      diff,
-      recentTurns,
-      opening: buildOpeningRecap(draft),
-      pendingPrompt: draft.meta.pendingPrompt || null,
-      rejectedEvents,
-      llm: this.llm,
-      debug: emit,
-      onNarrationDelta: stream?.onNarrationDelta,
-      trace,
-    });
+    const narration = await narrateTurn(
+      systemsNarratorPacket
+        ? buildNarratorParamsFromSystemsPacket({
+            packet: systemsNarratorPacket,
+            apiKey,
+            style: narratorStyle,
+            diff,
+            recentTurns,
+            opening: buildOpeningRecap(draft),
+            pendingPrompt: draft.meta.pendingPrompt || null,
+            rejectedEvents,
+            llm: this.llm,
+            debug: emit,
+            onNarrationDelta: stream?.onNarrationDelta,
+            trace,
+          })
+        : {
+            apiKey,
+            style: narratorStyle,
+            playerText,
+            telemetry: afterTelemetry,
+            diff,
+            recentTurns,
+            opening: buildOpeningRecap(draft),
+            pendingPrompt: draft.meta.pendingPrompt || null,
+            rejectedEvents,
+            llm: this.llm,
+            debug: emit,
+            onNarrationDelta: stream?.onNarrationDelta,
+            trace,
+          },
+    );
 
     const finalizedSpecialistOutputs = finalizeSpecialistConsultations(specialistOutputs, acceptedEvents);
     if (trace) {

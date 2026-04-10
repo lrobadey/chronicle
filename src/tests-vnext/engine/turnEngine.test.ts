@@ -73,7 +73,7 @@ describe('TurnEngine', () => {
       const turn = await engine.runTurn({
         sessionId: init.sessionId,
         playerId: 'player-1',
-        playerText: 'Move east',
+        playerText: 'Step toward the rope post',
         apiKey: 'test-key',
         debug: { onEvent: event => debugEvents.push(event) },
         stream: { onNarrationDelta: delta => narrationDeltas.push(delta) },
@@ -351,7 +351,7 @@ describe('TurnEngine', () => {
       const turn = await engine.runTurn({
         sessionId: init.sessionId,
         playerId: 'player-1',
-        playerText: 'look around carefully',
+        playerText: 'check who might be watching me here',
         apiKey: 'test-key',
         debug: { includeTrace: true },
       });
@@ -1288,6 +1288,137 @@ describe('TurnEngine', () => {
       assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'open_steward_turn'));
       assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'steward_preflight_mechanics'));
       assert.equal(turn.trace?.mechanicsResolutions?.length || 0, 0);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('routes observation through the systems council without invoking the GM or mutating DirectorState', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'narr-systems-observe-1',
+          output: [],
+          output_text: 'You take stock of the Landing without disturbing it.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const before = await store.loadSession(init.sessionId);
+      assert.ok(before);
+      const directorBefore = JSON.parse(JSON.stringify(before.directorState));
+      const debugEvents: DebugEvent[] = [];
+
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'look around',
+        apiKey: 'test-key',
+        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 0);
+      assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), false);
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'));
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'close_steward_turn'));
+      const after = await store.loadSession(init.sessionId);
+      assert.deepEqual(after?.directorState, directorBefore);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('routes cardinal movement through the systems council without invoking the GM', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'systems-mechanics-move-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_mechanics_resolution',
+              arguments:
+                '{"interpretation":"move","summary":"move north","actions":[{"type":"move","actorId":"player-1","to":{"x":34,"y":61,"z":0},"toLocationId":null,"mode":"walk","note":"Move north."}],"pendingPrompt":null,"touchedEntities":["player-1"],"confidence":0.88,"warnings":[]}',
+              call_id: 'systems-mechanics-call',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'narr-systems-move-1',
+          output: [],
+          output_text: 'You head north along the bones.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const debugEvents: DebugEvent[] = [];
+
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'go north',
+        apiKey: 'test-key',
+        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 1);
+      assert.equal(turn.acceptedEvents[0]?.type, 'MoveActor');
+      assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), false);
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'));
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'close_steward_turn'));
+      assert.equal(turn.trace?.mechanicsResolutions?.[0]?.interpretation, 'move');
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('falls back to the GM when the systems council returns an unsafe movement result', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'systems-mechanics-invalid-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_mechanics_resolution',
+              arguments:
+                '{"interpretation":"travel","summary":"travel north","actions":[{"type":"travel","actorId":"player-1","locationId":"the-drunken-vertebra","pace":"walk","confirmId":null,"note":"Travel north."}],"pendingPrompt":null,"touchedEntities":["player-1"],"confidence":0.77,"warnings":[]}',
+              call_id: 'systems-mechanics-invalid-call',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-after-systems-fallback-1',
+          output: [],
+          output_text: 'done',
+        },
+        {
+          id: 'narr-after-systems-fallback-1',
+          output: [],
+          output_text: 'You hesitate at the edge of the Landing.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const debugEvents: DebugEvent[] = [];
+
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'go north',
+        apiKey: 'test-key',
+        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 0);
+      assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), true);
+      const fallback = turn.trace?.toolCalls.find(call => call.tool === 'steward_fallback_to_gm');
+      assert.equal((fallback?.output as { reason?: string } | undefined)?.reason, 'systems_mechanics_unsafe_events');
     } finally {
       await removeDir(rootDir);
     }

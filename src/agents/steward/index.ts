@@ -6,3 +6,4 @@ export type {
 } from './types';
 
 export { openStewardTurn } from './openTurn';
+export { closeStewardTurn } from './closeTurn';

@@ -16,6 +16,7 @@ import type { GMAgendaUpdates } from '../gm/gmAgent';
 import type { CouncilDomain } from '../hierarchy/types';
 import type { StewardToCouncilPacket, CouncilToStewardPacket, DirectorUpdates } from '../hierarchy/packets';
 import type { TurnPlan } from '../hierarchy/turnPlan';
+import type { SystemsNarratorPacket } from '../council';
 
 // ---------------------------------------------------------------------------
 // Open turn
@@ -44,18 +45,27 @@ export interface StewardOpenResult {
 
 /** What the Steward receives after all Council agents have returned. */
 export interface StewardCloseInput {
+  turnPlan: TurnPlan;
   councilResults: CouncilToStewardPacket<CouncilDomain>[];
-  deterministicResults: unknown[];
   directorState: DirectorState;
-  acceptedEvents: WorldEvent[];
-  rejectedEvents: RejectedEventRecord[];
 }
 
 /** The Steward's closing decision: what to commit, surface, defer, or hold. */
 export interface StewardCloseResult {
+  handled: boolean;
+  fallbackReason?: string;
   summary: string;
+  proposedEvents: WorldEvent[];
+  acceptedEvents: WorldEvent[];
+  rejectedEvents: RejectedEventRecord[];
   agendaUpdates: GMAgendaUpdates;
   directorUpdates: DirectorUpdates;
-  /** Bounded truth summary passed to the Narrator (Voice layer). */
-  narratorContext: unknown;
+  narratorHandoff:
+    | { kind: 'systems_v1'; packet: SystemsNarratorPacket }
+    | { kind: 'legacy'; packet: null };
+  trace: {
+    route: 'systems_council' | 'fallback_to_gm';
+    reason?: string;
+    councilDomains: CouncilDomain[];
+  };
 }
