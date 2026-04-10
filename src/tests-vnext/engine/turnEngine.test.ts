@@ -927,6 +927,40 @@ describe('TurnEngine', () => {
     }
   });
 
+  it('clears stale turn logs when recreating a session from a missing snapshot', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const sessionId = 'recreated-session';
+      const sessionDir = path.join(rootDir, sessionId);
+      await fs.mkdir(sessionDir, { recursive: true });
+      await fs.writeFile(
+        path.join(sessionDir, 'events.jsonl'),
+        `${JSON.stringify({
+          sessionId,
+          turn: 1,
+          atIso: '2025-01-01T06:05:00.000Z',
+          playerId: 'player-1',
+          playerText: 'Look around',
+          acceptedEvents: [],
+          rejectedEvents: [],
+          narration: 'Old narration',
+        })}\n`,
+      );
+
+      const engine = new TurnEngine({ store, llm: new QueueLLM([]) });
+      const init = await engine.initSession({ sessionId, worldId: 'tel-mora' });
+      const storedLog = await store.loadTurnLog(sessionId);
+
+      assert.equal(init.created, true);
+      assert.equal(init.world.id, 'tel-mora');
+      assert.equal(init.history?.totalTurns, 0);
+      assert.deepEqual(init.history?.recentTurns, []);
+      assert.deepEqual(storedLog, []);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
   it('uses first-world opening context only when creating a new session', async () => {
     const { rootDir, store } = await createStore();
     try {

@@ -162,6 +162,9 @@ export async function runCli(options: CliOptions): Promise<CliRunResult> {
       startupWorldId,
       skipWorldPrompt,
     });
+    if (!startupWorld) {
+      return { exitCode: 0, finalState };
+    }
     const bannerWorld = sessionId ? null : startupWorld;
     write(`\n=== ${bannerWorld ? formatBannerTitle(bannerWorld) : 'Chronicle vNext'} ===\n\n`);
     if (bannerWorld?.cliTheme?.banner) {
@@ -524,7 +527,7 @@ async function resolveStartupWorld(params: {
   sessionId?: string;
   startupWorldId?: string;
   skipWorldPrompt?: boolean;
-}): Promise<WorldModule> {
+}): Promise<WorldModule | null> {
   if (params.startupWorldId) {
     return resolveWorldModule(params.startupWorldId);
   }
@@ -541,10 +544,27 @@ async function resolveStartupWorld(params: {
     params.write(`  ${index + 1}. ${label}${description}\n`);
   }
   params.write('Press Enter for Isle of Marrow.\n\n');
-  const choice = (await params.readLine('world> '))?.trim().toLowerCase() || '';
-  const selected = selectWorldFromChoice(choice, worlds) || resolveWorldModule(DEFAULT_WORLD_ID);
-  params.write(`Starting in ${selected.displayName}.\n\n`);
-  return selected;
+  while (true) {
+    const choice = await params.readLine('world> ');
+    if (choice == null) {
+      return null;
+    }
+
+    const normalizedChoice = choice.trim().toLowerCase();
+    if (!normalizedChoice) {
+      const selected = resolveWorldModule(DEFAULT_WORLD_ID);
+      params.write(`Starting in ${selected.displayName}.\n\n`);
+      return selected;
+    }
+
+    const selected = selectWorldFromChoice(normalizedChoice, worlds);
+    if (selected) {
+      params.write(`Starting in ${selected.displayName}.\n\n`);
+      return selected;
+    }
+
+    params.write(`Unknown world selection: ${choice.trim()}. Try again.\n\n`);
+  }
 }
 
 function selectWorldFromChoice(choice: string, worlds: WorldModule[]): WorldModule | undefined {

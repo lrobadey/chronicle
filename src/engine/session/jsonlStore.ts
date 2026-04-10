@@ -37,6 +37,7 @@ export class JsonlSessionStore implements SessionStore {
     if (!state) {
       const fresh = options.createWorld(options.worldId);
       this.assertCompatibleState(id, fresh);
+      await fs.rm(path.join(dir, EVENTS_FILE), { force: true });
       await this.writeState(path.join(dir, INITIAL_FILE), fresh);
       await this.writeState(path.join(dir, SNAPSHOT_FILE), fresh);
       return { sessionId: id, created: true, state: fresh };
