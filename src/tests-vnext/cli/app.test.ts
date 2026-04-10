@@ -53,12 +53,13 @@ class StubCliEngine implements CliEngine {
     params.stream?.onOpeningStart?.(telemetry);
     params.stream?.onOpeningDelta?.(opening);
     params.debug?.onEvent?.({ type: 'narrator.completed', phase: 'opening', text: opening });
+    const effectiveWorldId = params.worldId ?? (params.sessionId === 'persisted-tel-mora' ? 'tel-mora' : undefined);
     return {
       sessionId: params.sessionId || `session-${this.initCounter}`,
-      created: true,
+      created: params.sessionId === 'persisted-tel-mora' ? false : true,
       telemetry,
       opening,
-      world: worldInfoFor(params.worldId),
+      world: worldInfoFor(effectiveWorldId),
     };
   }
 
@@ -418,6 +419,58 @@ describe('CLI app', () => {
     assert.equal(state.gmReasoningEffort, 'high');
   });
 
+  it('adopts the resumed session world as the new-session default', async () => {
+    const engine = new StubCliEngine();
+
+    const state = await initCliSession({
+      engine,
+      sessionId: 'persisted-tel-mora',
+      apiKey: undefined,
+      gmReasoningEffort: 'low',
+      narratorStyle: 'michener',
+      debugEnabled: false,
+      debugDetail: 'summary',
+      apiMode: 'fallback',
+      write: () => {},
+      thinkingAnimation: createThinkingAnimation(new ScriptedTerminal([])),
+    });
+
+    assert.equal(state.sessionId, 'persisted-tel-mora');
+    assert.equal(state.worldId, 'tel-mora');
+    assert.equal(state.worldDisplayName, 'Tel Mora — The Dead Junction');
+    assert.equal(state.startupWorldId, 'tel-mora');
+  });
+
+  it('uses the resumed session world for /new when starting another session', async () => {
+    const engine = new StubCliEngine();
+    let state = await initCliSession({
+      engine,
+      sessionId: 'persisted-tel-mora',
+      apiKey: undefined,
+      gmReasoningEffort: 'low',
+      narratorStyle: 'michener',
+      debugEnabled: false,
+      debugDetail: 'summary',
+      apiMode: 'fallback',
+      write: () => {},
+      thinkingAnimation: createThinkingAnimation(new ScriptedTerminal([])),
+    });
+
+    ({ state } = await handleCliLine({
+      state,
+      line: '/new session-2',
+      engine,
+      write: () => {},
+      thinkingAnimation: createThinkingAnimation(new ScriptedTerminal([])),
+    }));
+
+    assert.equal(engine.initCalls.at(-1)?.sessionId, 'session-2');
+    assert.equal(engine.initCalls.at(-1)?.worldId, 'tel-mora');
+    assert.equal(state.sessionId, 'session-2');
+    assert.equal(state.worldId, 'tel-mora');
+    assert.equal(state.startupWorldId, 'tel-mora');
+  });
+
   it('renders planned tool names and raw payloads for tool timeline events', () => {
     const planned = renderDebugEvent({
       type: 'gm.response.received',
@@ -760,6 +813,8 @@ describe('CLI app', () => {
     assert.ok(terminal.output().includes('Choose a world:'));
     assert.ok(terminal.output().includes('Tel Mora — The Dead Junction'));
     assert.ok(terminal.output().includes('=== Chronicle vNext - Tel Mora — The Dead Junction ==='));
+    assert.ok(terminal.output().includes('The junction is quiet, but no one trusts it.'));
+    assert.ok(terminal.output().includes('A recommendation is coming, and everyone is listening for it.'));
   });
 
   it('treats EOF as a normal exit path', async () => {
