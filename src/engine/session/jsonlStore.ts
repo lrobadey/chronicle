@@ -14,13 +14,19 @@ const VNEXT_VERSION_PREFIX = 'vnext-';
 export class JsonlSessionStore implements SessionStore {
   constructor(private rootDir: string) {}
 
-  async ensureSession(sessionId: string | undefined, worldFactory: () => WorldState) {
+  async ensureSession(
+    sessionId: string | undefined,
+    options: {
+      worldId?: string;
+      createWorld: (worldId?: string) => WorldState;
+    },
+  ) {
     const id = sessionId || `session-${randomUUID()}`;
     const dir = this.sessionDir(id);
     const exists = await this.exists(dir);
     if (!exists) {
       await fs.mkdir(dir, { recursive: true });
-      const state = worldFactory();
+      const state = options.createWorld(options.worldId);
       this.assertCompatibleState(id, state);
       await this.writeState(path.join(dir, INITIAL_FILE), state);
       await this.writeState(path.join(dir, SNAPSHOT_FILE), state);
@@ -29,7 +35,7 @@ export class JsonlSessionStore implements SessionStore {
 
     const state = await this.loadSession(id);
     if (!state) {
-      const fresh = worldFactory();
+      const fresh = options.createWorld(options.worldId);
       this.assertCompatibleState(id, fresh);
       await this.writeState(path.join(dir, INITIAL_FILE), fresh);
       await this.writeState(path.join(dir, SNAPSHOT_FILE), fresh);

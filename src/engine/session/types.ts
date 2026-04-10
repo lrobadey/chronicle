@@ -87,7 +87,13 @@ export interface TurnTrace {
 }
 
 export interface SessionStore {
-  ensureSession(sessionId: string | undefined, worldFactory: () => WorldState): Promise<{ sessionId: string; created: boolean; state: WorldState }>;
+  ensureSession(
+    sessionId: string | undefined,
+    options: {
+      worldId?: string;
+      createWorld: (worldId?: string) => WorldState;
+    },
+  ): Promise<{ sessionId: string; created: boolean; state: WorldState }>;
   loadSession(sessionId: string): Promise<WorldState | null>;
   loadTurnLog(sessionId: string): Promise<TurnRecord[]>;
   saveInitialState(sessionId: string, state: WorldState): Promise<void>;

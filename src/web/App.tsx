@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { TurnTrace, WebHistorySummary, WebTranscriptHistory, WebTurnSummary } from '../engine/session/types';
 import type { Telemetry } from '../sim/views/telemetry';
+import type { WorldSurfaceInfo } from '../worlds';
 import {
   buildTranscriptEntries,
   createPendingTurnEntry,
@@ -24,6 +25,7 @@ interface InitResponse {
   initialNarration: string;
   telemetry: Telemetry;
   history: WebTranscriptHistory;
+  world: WorldSurfaceInfo;
   runtime: string;
 }
 
@@ -39,7 +41,9 @@ interface TurnResponse {
 }
 
 const SESSION_STORAGE_KEY = 'chronicle.web.sessionId';
-const DEFAULT_API_BASE = `${window.location.protocol}//${window.location.hostname}:3001`;
+const DEFAULT_API_BASE = typeof window === 'undefined'
+  ? 'http://127.0.0.1:3001'
+  : `${window.location.protocol}//${window.location.hostname}:3001`;
 
 export default function App() {
   const [apiBase, setApiBase] = useState(DEFAULT_API_BASE);
@@ -51,6 +55,7 @@ export default function App() {
   const [inputValue, setInputValue] = useState('');
   const [entries, setEntries] = useState<TranscriptEntry[]>([]);
   const [telemetry, setTelemetry] = useState<Telemetry | undefined>();
+  const [world, setWorld] = useState<WorldSurfaceInfo | null>(null);
   const [selectedTurn, setSelectedTurn] = useState<number | null>(null);
   const [bootOpening, setBootOpening] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -102,6 +107,7 @@ export default function App() {
       setSelectedTurn(null);
       setSessionId(null);
       setTelemetry(undefined);
+      setWorld(null);
       writeStoredSessionId(null);
     }
 
@@ -130,6 +136,7 @@ export default function App() {
 
       setEntries(nextEntries);
       setTelemetry(result.telemetry);
+      setWorld(result.world);
       setRuntimeState('ready');
       setSessionId(result.sessionId);
       writeStoredSessionId(result.sessionId);
@@ -221,7 +228,7 @@ export default function App() {
       <header className="app-header">
         <div className="brand-block">
           <span className="eyebrow">Chronicle vNext</span>
-          <h1>Isle of Marrow</h1>
+          <h1>{formatWorldTitle(world)}</h1>
         </div>
         <div className="header-center">
           <span className="session-pill">
@@ -823,6 +830,10 @@ function normalizeError(error: unknown): string {
 
 function shortSessionId(value: string): string {
   return value.length <= 18 ? value : `${value.slice(0, 14)}…`;
+}
+
+export function formatWorldTitle(world: WorldSurfaceInfo | null): string {
+  return world?.displayName || 'Loading world…';
 }
 
 function formatDistance(distance: number): string {

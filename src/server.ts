@@ -122,17 +122,19 @@ export function createChronicleServer(engine = new TurnEngine()) {
         const body = await parseBody(req);
         assertObject(body);
         const sessionId = asOptionalString(body.sessionId);
+        const worldId = asOptionalString(body.worldId);
         const apiKey = asOptionalString(body.apiKey);
         const stream = asOptionalBoolean(body.stream) === true;
 
         if (!stream) {
-          const result = await engine.initSession({ sessionId, apiKey: apiKey || process.env.OPENAI_API_KEY });
+          const result = await engine.initSession({ sessionId, worldId, apiKey: apiKey || process.env.OPENAI_API_KEY });
           sendJSON(res, 200, {
             sessionId: result.sessionId,
             created: result.created,
             initialNarration: result.opening,
             telemetry: result.telemetry,
             history: result.history,
+            world: result.world,
             runtime: 'vnext',
           });
           return;
@@ -146,6 +148,7 @@ export function createChronicleServer(engine = new TurnEngine()) {
         writeSSE(res, 'init.started', { sessionId: sessionId || undefined });
         const result = await engine.initSession({
           sessionId,
+          worldId,
           apiKey: apiKey || process.env.OPENAI_API_KEY,
           stream: {
             onOpeningDelta: delta => {
@@ -161,6 +164,7 @@ export function createChronicleServer(engine = new TurnEngine()) {
           initialNarration: result.opening,
           telemetry: result.telemetry,
           history: result.history,
+          world: result.world,
           runtime: 'vnext',
         });
         res.end();
