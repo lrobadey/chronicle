@@ -817,6 +817,38 @@ describe('CLI app', () => {
     assert.ok(terminal.output().includes('A recommendation is coming, and everyone is listening for it.'));
   });
 
+  it('treats EOF at the startup world prompt as a normal exit path', async () => {
+    const engine = new StubCliEngine();
+    const terminal = new ScriptedTerminal([]);
+    const result = await runCli({
+      engine,
+      terminal,
+      apiMode: 'fallback',
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(engine.initCalls.length, 0);
+    assert.deepEqual(terminal.prompts, ['world> ']);
+    assert.ok(terminal.output().includes('Choose a world:'));
+    assert.ok(terminal.output().includes('Goodbye!'));
+  });
+
+  it('reprompts after an invalid startup world selection', async () => {
+    const engine = new StubCliEngine();
+    const terminal = new ScriptedTerminal(['3', 'tel-mora', '/exit']);
+    const result = await runCli({
+      engine,
+      terminal,
+      apiMode: 'fallback',
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(engine.initCalls[0]?.worldId, 'tel-mora');
+    assert.deepEqual(terminal.prompts, ['world> ', 'world> ', '> ']);
+    assert.ok(terminal.output().includes('Unknown world selection: 3. Try again.'));
+    assert.ok(terminal.output().includes('Starting in Tel Mora — The Dead Junction.'));
+  });
+
   it('treats EOF as a normal exit path', async () => {
     const engine = new StubCliEngine();
     const terminal = new ScriptedTerminal([]);
