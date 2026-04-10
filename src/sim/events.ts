@@ -1,4 +1,4 @@
-import type { Actor, ActorId, GridPos, ItemId, ItemLifecycleState, ItemLocationInput, LocationPOI } from './state';
+import type { Actor, ActorId, FactionId, GridPos, ItemId, ItemLifecycleState, ItemLocationInput, LocationPOI } from './state';
 import type { ItemComponents } from './archetypes';
 
 export type AffectItemEffect =
@@ -134,6 +134,16 @@ export type WorldEvent =
               terrain?: LocationPOI['terrain'];
               tags?: string[];
             };
+          }
+        | {
+            kind: 'faction';
+            data: {
+              id: FactionId;
+              name: string;
+              description: string;
+              tags?: string[];
+              memberIds?: ActorId[];
+            };
           };
       note?: string;
     }
@@ -174,6 +184,33 @@ export type WorldEvent =
       type: 'SetFlag';
       key: string;
       value: unknown;
+      note?: string;
+    }
+  | {
+      meta?: EventMeta;
+      /**
+       * Adjust an actor's standing with a faction.
+       * delta > 0 improves standing; delta < 0 worsens it.
+       * Standing is clamped to [−100, 100].
+       */
+      type: 'ModifyReputation';
+      actorId: ActorId;
+      factionId: FactionId;
+      delta: number;
+      reason?: string;
+      note?: string;
+    }
+  | {
+      meta?: EventMeta;
+      /**
+       * Propagate a rumor to an actor's knowledge.
+       * Rumor text is added to the recipient's knowledge.rumors array.
+       */
+      type: 'SpreadRumor';
+      fromActorId?: ActorId;
+      toActorId: ActorId;
+      rumor: string;
+      subject?: string;
       note?: string;
     };
 

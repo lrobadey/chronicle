@@ -25,6 +25,7 @@ export interface GridMap {
 }
 
 export type ActorId = string;
+export type FactionId = string;
 export type ItemId = string;
 export type LocationId = string;
 export type ItemLifecycleState = 'intact' | 'opened' | 'broken' | 'empty' | 'consumed' | 'ruined' | 'unusable';
@@ -45,6 +46,21 @@ export interface Actor {
     goals: string[];
   };
   relationships?: Record<ActorId, { trust: number; fear: number; affinity: number }>;
+  /** Standing with each faction. Range: −100 (hostile) to 100 (revered). 0 = neutral/unknown. */
+  factionStandings?: Record<FactionId, number>;
+}
+
+/**
+ * A faction is a named group with shared interests, territory, or identity.
+ * Factions are first-class Spine entities (North Star §4.1, §4.2.1).
+ */
+export interface FactionEntity {
+  id: FactionId;
+  name: string;
+  description: string;
+  tags?: string[];
+  /** Actor IDs who are members of this faction. */
+  memberIds: ActorId[];
 }
 
 export type ItemLocationInput =
@@ -149,6 +165,8 @@ export interface KnowledgeState {
   seenActors: Record<ActorId, true>;
   seenItems: Record<ItemId, true>;
   notes: string[];
+  /** Rumors received by this actor — filtered knowledge about the social world. */
+  rumors: string[];
 }
 
 export interface SceneAgenda {
@@ -205,6 +223,17 @@ export interface DirectorState {
     score: number;
     reason: string;
   }>;
+  /** Tracks faction momentum visible to the Steward for narrative pressure decisions. */
+  factionPressures: Array<{
+    factionId: FactionId;
+    pressure: number;
+    trend: 'rising' | 'stable' | 'falling';
+  }>;
+  /**
+   * Internal: elapsed minutes at the last reputation drift pass.
+   * Used by the reputation kernel system to compute drift delta (like decay lastSimulatedAtMinutes).
+   */
+  reputationDriftLastMinutes: number;
 }
 
 export interface WorldState {
@@ -213,6 +242,8 @@ export interface WorldState {
   actors: Record<ActorId, Actor>;
   items: Record<ItemId, Item>;
   locations: Record<LocationId, LocationPOI>;
+  /** Faction registry — first-class simulation entities (North Star §4.2.1). */
+  factions: Record<FactionId, FactionEntity>;
   spine: SpineState;
   systems: SystemsState;
   directorState: DirectorState;

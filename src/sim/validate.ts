@@ -170,14 +170,24 @@ function validateCreateEntity(state: WorldState, event: Extract<WorldEvent, { ty
     return { ok: true };
   }
 
-  const { data } = event.entity;
-  if (typeof data.id !== 'string' || typeof data.name !== 'string' || typeof data.description !== 'string' || !data.anchor) {
+  if (event.entity.kind === 'faction') {
+    const { data } = event.entity;
+    if (typeof data.id !== 'string' || typeof data.name !== 'string' || typeof data.description !== 'string') {
+      return { ok: false, reason: 'invalid_faction_payload' };
+    }
+    if (state.factions[data.id]) return { ok: false, reason: 'faction_already_exists' };
+    if (!data.name.trim()) return { ok: false, reason: 'faction_name_required' };
+    return { ok: true };
+  }
+
+  const locationData = event.entity.data;
+  if (typeof locationData.id !== 'string' || typeof locationData.name !== 'string' || typeof locationData.description !== 'string' || !('anchor' in locationData) || !locationData.anchor) {
     return { ok: false, reason: 'invalid_location_payload' };
   }
-  if (state.locations[data.id]) return { ok: false, reason: 'location_already_exists' };
-  if (!data.name.trim()) return { ok: false, reason: 'location_name_required' };
-  if (!data.description.trim()) return { ok: false, reason: 'location_description_required' };
-  if (!isWithinBounds(state, data.anchor)) return { ok: false, reason: 'location_anchor_out_of_bounds' };
+  if (state.locations[locationData.id]) return { ok: false, reason: 'location_already_exists' };
+  if (!locationData.name.trim()) return { ok: false, reason: 'location_name_required' };
+  if (!locationData.description.trim()) return { ok: false, reason: 'location_description_required' };
+  if (!isWithinBounds(state, locationData.anchor)) return { ok: false, reason: 'location_anchor_out_of_bounds' };
   return { ok: true };
 }
 

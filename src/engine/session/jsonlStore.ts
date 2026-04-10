@@ -156,6 +156,8 @@ function normalizeLoadedState(state: WorldState): WorldState {
       pendingWorldEvents: [],
       playerBehaviorPatterns: {},
       capabilityCandidates: [],
+      factionPressures: [],
+      reputationDriftLastMinutes: 0,
     };
   }
 
@@ -178,6 +180,17 @@ function normalizeLoadedState(state: WorldState): WorldState {
     state.directorState.playerBehaviorPatterns = {};
   }
   if (!Array.isArray(state.directorState.capabilityCandidates)) state.directorState.capabilityCandidates = [];
+  if (!Array.isArray(state.directorState.factionPressures)) state.directorState.factionPressures = [];
+  if (typeof state.directorState.reputationDriftLastMinutes !== 'number') state.directorState.reputationDriftLastMinutes = 0;
+
+  // Migrate: ensure factions registry exists (not present in saves before reputation system)
+  if (!state.factions || typeof state.factions !== 'object') state.factions = {};
+
+  // Migrate: ensure KnowledgeState.rumors exists for all actors
+  for (const actorId of Object.keys(state.knowledge ?? {})) {
+    const k = state.knowledge[actorId];
+    if (k && !Array.isArray(k.rumors)) k.rumors = [];
+  }
 
   return syncWorldSpine(state);
 }

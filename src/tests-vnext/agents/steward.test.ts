@@ -21,6 +21,8 @@ function createDirectorState(): DirectorState {
     pendingWorldEvents: [],
     playerBehaviorPatterns: {},
     capabilityCandidates: [],
+    factionPressures: [],
+    reputationDriftLastMinutes: 0,
   };
 }
 

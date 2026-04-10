@@ -1,5 +1,6 @@
 import type { WorldEvent } from './events';
 import type { KnowledgeState, WorldState } from './state';
+import { runReputationDrift } from './systems/reputation';
 import { getItemPlacement, setItemPlacement, syncWorldSpine } from './spine';
 import { applyAffectItem } from './itemEffects';
 import { deriveTide, isTideBlocked } from './systems/tide';
@@ -50,6 +51,10 @@ function applyEventBase(state: WorldState, event: WorldEvent): WorldState {
       return applyCreateEntity(state, event);
     case 'SetFlag':
       return addLedger(state, event.note || `Flag ${event.key} updated`);
+    case 'ModifyReputation':
+      return applyModifyReputation(state, event);
+    case 'SpreadRumor':
+      return applySpreadRumor(state, event);
     default:
       return state;
   }
@@ -169,12 +174,7 @@ function applyRecordClue(state: WorldState, event: Extract<WorldEvent, { type: '
 
   const next = cloneState(state);
   const text = event.text.trim();
-  const existing = next.knowledge[event.actorId] || {
-    seenActors: {},
-    seenItems: {},
-    seenLocations: {},
-    notes: [],
-  };
+  const existing = next.knowledge[event.actorId] || emptyKnowledge();
 
   if (existing.notes.includes(text)) {
     return state;
@@ -329,9 +329,72 @@ function applyCreateEntity(state: WorldState, event: Extract<WorldEvent, { type:
       terrain: event.entity.data.terrain,
       tags: event.entity.data.tags,
     };
+  } else if (event.entity.kind === 'faction') {
+    const { data } = event.entity;
+    next.factions[data.id] = {
+      id: data.id,
+      name: data.name,
+      description: data.description,
+      tags: data.tags,
+      memberIds: data.memberIds ?? [],
+    };
   }
   addLedgerInPlace(next, event.note || `Created ${event.entity.kind} ${event.entity.data.id}`);
   return next;
+}
+
+function applyModifyReputation(
+  state: WorldState,
+  event: Extract<WorldEvent, { type: 'ModifyReputation' }>,
+): WorldState {
+  const actor = state.actors[event.actorId];
+  if (!actor) return state;
+
+  const current = actor.factionStandings?.[event.factionId] ?? 0;
+  const updated = Math.max(-100, Math.min(100, current + event.delta));
+
+  const next = cloneState(state);
+  next.actors[event.actorId] = {
+    ...next.actors[event.actorId],
+    factionStandings: {
+      ...(next.actors[event.actorId].factionStandings ?? {}),
+      [event.factionId]: updated,
+    },
+  };
+  const direction = event.delta >= 0 ? '+' : '';
+  const label = event.reason ? ` (${event.reason})` : '';
+  addLedgerInPlace(
+    next,
+    event.note || `${actor.name} standing with ${event.factionId}: ${direction}${event.delta}${label} → ${updated}`,
+  );
+  return next;
+}
+
+function applySpreadRumor(
+  state: WorldState,
+  event: Extract<WorldEvent, { type: 'SpreadRumor' }>,
+): WorldState {
+  const recipient = state.actors[event.toActorId];
+  if (!recipient) return state;
+
+  const existing = state.knowledge[event.toActorId] || emptyKnowledge();
+  if (existing.rumors.includes(event.rumor)) return state;
+
+  const next = cloneState(state);
+  next.knowledge[event.toActorId] = {
+    ...existing,
+    rumors: [...existing.rumors, event.rumor],
+  };
+  const from = event.fromActorId ? state.actors[event.fromActorId]?.name ?? event.fromActorId : 'unknown source';
+  addLedgerInPlace(
+    next,
+    event.note || `${recipient.name} hears rumor from ${from}: "${event.rumor}"`,
+  );
+  return next;
+}
+
+function emptyKnowledge(): KnowledgeState {
+  return { seenActors: {}, seenItems: {}, seenLocations: {}, notes: [], rumors: [] };
 }
 
 function addLedger(state: WorldState, text: string): WorldState {
@@ -347,7 +410,7 @@ function addLedgerInPlace(state: WorldState, text: string) {
 function updateKnowledgeForActor(state: WorldState, actorId: string) {
   const actor = state.actors[actorId];
   if (!actor) return;
-  const knowledge = state.knowledge[actorId] || { seenActors: {}, seenItems: {}, seenLocations: {}, notes: [] };
+  const knowledge = state.knowledge[actorId] || emptyKnowledge();
 
   const nearLocations = locationsWithinRadius(state, actor.pos, DEFAULT_VIS_RADIUS);
   for (const loc of nearLocations) {

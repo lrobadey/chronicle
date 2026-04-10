@@ -46,5 +46,30 @@ export function checkInvariants(state: WorldState): InvariantIssue[] {
     }
   }
 
+  // Faction integrity: actor factionStandings must reference known factions
+  for (const [actorId, actor] of Object.entries(state.actors)) {
+    if (!actor.factionStandings) continue;
+    for (const factionId of Object.keys(actor.factionStandings)) {
+      if (!state.factions[factionId]) {
+        issues.push({
+          path: `actors.${actorId}.factionStandings.${factionId}`,
+          message: `Standing references unknown faction '${factionId}'`,
+        });
+      }
+    }
+  }
+
+  // Faction integrity: faction memberIds must reference known actors
+  for (const [factionId, faction] of Object.entries(state.factions)) {
+    for (const memberId of faction.memberIds) {
+      if (!state.actors[memberId]) {
+        issues.push({
+          path: `factions.${factionId}.memberIds`,
+          message: `Faction '${factionId}' lists unknown actor '${memberId}' as member`,
+        });
+      }
+    }
+  }
+
   return issues;
 }

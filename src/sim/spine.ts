@@ -1,4 +1,4 @@
-import type { Actor, GridPos, Item, ItemLifecycleState, ItemLocationInput, LocationPOI, WorldState } from './state';
+import type { Actor, FactionEntity, GridPos, Item, ItemLifecycleState, ItemLocationInput, LocationPOI, WorldState } from './state';
 import {
   SpineIntegrityError,
   type SpineIntegrityIssue,
@@ -6,6 +6,7 @@ import {
 } from '../engine/errors';
 import { getArchetypePreset, mergeItemComponents } from './archetypes';
 import { runDecayCatchUp } from './systems/decay';
+import { runReputationDrift } from './systems/reputation';
 
 export type SpineEntityId = string;
 export type SpineRelationId = string;
@@ -13,7 +14,7 @@ export type SpineScheduleId = string;
 
 export interface SpineEntity {
   id: SpineEntityId;
-  kind: 'actor' | 'item' | 'location' | 'container' | 'surface' | 'structure';
+  kind: 'actor' | 'item' | 'location' | 'container' | 'surface' | 'structure' | 'faction';
   archetype: string;
   name: string;
   tags?: string[];
@@ -77,6 +78,12 @@ export interface SpineEntity {
     lifecycle?: {
       state?: ItemLifecycleState;
     };
+    /** Faction-specific metadata. Only populated when kind === 'faction'. */
+    faction?: {
+      territory?: string;
+      agenda?: string;
+      memberCount?: number;
+    };
   };
 }
 
@@ -91,7 +98,10 @@ export interface SpineRelation {
     | 'worn_by'
     | 'owned_by'
     | 'resides_in'
-    | 'connected_to';
+    | 'connected_to'
+    | 'member_of'
+    | 'allied_with'
+    | 'rival_of';
   from: SpineEntityId;
   to: SpineEntityId;
   props?: Record<string, unknown>;
@@ -147,7 +157,7 @@ export interface SpineValidationContext {
  * spine relations.
  */
 export function buildInitialSpine(
-  state: Pick<WorldState, 'actors' | 'items' | 'locations'>,
+  state: Pick<WorldState, 'actors' | 'items' | 'locations' | 'factions'>,
   itemPlacements: Record<string, ItemLocationInput>,
 ): SpineState {
   const entities: Record<SpineEntityId, SpineEntity> = {};
@@ -181,6 +191,13 @@ export function buildInitialSpine(
     if (!placement) continue;
     entities[item.id] = buildItemEntity(item, placement, state.locations);
     addRelation(relations, buildPlacementRelation(item.id, placement));
+  }
+
+  for (const faction of Object.values(state.factions || {})) {
+    entities[faction.id] = buildFactionEntity(faction);
+    for (const memberId of faction.memberIds) {
+      addRelation(relations, { type: 'member_of', from: memberId, to: faction.id });
+    }
   }
 
   return {
@@ -237,6 +254,13 @@ export function syncWorldSpine(state: WorldState): WorldState {
     addRelation(relations, buildPlacementRelation(item.id, placement));
   }
 
+  for (const faction of Object.values(state.factions || {})) {
+    entities[faction.id] = buildFactionEntity(faction);
+    for (const memberId of faction.memberIds) {
+      addRelation(relations, { type: 'member_of', from: memberId, to: faction.id });
+    }
+  }
+
   state.spine = {
     entities,
     relations,
@@ -244,6 +268,7 @@ export function syncWorldSpine(state: WorldState): WorldState {
     schedules: previous.schedules || {},
   };
   runDecayCatchUp(state);
+  runReputationDrift(state);
   validateSpineOrThrow(state.spine, {
     actorIds: Object.keys(state.actors),
     itemIds: Object.keys(state.items),
@@ -704,6 +729,20 @@ function buildActorEntity(actor: Actor, inventorySlots: number): SpineEntity {
       location: {
         anchor: actor.pos,
       },
+    },
+  };
+}
+
+function buildFactionEntity(faction: FactionEntity): SpineEntity {
+  return {
+    id: faction.id,
+    kind: 'faction',
+    archetype: 'faction.group',
+    name: faction.name,
+    tags: faction.tags,
+    components: {
+      identity: { tags: faction.tags },
+      faction: { memberCount: faction.memberIds.length },
     },
   };
 }
