@@ -1,4 +1,4 @@
-import type { Actor, Item, ItemLocationInput, KnowledgeState, LocationPOI, WorldState } from '../sim/state';
+import type { Actor, FactionEntity, Item, ItemLocationInput, KnowledgeState, LocationPOI, WorldState } from '../sim/state';
 import { buildInitialSpine } from '../sim/spine';
 import type { WorldModule, CreateWorldOptions } from './types';
 
@@ -155,6 +155,49 @@ const actors: Record<string, Actor> = {
   },
 };
 
+const factions: Record<string, FactionEntity> = {
+  levelers: {
+    id: 'levelers',
+    name: 'The Levelers',
+    description:
+      'The engineers, labor organizers, and restoration advocates pushing to clear the Silted Lock and bring canal water back through Tel Mora.',
+    tags: ['engineering', 'restoration', 'infrastructure'],
+    memberIds: ['rana-tuq', 'nesh'],
+  },
+  bedkeepers: {
+    id: 'bedkeepers',
+    name: 'The Bedkeepers',
+    description:
+      'The families and elders who have built their homes in the dry canal bed and insist that any restoration plan account for the people already living there.',
+    tags: ['housing', 'locals', 'mutual-aid'],
+    memberIds: ['old-kesh'],
+  },
+  seepkeepers: {
+    id: 'seepkeepers',
+    name: 'The Seepkeepers',
+    description:
+      'The small rationing and filtration network centered on the Seep, responsible for keeping Tel Mora’s remaining drinkable water usable.',
+    tags: ['water', 'rationing', 'neutral'],
+    memberIds: ['siduri'],
+  },
+  'kashru-registry': {
+    id: 'kashru-registry',
+    name: 'The Kashru Registry',
+    description:
+      'The upstream administrative apparatus that decides which settlements remain on the books and which projects receive formal restoration backing.',
+    tags: ['bureaucracy', 'assessment', 'outside-power'],
+    memberIds: ['deshur'],
+  },
+  'downriver-trade': {
+    id: 'downriver-trade',
+    name: 'The Downriver Trade',
+    description:
+      'A loose commercial network of caravan and river merchants who control scarce imported copper and profit from uncertainty at settlements like Tel Mora.',
+    tags: ['trade', 'copper', 'leverage'],
+    memberIds: ['lugal-ane'],
+  },
+};
+
 const items: Record<string, Item> = {
   'surveyors-rod': {
     id: 'surveyors-rod',
@@ -192,6 +235,7 @@ export function createTelMoraWorld(options: CreateWorldOptions = {}): WorldState
         'survey-kit': true,
       },
       notes: [],
+      rumors: [],
     },
   };
 
@@ -218,6 +262,7 @@ export function createTelMoraWorld(options: CreateWorldOptions = {}): WorldState
     actors,
     items,
     locations,
+    factions,
     spine: {
       entities: {},
       relations: {},
@@ -282,6 +327,8 @@ export function createTelMoraWorld(options: CreateWorldOptions = {}): WorldState
       pendingWorldEvents: [],
       playerBehaviorPatterns: {},
       capabilityCandidates: [],
+      factionPressures: [],
+      reputationDriftLastMinutes: 0,
     },
     ledger: [
       { turn: 0, text: 'Tel Mora initialized' },
