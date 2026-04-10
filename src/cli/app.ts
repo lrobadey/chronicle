@@ -543,7 +543,7 @@ async function resolveStartupWorld(params: {
     const description = typeof world.metadata?.summary === 'string' ? ` - ${world.metadata.summary}` : '';
     params.write(`  ${index + 1}. ${label}${description}\n`);
   }
-  params.write('Press Enter for Isle of Marrow.\n\n');
+  params.write('\n');
   while (true) {
     const choice = await params.readLine('world> ');
     if (choice == null) {
@@ -552,9 +552,8 @@ async function resolveStartupWorld(params: {
 
     const normalizedChoice = choice.trim().toLowerCase();
     if (!normalizedChoice) {
-      const selected = resolveWorldModule(DEFAULT_WORLD_ID);
-      params.write(`Starting in ${selected.displayName}.\n\n`);
-      return selected;
+      params.write('Choose a world to continue.\n\n');
+      continue;
     }
 
     const selected = selectWorldFromChoice(normalizedChoice, worlds);

@@ -320,6 +320,7 @@ export const isleOfMarrowWorldModule: WorldModule = {
     intro: 'The landing is already awake when you arrive.',
   },
   metadata: {
+    summary: 'A coastal settlement carved from leviathan bones, where salvage and survival shape every bargain.',
     settlement: 'The Landing',
     tone: 'coastal, resource-pressured, grounded',
   },
