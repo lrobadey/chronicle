@@ -810,11 +810,34 @@ describe('CLI app', () => {
     assert.equal(result.exitCode, 0);
     assert.equal(engine.initCalls[0]?.worldId, 'tel-mora');
     assert.deepEqual(terminal.prompts, ['world> ', '> ']);
-    assert.ok(terminal.output().includes('Choose a world:'));
-    assert.ok(terminal.output().includes('Tel Mora — The Dead Junction'));
-    assert.ok(terminal.output().includes('=== Chronicle vNext - Tel Mora — The Dead Junction ==='));
-    assert.ok(terminal.output().includes('The junction is quiet, but no one trusts it.'));
-    assert.ok(terminal.output().includes('A recommendation is coming, and everyone is listening for it.'));
+    const output = terminal.output();
+    assert.ok(output.includes('Choose a world:'));
+    assert.ok(output.includes('  1. Isle of Marrow - A coastal settlement carved from leviathan bones, where salvage and survival shape every bargain.'));
+    assert.ok(output.includes('  2. Tel Mora — The Dead Junction - A dead canal junction where restoration, housing, and water scarcity collide.'));
+    assert.ok(!output.includes('Press Enter for Isle of Marrow.'));
+    assert.ok(output.includes('Starting in Tel Mora — The Dead Junction.'));
+    assert.ok(output.includes('=== Chronicle vNext - Tel Mora — The Dead Junction ==='));
+    assert.ok(output.includes('The junction is quiet, but no one trusts it.'));
+    assert.ok(output.includes('A recommendation is coming, and everyone is listening for it.'));
+  });
+
+  it('reprompts after blank startup world input without initializing the engine', async () => {
+    const engine = new StubCliEngine();
+    const terminal = new ScriptedTerminal(['', '1', '/exit']);
+    const result = await runCli({
+      engine,
+      terminal,
+      apiMode: 'fallback',
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(engine.initCalls.length, 1);
+    assert.equal(engine.initCalls[0]?.worldId, 'isle-of-marrow');
+    assert.deepEqual(terminal.prompts, ['world> ', 'world> ', '> ']);
+    const output = terminal.output();
+    assert.ok(output.includes('Choose a world to continue.'));
+    assert.ok(output.includes('Starting in Isle of Marrow.'));
+    assert.ok(output.includes('=== Chronicle vNext - Isle of Marrow ==='));
   });
 
   it('treats EOF at the startup world prompt as a normal exit path', async () => {
