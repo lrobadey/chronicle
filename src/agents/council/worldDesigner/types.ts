@@ -30,6 +30,15 @@ export interface WorldDesignerTaskContext {
   worldSnapshot: unknown;
   /** Current agenda for world-level threads. */
   worldAgenda: unknown;
+  /**
+   * Request to materialize or deepen a faction entity.
+   * The World Designer owns faction canonical structure; the Character
+   * Designer owns faction social dynamics.
+   */
+  factionMaterializationRequest?: {
+    factionId: string;
+    reason: string;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -51,4 +60,12 @@ export interface WorldDesignerResultDetail {
   }>;
   /** Notes on map consistency issues detected or resolved. */
   coherenceNotes: string[];
+  /**
+   * Proposed faction materialization events (CreateEntity faction).
+   * Used when the Steward decides to deepen faction structure adaptively.
+   */
+  factionProposals: Array<{
+    summary: string;
+    candidateEvents: WorldEvent[];
+  }>;
 }

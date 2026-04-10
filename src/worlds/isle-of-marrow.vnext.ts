@@ -1,4 +1,4 @@
-import type { WorldState, LocationPOI, Actor, Item, ItemLocationInput, KnowledgeState } from '../sim/state';
+import type { WorldState, LocationPOI, Actor, FactionEntity, Item, ItemLocationInput, KnowledgeState } from '../sim/state';
 import { buildInitialSpine } from '../sim/spine';
 
 export interface CreateWorldOptions {
@@ -96,6 +96,7 @@ const actors: Record<string, Actor> = {
     name: 'You',
     pos: { x: 0, y: 0, z: 0 },
     inventory: [],
+    factionStandings: {},
   },
   'mira-salt': {
     id: 'mira-salt',
@@ -165,6 +166,37 @@ const actors: Record<string, Actor> = {
   },
 };
 
+/**
+ * Isle of Marrow factions — first-class Spine entities (North Star §4.2.1).
+ * Each NPC is wired to their faction via member_of relations in buildInitialSpine.
+ */
+const factions: Record<string, FactionEntity> = {
+  'the-market-guild': {
+    id: 'the-market-guild',
+    name: 'The Market Guild',
+    description:
+      'The informal brotherhood of merchants, quartermasters, and traders who keep the Rib Market running. They control what moves on the island, what prices hold, and which ships are welcome at the docks.',
+    tags: ['trade', 'commerce', 'market'],
+    memberIds: ['ledger-pike'],
+  },
+  'heartspring-clergy': {
+    id: 'heartspring-clergy',
+    name: 'The Heartspring Clergy',
+    description:
+      'A small order of devotees who tend the Heartspring deep within the skeleton. They offer healing water, hear confession, and guard the rituals that the island considers sacred.',
+    tags: ['religion', 'healing', 'ritual'],
+    memberIds: ['father-kel'],
+  },
+  'dock-brotherhood': {
+    id: 'dock-brotherhood',
+    name: 'The Dock Brotherhood',
+    description:
+      'The dockworkers and tide-watchers who manage the Landing. They know the sea, the ropes, the shipping schedules, and every mark the tide leaves on the pilings. Their loyalty is to the work and to each other.',
+    tags: ['docks', 'labor', 'seafaring'],
+    memberIds: ['tamar-vane'],
+  },
+};
+
 const items: Record<string, Item> = {
   'heartwater-jar': {
     id: 'heartwater-jar',
@@ -192,6 +224,7 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
       seenActors: { 'player-1': true, 'tamar-vane': true },
       seenItems: {},
       notes: [],
+      rumors: [],
     },
   };
 
@@ -219,6 +252,7 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
     actors,
     items,
     locations,
+    factions,
     spine: {
       entities: {},
       relations: {},
@@ -259,6 +293,8 @@ export function createIsleOfMarrowWorldVNext(options: CreateWorldOptions = {}): 
       pendingWorldEvents: [],
       playerBehaviorPatterns: {},
       capabilityCandidates: [],
+      factionPressures: [],
+      reputationDriftLastMinutes: 0,
     },
     ledger: [
       { turn: 0, text: 'Isle of Marrow initialized' },

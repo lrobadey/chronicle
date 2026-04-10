@@ -31,6 +31,17 @@ export interface CharacterDesignerTaskContext {
   sceneObservation: unknown;
   /** Conversation history relevant to this turn. */
   conversationHistory: unknown;
+  /**
+   * Faction context the Steward provides so the Character Designer can
+   * reason about inter-faction dynamics and the player's standing with
+   * each faction present in the scene.
+   */
+  factionContext?: {
+    /** Faction IDs relevant to this scene (members present or topic of conversation). */
+    relevantFactionIds: string[];
+    /** The player's current standing with each relevant faction. */
+    playerStandings: Record<string, number>;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -50,10 +61,19 @@ export interface NpcCharacterOutput {
 /** Domain-specific detail in the Character Designer's council result. */
 export interface CharacterDesignerResultDetail {
   npcOutputs: NpcCharacterOutput[];
-  /** Relationship changes observed or recommended. */
+  /**
+   * Relationship changes observed or recommended.
+   * When factionId is present the change is to the actor's faction standing
+   * (proposed as a ModifyReputation event); otherwise it is a bilateral NPC
+   * relationship update (trust / fear / affinity).
+   */
   relationshipUpdates: Array<{
     fromActorId: string;
     toActorId: string;
     change: string;
+    /** Present when the change should be recorded as a ModifyReputation event. */
+    factionId?: string;
+    /** Numeric delta for faction standing changes. Positive = improve, negative = worsen. */
+    standingDelta?: number;
   }>;
 }
