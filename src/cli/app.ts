@@ -8,6 +8,7 @@ import { isChronicleError } from '../engine/errors';
 import type { GMReasoningEffort } from '../agents/gm/gmAgent';
 import type { NarratorStyle } from '../agents/narrator/narratorAgent';
 import type { WorldEvent } from '../sim/events';
+import { DEFAULT_WORLD_ID, listWorldModules, resolveWorldModule, type WorldModule } from '../worlds';
 import { ThinkingAnimation, type ThinkingPhase } from './thinkingAnimation';
 import { parseCommand } from './commandParsing';
 
@@ -18,6 +19,9 @@ const DEFAULT_GM_REASONING_EFFORT: GMReasoningEffort = 'low';
 export interface CliState {
   sessionId: string;
   playerId: string;
+  startupWorldId: string;
+  worldId: string;
+  worldDisplayName: string;
   narratorStyle: NarratorStyle;
   gmReasoningEffort: GMReasoningEffort;
   apiKey?: string;
@@ -29,6 +33,7 @@ export interface CliState {
 export interface CliEngine {
   initSession(params: {
     sessionId?: string;
+    worldId?: string;
     apiKey?: string;
     debug?: { onEvent?: DebugSink };
     stream?: {
@@ -71,6 +76,8 @@ export interface CliOptions {
   engine: CliEngine;
   terminal: CliTerminal;
   sessionId?: string;
+  startupWorldId?: string;
+  skipWorldPrompt?: boolean;
   narratorStyle?: NarratorStyle;
   debugEnabled?: boolean;
   debugDetail?: DebugDetail;
@@ -106,6 +113,8 @@ export async function runCli(options: CliOptions): Promise<CliRunResult> {
     engine,
     terminal,
     sessionId,
+    startupWorldId,
+    skipWorldPrompt = false,
     transcript,
     env = process.env,
     narratorStyle = 'michener',
@@ -144,12 +153,25 @@ export async function runCli(options: CliOptions): Promise<CliRunResult> {
     }
 
     shouldPrintGoodbye = true;
-    write('\n=== Chronicle vNext - Isle of Marrow ===\n\n');
-
     const resolvedApiKey = resolveStartupApiKey(apiMode, env);
+    const startupWorld = await resolveStartupWorld({
+      terminal,
+      readLine,
+      write,
+      sessionId,
+      startupWorldId,
+      skipWorldPrompt,
+    });
+    const bannerWorld = sessionId ? null : startupWorld;
+    write(`\n=== ${bannerWorld ? formatBannerTitle(bannerWorld) : 'Chronicle vNext'} ===\n\n`);
+    if (bannerWorld?.cliTheme?.intro) {
+      write(`${bannerWorld.cliTheme.intro}\n\n`);
+    }
+
     finalState = await initCliSession({
       engine,
       sessionId,
+      worldId: startupWorld.id,
       apiKey: resolvedApiKey,
       gmReasoningEffort: DEFAULT_GM_REASONING_EFFORT,
       narratorStyle,
@@ -203,6 +225,7 @@ export async function startCli(
 export async function initCliSession(params: {
   engine: CliEngine;
   sessionId?: string;
+  worldId?: string;
   apiKey?: string;
   gmReasoningEffort: GMReasoningEffort;
   narratorStyle: NarratorStyle;
@@ -212,7 +235,7 @@ export async function initCliSession(params: {
   write: (text: string) => void;
   thinkingAnimation: ThinkingAnimation;
 }): Promise<CliState> {
-  const { engine, sessionId, apiKey, gmReasoningEffort, narratorStyle, debugEnabled, debugDetail, apiMode, write, thinkingAnimation } = params;
+  const { engine, sessionId, worldId, apiKey, gmReasoningEffort, narratorStyle, debugEnabled, debugDetail, apiMode, write, thinkingAnimation } = params;
   const debugSink = debugEnabled ? createDebugWriter(write, debugDetail, thinkingAnimation) : undefined;
   const openingChunks: string[] = [];
   let openingStreamed = false;
@@ -224,6 +247,7 @@ export async function initCliSession(params: {
   const { result, usedFallback } = await initWithFallback(
     engine,
     sessionId,
+    worldId,
     apiKey,
     apiMode,
     telemetry => {
@@ -256,6 +280,7 @@ export async function initCliSession(params: {
   } else if (usedFallback) {
     write('(API unavailable - switched to deterministic fallback mode)\n\n');
   }
+  write(`World: ${result.world.displayName}\n\n`);
 
   if (debugEnabled) {
     const openingText = openingChunks.join('') || result.opening;
@@ -269,6 +294,9 @@ export async function initCliSession(params: {
   return {
     sessionId: result.sessionId,
     playerId: 'player-1',
+    startupWorldId: worldId || result.world.id,
+    worldId: result.world.id,
+    worldDisplayName: result.world.displayName,
     narratorStyle,
     gmReasoningEffort,
     apiKey: usedFallback ? undefined : apiKey,
@@ -299,6 +327,8 @@ export async function handleCliLine(params: {
         return { state, exit: true };
       case 'session':
         write(`\nSession: ${state.sessionId}\n`);
+        write(`World: ${state.worldDisplayName} (${state.worldId})\n`);
+        write(`New session default: ${state.startupWorldId}\n`);
         write(`Narrator style: ${state.narratorStyle}\n`);
         write(`GM reasoning: ${state.gmReasoningEffort}\n`);
         write(`Debug mode: ${state.debugEnabled ? 'on' : 'off'}\n`);
@@ -356,6 +386,7 @@ export async function handleCliLine(params: {
         state = await initCliSession({
           engine,
           sessionId: requestedSession,
+          worldId: state.startupWorldId,
           apiKey: state.apiKey,
           gmReasoningEffort: state.gmReasoningEffort,
           write,
@@ -483,6 +514,50 @@ function shouldUseAnsi(env: NodeJS.ProcessEnv): boolean {
   return true;
 }
 
+async function resolveStartupWorld(params: {
+  terminal: CliTerminal;
+  readLine: (prompt: string) => Promise<string | null>;
+  write: (text: string) => void;
+  sessionId?: string;
+  startupWorldId?: string;
+  skipWorldPrompt?: boolean;
+}): Promise<WorldModule> {
+  if (params.startupWorldId) {
+    return resolveWorldModule(params.startupWorldId);
+  }
+
+  if (params.sessionId || params.skipWorldPrompt || !params.terminal.isTTY()) {
+    return resolveWorldModule(DEFAULT_WORLD_ID);
+  }
+
+  const worlds = listWorldModules();
+  params.write('Choose a world:\n');
+  for (const [index, world] of worlds.entries()) {
+    const label = world.displayName;
+    const description = typeof world.metadata?.summary === 'string' ? ` - ${world.metadata.summary}` : '';
+    params.write(`  ${index + 1}. ${label}${description}\n`);
+  }
+  params.write('Press Enter for Isle of Marrow.\n\n');
+  const choice = (await params.readLine('world> '))?.trim().toLowerCase() || '';
+  const selected = selectWorldFromChoice(choice, worlds) || resolveWorldModule(DEFAULT_WORLD_ID);
+  params.write(`Starting in ${selected.displayName}.\n\n`);
+  return selected;
+}
+
+function selectWorldFromChoice(choice: string, worlds: WorldModule[]): WorldModule | undefined {
+  if (!choice) return undefined;
+  if (choice === '1') return worlds[0];
+  if (choice === '2') return worlds[1];
+  return worlds.find(world => {
+    const normalizedDisplayName = world.displayName.toLowerCase();
+    return choice === world.id || normalizedDisplayName === choice || normalizedDisplayName.includes(choice) || world.id.includes(choice);
+  });
+}
+
+function formatBannerTitle(world: WorldModule): string {
+  return `Chronicle vNext - ${world.displayName}`;
+}
+
 function resolveStartupApiKey(apiMode: CliApiMode, env: NodeJS.ProcessEnv): string | undefined {
   if (apiMode === 'fallback') return undefined;
   const apiKey = resolveApiKey(env);
@@ -503,7 +578,7 @@ Commands:
   /debug [on|off]       Toggle live debug timeline (default toggles)
   /trace [on|off]       Alias for /debug
   /detail <mode>        Set debug detail (summary|raw)
-  /new [sessionId]      Start or resume a session
+  /new [sessionId]      Start or resume a session in the current world
   /exit                 Exit CLI
 `;
 }
@@ -1042,6 +1117,7 @@ function indentBlock(text: string): string {
 async function initWithFallback(
   engine: CliEngine,
   sessionId: string | undefined,
+  worldId: string | undefined,
   apiKey: string | undefined,
   apiMode: CliApiMode,
   onOpeningStart?: (telemetry: InitResult['telemetry']) => void,
@@ -1052,6 +1128,7 @@ async function initWithFallback(
     return {
       result: await engine.initSession({
         sessionId,
+        worldId,
         debug: onDebugEvent ? { onEvent: onDebugEvent } : undefined,
         stream: onOpeningStart || onOpeningDelta ? { onOpeningStart, onOpeningDelta } : undefined,
       }),
@@ -1063,6 +1140,7 @@ async function initWithFallback(
     return {
       result: await engine.initSession({
         sessionId,
+        worldId,
         apiKey,
         debug: onDebugEvent ? { onEvent: onDebugEvent } : undefined,
         stream: onOpeningStart || onOpeningDelta ? { onOpeningStart, onOpeningDelta } : undefined,
@@ -1074,6 +1152,7 @@ async function initWithFallback(
     return {
       result: await engine.initSession({
         sessionId,
+        worldId,
         debug: onDebugEvent ? { onEvent: onDebugEvent } : undefined,
         stream: onOpeningStart || onOpeningDelta ? { onOpeningStart, onOpeningDelta } : undefined,
       }),

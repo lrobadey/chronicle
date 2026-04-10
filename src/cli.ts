@@ -33,6 +33,8 @@ async function main() {
   });
   const result = await startCli(engine, {
     env: process.env,
+    startupWorldId: process.env.CHRONICLE_STARTUP_WORLD_ID || undefined,
+    skipWorldPrompt: isTruthyEnv(process.env.CHRONICLE_SKIP_WORLD_PROMPT),
     apiMode: resolveCliApiMode(process.env.CHRONICLE_API_MODE),
     allowNonTty: isTruthyEnv(process.env.CHRONICLE_ALLOW_NON_TTY),
     transcript: createTranscriptSink(process.env.CHRONICLE_CLI_TRANSCRIPT),

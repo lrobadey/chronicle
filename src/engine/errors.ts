@@ -30,6 +30,18 @@ export class PlayerNotFoundError extends ChronicleError {
   }
 }
 
+export class UnknownWorldError extends ChronicleError {
+  constructor(worldId: string | undefined, validWorldIds: string[]) {
+    const requested = worldId?.trim() || 'unknown';
+    super(
+      'unknown_world',
+      `Unknown world id: ${requested}. Valid worlds: ${validWorldIds.join(', ')}`,
+      400,
+      { worldId, validWorldIds },
+    );
+  }
+}
+
 export class IncompatibleSessionError extends ChronicleError {
   constructor(sessionId: string, version: string | undefined) {
     super(

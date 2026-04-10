@@ -60,7 +60,8 @@ import {
   type MechanicsWorkerRequest,
 } from '../agents/mechanics';
 import { closeStewardTurn, openStewardTurn } from '../agents/steward';
-import { createIsleOfMarrowWorldVNext } from '../worlds/isle-of-marrow.vnext';
+import { resolveWorldModule } from '../worlds/registry';
+import { describeWorldModule, type WorldModule, type WorldPresentation } from '../worlds/types';
 import type { DebugSink } from './debug';
 import { emitDebugEvent } from './debug';
 import {
@@ -87,7 +88,7 @@ export interface TurnEngineConfig {
   store?: SessionStore;
   llm?: LLMClient;
   clock?: () => Date;
-  worldFactory?: (worldId?: string) => WorldState;
+  worldResolver?: (worldId?: string) => WorldModule;
 }
 
 export interface InitResult {
@@ -96,6 +97,7 @@ export interface InitResult {
   telemetry: ReturnType<typeof buildTelemetry>;
   opening: string;
   history?: WebTranscriptHistory;
+  world: WorldPresentation;
 }
 
 export interface RunTurnInput {
@@ -126,17 +128,19 @@ export interface RunTurnOutput {
 export class TurnEngine {
   private store: SessionStore;
   private llm: LLMClient;
-  private worldFactory: (worldId?: string) => WorldState;
+  private clock: () => Date;
+  private worldResolver: (worldId?: string) => WorldModule;
 
   constructor(config: TurnEngineConfig = {}) {
     this.store = config.store || new JsonlSessionStore(path.resolve(process.cwd(), 'data/sessions'));
     this.llm = config.llm || new OpenAIClient();
-    const clock = config.clock || (() => new Date());
-    this.worldFactory = config.worldFactory || (() => createIsleOfMarrowWorldVNext({ anchorIso: clock().toISOString() }));
+    this.clock = config.clock || (() => new Date());
+    this.worldResolver = config.worldResolver || resolveWorldModule;
   }
 
   async initSession(params: {
     sessionId?: string;
+    worldId?: string;
     apiKey?: string;
     debug?: { onEvent?: DebugSink };
     stream?: {
@@ -144,16 +148,20 @@ export class TurnEngine {
       onOpeningDelta?: (delta: string) => void;
     };
   }): Promise<InitResult> {
-    const { sessionId, apiKey, debug, stream } = params;
+    const { sessionId, worldId, apiKey, debug, stream } = params;
     const emit = debug?.onEvent;
     emitDebugEvent(emit, { type: 'init.started', sessionId });
     try {
-      const ensured = await this.store.ensureSession(sessionId, this.worldFactory);
+      const ensured = await this.store.ensureSession(sessionId, {
+        worldId,
+        createWorld: requestedWorldId => this.createWorldState(requestedWorldId),
+      });
       const turnHistory = await this.store.loadTurnLog(ensured.sessionId);
       emitDebugEvent(emit, { type: 'init.session_ready', sessionId: ensured.sessionId, created: ensured.created });
       assertNoInvariantIssues(ensured.state, 'Session initialized with invalid world state');
       const telemetry = buildTelemetry(ensured.state, 'player-1');
       const history = buildWebTranscriptHistory(ensured.state, turnHistory);
+      const world = this.describeWorldState(ensured.state);
       stream?.onOpeningStart?.(telemetry);
       const opening = await narrateOpening({
         apiKey,
@@ -171,7 +179,7 @@ export class TurnEngine {
         }
         await this.store.saveSnapshot(ensured.sessionId, ensured.state);
       }
-      return { sessionId: ensured.sessionId, created: ensured.created, telemetry, opening, history };
+      return { sessionId: ensured.sessionId, created: ensured.created, telemetry, opening, history, world };
     } catch (error) {
       emitDebugEvent(emit, { type: 'error', stage: 'init', message: error instanceof Error ? error.message : 'unknown' });
       throw error;
@@ -185,8 +193,11 @@ export class TurnEngine {
     return buildTelemetry(state, playerId);
   }
 
-  async ensureStaffSession(params: { sessionId?: string; playerId: string }) {
-    const ensured = await this.store.ensureSession(params.sessionId, this.worldFactory);
+  async ensureStaffSession(params: { sessionId?: string; worldId?: string; playerId: string }) {
+    const ensured = await this.store.ensureSession(params.sessionId, {
+      worldId: params.worldId,
+      createWorld: requestedWorldId => this.createWorldState(requestedWorldId),
+    });
     if (!ensured.state.actors[params.playerId]) throw new PlayerNotFoundError(params.playerId);
     assertNoInvariantIssues(ensured.state, 'Session initialized with invalid world state');
     return {
@@ -194,6 +205,14 @@ export class TurnEngine {
       created: ensured.created,
       telemetry: buildTelemetry(ensured.state, params.playerId),
     };
+  }
+
+  private createWorldState(worldId?: string): WorldState {
+    return this.worldResolver(worldId).createWorld({ anchorIso: this.clock().toISOString() });
+  }
+
+  private describeWorldState(state: WorldState): WorldPresentation {
+    return describeWorldModule(this.worldResolver(state.meta.worldId));
   }
 
   async getStaffInterviewContext(sessionId: string, playerId: string): Promise<StaffInterviewContext> {

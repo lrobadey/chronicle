@@ -65,6 +65,19 @@ describe('vNext API compatibility', () => {
     assert.equal(typeof initBody.created, 'boolean');
     assert.equal(typeof initBody.initialNarration, 'string');
     assert.ok(initBody.telemetry);
+    assert.deepEqual(initBody.world, {
+      id: 'isle-of-marrow',
+      displayName: 'Isle of Marrow',
+      cliTheme: {
+        eyebrow: 'Chronicle vNext',
+        banner: 'The tide keeps its own counsel at first light.',
+        intro: 'The landing is already awake when you arrive.',
+      },
+      metadata: {
+        settlement: 'The Landing',
+        tone: 'coastal, resource-pressured, grounded',
+      },
+    });
     assert.deepEqual(initBody.history, {
       totalTurns: 0,
       recentTurns: [],
@@ -91,6 +104,39 @@ describe('vNext API compatibility', () => {
       accepted: [],
       rejected: [],
       outcome: 'quiet',
+    });
+  });
+
+  it('accepts worldId on /api/init and returns matching world metadata', async () => {
+    const { baseUrl } = await createRunningServer();
+
+    const initResponse = await fetch(`${baseUrl}/api/init`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ worldId: 'tel-mora' }),
+    });
+
+    assert.equal(initResponse.status, 200);
+    const initBody = await initResponse.json() as Record<string, unknown>;
+    assert.deepEqual(initBody.world, {
+      id: 'tel-mora',
+      displayName: 'Tel Mora — The Dead Junction',
+      cliTheme: {
+        eyebrow: 'Chronicle vNext',
+        banner: 'The junction is quiet, but no one trusts it.',
+        intro: 'A recommendation is coming, and everyone is listening for it.',
+      },
+      metadata: {
+        settlement: 'Tel Mora',
+        tone: 'political, compact, resource-pressured',
+        economy: {
+          copper: 'scarce',
+          reedCloth: 'common',
+          driedFish: 'adequate',
+          cleanWater: 'rationed',
+          clayMudbrick: 'abundant',
+        },
+      },
     });
   });
 
@@ -129,6 +175,19 @@ describe('vNext API compatibility', () => {
     const completed = events[2]?.data as Record<string, unknown>;
     assert.equal(typeof completed.sessionId, 'string');
     assert.equal(typeof completed.initialNarration, 'string');
+    assert.deepEqual(completed.world, {
+      id: 'isle-of-marrow',
+      displayName: 'Isle of Marrow',
+      cliTheme: {
+        eyebrow: 'Chronicle vNext',
+        banner: 'The tide keeps its own counsel at first light.',
+        intro: 'The landing is already awake when you arrive.',
+      },
+      metadata: {
+        settlement: 'The Landing',
+        tone: 'coastal, resource-pressured, grounded',
+      },
+    });
     assert.deepEqual(completed.history, {
       totalTurns: 0,
       recentTurns: [],

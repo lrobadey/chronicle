@@ -9,6 +9,7 @@ import { ScriptedTerminal } from './scriptedTerminal';
 class StubCliEngine implements CliEngine {
   readonly initCalls: Array<{
     sessionId?: string;
+    worldId?: string;
     apiKey?: string;
     debugEnabled?: boolean;
     stream?: {
@@ -21,6 +22,7 @@ class StubCliEngine implements CliEngine {
 
   async initSession(params: {
     sessionId?: string;
+    worldId?: string;
     apiKey?: string;
     debug?: { onEvent?: DebugSink };
     stream?: {
@@ -30,6 +32,7 @@ class StubCliEngine implements CliEngine {
   }) {
     this.initCalls.push({
       sessionId: params.sessionId,
+      worldId: params.worldId,
       apiKey: params.apiKey,
       debugEnabled: Boolean(params.debug?.onEvent),
       stream: params.stream,
@@ -55,6 +58,7 @@ class StubCliEngine implements CliEngine {
       created: true,
       telemetry,
       opening,
+      world: worldInfoFor(params.worldId),
     };
   }
 
@@ -158,6 +162,9 @@ function baseState(overrides: Partial<CliState> = {}): CliState {
   return {
     sessionId: 'session-1',
     playerId: 'player-1',
+    startupWorldId: 'isle-of-marrow',
+    worldId: 'isle-of-marrow',
+    worldDisplayName: 'Isle of Marrow',
     narratorStyle: 'michener',
     gmReasoningEffort: 'low',
     apiKey: 'test-key',
@@ -165,6 +172,32 @@ function baseState(overrides: Partial<CliState> = {}): CliState {
     debugDetail: 'summary',
     apiMode: 'auto',
     ...overrides,
+  };
+}
+
+function worldInfoFor(worldId?: string) {
+  if (worldId === 'tel-mora') {
+    return {
+      id: 'tel-mora',
+      displayName: 'Tel Mora — The Dead Junction',
+      cliTheme: {
+        eyebrow: 'Chronicle vNext',
+        banner: 'The junction is quiet, but no one trusts it.',
+        intro: 'A recommendation is coming, and everyone is listening for it.',
+      },
+      metadata: {},
+    };
+  }
+
+  return {
+    id: 'isle-of-marrow',
+    displayName: 'Isle of Marrow',
+    cliTheme: {
+      eyebrow: 'Chronicle vNext',
+      banner: 'The tide keeps its own counsel at first light.',
+      intro: 'The landing is already awake when you arrive.',
+    },
+    metadata: {},
   };
 }
 
@@ -219,6 +252,8 @@ describe('CLI app', () => {
 
     assert.equal(state.apiKey, undefined);
     assert.equal(state.apiMode, 'fallback');
+    assert.equal(state.worldId, 'isle-of-marrow');
+    assert.equal(state.worldDisplayName, 'Isle of Marrow');
     assert.equal(engine.initCalls.length, 2);
     assert.equal(engine.initCalls[0]?.apiKey, 'bad-key');
     assert.equal(engine.initCalls[1]?.apiKey, undefined);
@@ -286,6 +321,7 @@ describe('CLI app', () => {
       engine,
       terminal,
       apiMode: 'fallback',
+      startupWorldId: 'isle-of-marrow',
     });
 
     assert.equal(result.exitCode, 0);
@@ -303,6 +339,7 @@ describe('CLI app', () => {
       engine,
       terminal,
       apiMode: 'fallback',
+      startupWorldId: 'isle-of-marrow',
     });
 
     assert.equal(result.exitCode, 0);
@@ -376,6 +413,8 @@ describe('CLI app', () => {
     }));
 
     assert.equal(state.sessionId, 'session-2');
+    assert.equal(state.worldId, 'isle-of-marrow');
+    assert.equal(state.worldDisplayName, 'Isle of Marrow');
     assert.equal(state.gmReasoningEffort, 'high');
   });
 
@@ -685,6 +724,7 @@ describe('CLI app', () => {
       terminal,
       apiMode: 'fallback',
       env: { OPENAI_API_KEY: 'live-key' },
+      startupWorldId: 'isle-of-marrow',
     });
 
     assert.equal(result.exitCode, 0);
@@ -698,10 +738,28 @@ describe('CLI app', () => {
     assert.ok(output.includes('(Fallback mode - deterministic runtime)'));
     assert.ok(output.includes('Opening:\n[Day 1, 14:00] opening-session-1'));
     assert.ok(output.includes('Commands:'));
+    assert.ok(output.includes('World: Isle of Marrow (isle-of-marrow)'));
     assert.ok(output.includes('Location: The Landing'));
     assert.ok(output.includes('Session: session-1'));
     assert.ok(output.includes('Goodbye!'));
     assert.equal(terminal.closed, true);
+  });
+
+  it('prompts for a startup world when no dedicated world is provided', async () => {
+    const engine = new StubCliEngine();
+    const terminal = new ScriptedTerminal(['2', '/exit']);
+    const result = await runCli({
+      engine,
+      terminal,
+      apiMode: 'fallback',
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(engine.initCalls[0]?.worldId, 'tel-mora');
+    assert.deepEqual(terminal.prompts, ['world> ', '> ']);
+    assert.ok(terminal.output().includes('Choose a world:'));
+    assert.ok(terminal.output().includes('Tel Mora — The Dead Junction'));
+    assert.ok(terminal.output().includes('=== Chronicle vNext - Tel Mora — The Dead Junction ==='));
   });
 
   it('treats EOF as a normal exit path', async () => {
@@ -711,6 +769,7 @@ describe('CLI app', () => {
       engine,
       terminal,
       apiMode: 'fallback',
+      startupWorldId: 'isle-of-marrow',
     });
 
     assert.equal(result.exitCode, 0);
@@ -744,6 +803,7 @@ describe('CLI app', () => {
       allowNonTty: true,
       env: { OPENAI_API_KEY: 'live-key' },
       transcript: event => transcript.push(event),
+      startupWorldId: 'isle-of-marrow',
     });
 
     assert.equal(result.exitCode, 0);
@@ -766,6 +826,7 @@ describe('CLI app', () => {
       terminal,
       apiMode: 'live',
       env: {},
+      startupWorldId: 'isle-of-marrow',
     });
 
     assert.equal(result.exitCode, 1);
@@ -783,6 +844,7 @@ describe('CLI app', () => {
       terminal,
       apiMode: 'auto',
       env: { OPENAI_API_KEY: 'live-key' },
+      startupWorldId: 'isle-of-marrow',
     });
 
     assert.equal(result.exitCode, 0);

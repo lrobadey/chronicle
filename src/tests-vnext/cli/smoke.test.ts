@@ -88,4 +88,21 @@ describe('CLI smoke', () => {
     assert.ok(transcript.includes('"type":"prompt"'));
     assert.ok(transcript.includes('"type":"input","text":"look around"'));
   });
+
+  it('boots the tel-mora startup world when requested by script env', async () => {
+    const sessionRoot = await makeTempDir('chronicle-cli-smoke-tel-mora-');
+
+    const result = await runCliSmoke('/exit\n', {
+      CHRONICLE_ALLOW_NON_TTY: '1',
+      CHRONICLE_API_MODE: 'fallback',
+      CHRONICLE_SESSION_ROOT: sessionRoot,
+      CHRONICLE_STARTUP_WORLD_ID: 'tel-mora',
+      NODE_NO_WARNINGS: '1',
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.stdout.includes('=== Chronicle vNext - Tel Mora — The Dead Junction ==='));
+    assert.ok(result.stdout.includes('The junction is quiet, but no one trusts it.'));
+    assert.ok(result.stdout.includes('A recommendation is coming, and everyone is listening for it.'));
+  });
 });

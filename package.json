@@ -8,6 +8,8 @@
   },
   "scripts": {
     "cli": "tsx src/cli.ts",
+    "cli:isle-of-marrow": "CHRONICLE_STARTUP_WORLD_ID=isle-of-marrow CHRONICLE_SKIP_WORLD_PROMPT=1 tsx src/cli.ts",
+    "cli:tel-mora": "CHRONICLE_STARTUP_WORLD_ID=tel-mora CHRONICLE_SKIP_WORLD_PROMPT=1 tsx src/cli.ts",
     "staff-cli": "tsx src/staff-cli.ts",
     "server": "tsx src/server.ts",
     "test": "rm -rf .tmp-tests && tsc -p tsconfig.test.json && echo '{\"type\":\"commonjs\"}' > .tmp-tests/package.json && node --test .tmp-tests/tests-vnext/**/*.test.js",

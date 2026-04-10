@@ -6,7 +6,7 @@ import type { StaffInterviewMessage, StaffInterviewResult } from '../agents/staf
 import { parseCommand } from './commandParsing';
 
 export interface StaffCliEngine {
-  ensureStaffSession(params: { sessionId?: string; playerId: string }): Promise<{
+  ensureStaffSession(params: { sessionId?: string; worldId?: string; playerId: string }): Promise<{
     sessionId: string;
     created: boolean;
   }>;
@@ -158,12 +158,14 @@ export async function handleStaffCliLine(params: {
 async function openStaffSession(params: {
   engine: StaffCliEngine;
   sessionId?: string;
+  worldId?: string;
   playerId: string;
   apiKey?: string;
   write: (text: string) => void;
 }): Promise<StaffCliState> {
   const ensured = await params.engine.ensureStaffSession({
     sessionId: params.sessionId,
+    worldId: params.worldId,
     playerId: params.playerId,
   });
   params.write(`Session: ${ensured.sessionId}${ensured.created ? ' (created)' : ''}\n`);

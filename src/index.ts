@@ -11,4 +11,4 @@ export * from './agents/narrator';
 export * from './agents/specialists';
 export * from './agents/mechanics';
 export * from './agents/staffInterview';
-export { createIsleOfMarrowWorldVNext } from './worlds/isle-of-marrow.vnext';
+export * from './worlds';
