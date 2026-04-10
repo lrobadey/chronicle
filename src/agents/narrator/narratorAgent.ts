@@ -63,6 +63,7 @@ export function buildNarratorParamsFromSystemsPacket(input: {
   apiKey?: string;
   model?: string;
   style?: NarratorStyle;
+  telemetry: Telemetry;
   diff: TurnDiff;
   recentTurns: RecentTurnDigest[];
   opening?: OpeningRecap | null;
@@ -78,7 +79,7 @@ export function buildNarratorParamsFromSystemsPacket(input: {
     model: input.model,
     style: input.style,
     playerText: input.packet.playerText,
-    telemetry: input.packet.telemetry,
+    telemetry: input.telemetry,
     diff: input.diff,
     recentTurns: input.recentTurns,
     opening: input.opening,

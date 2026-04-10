@@ -1354,6 +1354,8 @@ describe('TurnEngine', () => {
       ]);
       const engine = new TurnEngine({ store, llm });
       const init = await engine.initSession({});
+      const before = await store.loadSession(init.sessionId);
+      assert.ok(before);
       const debugEvents: DebugEvent[] = [];
 
       const turn = await engine.runTurn({
@@ -1370,6 +1372,9 @@ describe('TurnEngine', () => {
       assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'));
       assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'close_steward_turn'));
       assert.equal(turn.trace?.mechanicsResolutions?.[0]?.interpretation, 'move');
+      assert.notDeepEqual(turn.telemetry.player.pos, before.actors['player-1']?.pos);
+      const narratorInput = JSON.parse(String(llm.calls[1]?.input || '{}'));
+      assert.deepEqual(narratorInput.telemetry, turn.telemetry);
     } finally {
       await removeDir(rootDir);
     }
@@ -1419,6 +1424,58 @@ describe('TurnEngine', () => {
       assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), true);
       const fallback = turn.trace?.toolCalls.find(call => call.tool === 'steward_fallback_to_gm');
       assert.equal((fallback?.output as { reason?: string } | undefined)?.reason, 'systems_mechanics_unsafe_events');
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('falls back to the GM when systems movement events are rejected during application', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'systems-mechanics-rejected-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_mechanics_resolution',
+              arguments:
+                '{"interpretation":"move","summary":"move north","actions":[{"type":"move","actorId":"player-1","to":{"x":9999,"y":9999,"z":0},"toLocationId":null,"mode":"walk","note":"Move north."}],"pendingPrompt":null,"touchedEntities":["player-1"],"confidence":0.88,"warnings":[]}',
+              call_id: 'systems-mechanics-rejected-call',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-after-systems-rejected-1',
+          output: [],
+          output_text: 'done',
+        },
+        {
+          id: 'narr-after-systems-rejected-1',
+          output: [],
+          output_text: 'You stop short and reconsider the path ahead.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const debugEvents: DebugEvent[] = [];
+
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'go north',
+        apiKey: 'test-key',
+        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 0);
+      assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), true);
+      const fallback = turn.trace?.toolCalls.find(call => call.tool === 'steward_fallback_to_gm');
+      assert.equal((fallback?.output as { reason?: string } | undefined)?.reason, 'systems_events_rejected_or_unapplied');
+      assert.equal(llm.calls.length, 3);
+      const narratorInput = JSON.parse(String(llm.calls[2]?.input || '{}'));
+      assert.deepEqual(narratorInput.telemetry, turn.telemetry);
     } finally {
       await removeDir(rootDir);
     }

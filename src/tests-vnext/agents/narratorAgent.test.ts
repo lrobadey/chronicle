@@ -242,6 +242,14 @@ describe('narrator streaming', () => {
   });
 
   it('bridges a systems narrator packet into the legacy narrator params shape', () => {
+    const finalTelemetry = {
+      ...telemetry,
+      location: {
+        ...telemetry.location,
+        id: 'north-of-landing',
+        name: 'North of the Landing',
+      },
+    };
     const params = buildNarratorParamsFromSystemsPacket({
       packet: {
         version: 'systems_v1',
@@ -252,13 +260,14 @@ describe('narrator streaming', () => {
         observation: { player: { id: 'player-1' } } as any,
         warnings: [],
       },
+      telemetry: finalTelemetry as any,
       diff,
       recentTurns: [],
       llm: new QueueLLM([]),
     });
 
     assert.equal(params.playerText, 'look around');
-    assert.deepEqual(params.telemetry, telemetry);
+    assert.deepEqual(params.telemetry, finalTelemetry);
     assert.equal(params.diff, diff);
   });
 });

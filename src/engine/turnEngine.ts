@@ -589,10 +589,25 @@ export class TurnEngine {
         });
 
         if (closeResult.handled) {
+          const acceptedBefore = acceptedEvents.length;
           const result = applyProposedEvents(closeResult.proposedEvents);
-          handledBySteward = result.ok;
-          if (closeResult.narratorHandoff.kind === 'systems_v1') {
+          const acceptedDelta = acceptedEvents.length - acceptedBefore;
+          const readOnlySystemsTurn = closeResult.proposedEvents.length === 0;
+          handledBySteward = readOnlySystemsTurn ? result.ok : result.ok && acceptedDelta > 0;
+          if (handledBySteward && closeResult.narratorHandoff.kind === 'systems_v1') {
             systemsNarratorPacket = closeResult.narratorHandoff.packet;
+          } else if (!handledBySteward && trace) {
+            trace.toolCalls.push({
+              tool: 'steward_fallback_to_gm',
+              input: {
+                turnPlan: stewardResult.turnPlan,
+              },
+              output: {
+                reason: closeResult.proposedEvents.length > 0
+                  ? 'systems_events_rejected_or_unapplied'
+                  : closeResult.fallbackReason || 'steward_requested_gm_fallback',
+              },
+            });
           }
         } else if (trace) {
           trace.toolCalls.push({
@@ -901,6 +916,7 @@ export class TurnEngine {
             packet: systemsNarratorPacket,
             apiKey,
             style: narratorStyle,
+            telemetry: afterTelemetry,
             diff,
             recentTurns,
             opening: buildOpeningRecap(draft),
