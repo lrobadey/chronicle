@@ -593,7 +593,7 @@ export class TurnEngine {
           const result = applyProposedEvents(closeResult.proposedEvents);
           const acceptedDelta = acceptedEvents.length - acceptedBefore;
           const readOnlySystemsTurn = closeResult.proposedEvents.length === 0;
-          handledBySteward = readOnlySystemsTurn ? result.ok : result.ok && acceptedDelta > 0;
+          handledBySteward = readOnlySystemsTurn ? result.ok : result.ok && acceptedDelta === closeResult.proposedEvents.length;
           if (handledBySteward && closeResult.narratorHandoff.kind === 'systems_v1') {
             systemsNarratorPacket = closeResult.narratorHandoff.packet;
           } else if (!handledBySteward && trace) {

@@ -1481,6 +1481,59 @@ describe('TurnEngine', () => {
     }
   });
 
+  it('falls back to the GM when systems movement only partially applies', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'systems-mechanics-partial-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_mechanics_resolution',
+              arguments:
+                '{"interpretation":"move","summary":"move north","actions":[{"type":"move","actorId":"player-1","to":{"x":34,"y":61,"z":0},"toLocationId":null,"mode":"walk","note":"Take one careful step north."},{"type":"move","actorId":"player-1","to":{"x":9999,"y":9999,"z":0},"toLocationId":null,"mode":"walk","note":"Then lunge impossibly far."}],"pendingPrompt":null,"touchedEntities":["player-1"],"confidence":0.88,"warnings":[]}',
+              call_id: 'systems-mechanics-partial-call',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-after-systems-partial-1',
+          output: [],
+          output_text: 'done',
+        },
+        {
+          id: 'narr-after-systems-partial-1',
+          output: [],
+          output_text: 'You check yourself before committing to the path.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const debugEvents: DebugEvent[] = [];
+
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'go north',
+        apiKey: 'test-key',
+        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
+      });
+
+      assert.equal(turn.acceptedEvents.length, 1);
+      assert.equal(turn.rejectedEvents.length, 1);
+      assert.equal(debugEvents.some(event => event.type === 'gm.iteration.started'), true);
+      const fallback = turn.trace?.toolCalls.find(call => call.tool === 'steward_fallback_to_gm');
+      assert.equal((fallback?.output as { reason?: string } | undefined)?.reason, 'systems_events_rejected_or_unapplied');
+      assert.equal(llm.calls.length, 3);
+      const narratorInput = JSON.parse(String(llm.calls[2]?.input || '{}'));
+      assert.deepEqual(narratorInput.telemetry, turn.telemetry);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
   it('can revise or reject a mechanics draft without applying world changes', async () => {
     const { rootDir, store } = await createStore();
     try {
