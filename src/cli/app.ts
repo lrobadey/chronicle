@@ -164,6 +164,9 @@ export async function runCli(options: CliOptions): Promise<CliRunResult> {
     });
     const bannerWorld = sessionId ? null : startupWorld;
     write(`\n=== ${bannerWorld ? formatBannerTitle(bannerWorld) : 'Chronicle vNext'} ===\n\n`);
+    if (bannerWorld?.cliTheme?.banner) {
+      write(`${bannerWorld.cliTheme.banner}\n\n`);
+    }
     if (bannerWorld?.cliTheme?.intro) {
       write(`${bannerWorld.cliTheme.intro}\n\n`);
     }
@@ -294,7 +297,7 @@ export async function initCliSession(params: {
   return {
     sessionId: result.sessionId,
     playerId: 'player-1',
-    startupWorldId: worldId || result.world.id,
+    startupWorldId: result.world.id,
     worldId: result.world.id,
     worldDisplayName: result.world.displayName,
     narratorStyle,
