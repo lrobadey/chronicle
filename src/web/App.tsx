@@ -61,6 +61,7 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [advancedSessionOpen, setAdvancedSessionOpen] = useState(false);
+  const [headerCondensed, setHeaderCondensed] = useState(false);
   const initialBootStartedRef = useRef(false);
   const bootRequestIdRef = useRef(0);
   const turnRequestIdRef = useRef(0);
@@ -90,6 +91,15 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => {
+      setHeaderCondensed(window.scrollY > 28);
+    };
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
   async function bootSession(forceFresh = false) {
@@ -225,7 +235,7 @@ export default function App() {
   return (
     <div className="chronicle-app">
       <div className="chronicle-backdrop" />
-      <header className="app-header">
+      <header className={`app-header${headerCondensed ? ' compact' : ''}`}>
         <div className="brand-block">
           <span className="eyebrow">Chronicle vNext</span>
           <h1>{formatWorldTitle(world)}</h1>
