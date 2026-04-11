@@ -89,6 +89,31 @@ button {
   backdrop-filter: blur(28px) saturate(1.2);
   background: linear-gradient(180deg, rgba(7, 8, 9, 0.88), rgba(7, 8, 9, 0.48));
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: padding 160ms ease, gap 160ms ease, background 160ms ease;
+}
+
+.app-header.compact {
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(180deg, rgba(7, 8, 9, 0.95), rgba(7, 8, 9, 0.75));
+}
+
+.app-header.compact .eyebrow {
+  display: none;
+}
+
+.app-header.compact .brand-block h1 {
+  font-size: clamp(1.1rem, 2vw, 1.35rem);
+}
+
+.app-header.compact .session-pill {
+  padding: 0.35rem 0.68rem;
+  font-size: 0.62rem;
+}
+
+.app-header.compact .header-action {
+  padding: 0.42rem 0.72rem;
+  font-size: 0.67rem;
 }
 
 .brand-block h1,
@@ -193,8 +218,7 @@ button {
 }
 
 .world-card {
-  position: sticky;
-  top: 6rem;
+  position: relative;
   z-index: 10;
   margin-bottom: 1.5rem;
   padding: 1.25rem 1.5rem;
