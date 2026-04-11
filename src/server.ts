@@ -3,8 +3,10 @@
  */
 
 import 'dotenv/config';
+import fs from 'node:fs';
 import http from 'node:http';
-import { URL } from 'node:url';
+import path from 'node:path';
+import { URL, fileURLToPath } from 'node:url';
 import { TurnEngine } from './engine/turnEngine';
 import { InputValidationError, isChronicleError } from './engine/errors';
 
@@ -101,10 +103,55 @@ function normalizeError(err: unknown): { status: number; code: string; error: st
   };
 }
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const STATIC_DIR = path.resolve(__dirname, 'dist');
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html',
+  '.js': 'application/javascript',
+  '.mjs': 'application/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
+function serveStatic(res: http.ServerResponse, urlPath: string): boolean {
+  const relative = urlPath === '/' ? '/index.html' : urlPath;
+  const filePath = path.join(STATIC_DIR, path.normalize(relative));
+  if (!filePath.startsWith(STATIC_DIR + path.sep) && filePath !== STATIC_DIR) {
+    return false; // path traversal guard
+  }
+  const ext = path.extname(filePath);
+  const mime = MIME_TYPES[ext] || 'application/octet-stream';
+  try {
+    const data = fs.readFileSync(filePath);
+    res.writeHead(200, { 'Content-Type': mime });
+    res.end(data);
+    return true;
+  } catch {
+    // File not found — for extensionless paths try SPA fallback
+    if (ext === '' || ext === '.html') {
+      try {
+        const data = fs.readFileSync(path.join(STATIC_DIR, 'index.html'));
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(data);
+        return true;
+      } catch {
+        // dist not built yet; fall through to 404
+      }
+    }
+    return false;
+  }
+}
+
 export function createChronicleServer(engine = new TurnEngine()) {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
-    const path = url.pathname;
+    const urlPath = url.pathname;
     const method = req.method;
 
     if (method === 'OPTIONS') {
@@ -118,7 +165,7 @@ export function createChronicleServer(engine = new TurnEngine()) {
     }
 
     try {
-      if (path === '/api/init' && method === 'POST') {
+      if (urlPath === '/api/init' && method === 'POST') {
         const body = await parseBody(req);
         assertObject(body);
         const sessionId = asOptionalString(body.sessionId);
@@ -171,7 +218,7 @@ export function createChronicleServer(engine = new TurnEngine()) {
         return;
       }
 
-      if (path === '/api/turn' && method === 'POST') {
+      if (urlPath === '/api/turn' && method === 'POST') {
         const body = await parseBody(req);
         assertObject(body);
 
@@ -220,10 +267,12 @@ export function createChronicleServer(engine = new TurnEngine()) {
         return;
       }
 
-      if (path === '/health' && method === 'GET') {
+      if (urlPath === '/health' && method === 'GET') {
         sendJSON(res, 200, { status: 'ok', runtime: 'vnext' });
         return;
       }
+
+      if (method === 'GET' && serveStatic(res, urlPath)) return;
 
       sendError(res, 404, 'not_found', 'Not found');
     } catch (err) {

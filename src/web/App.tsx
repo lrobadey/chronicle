@@ -43,7 +43,7 @@ interface TurnResponse {
 const SESSION_STORAGE_KEY = 'chronicle.web.sessionId';
 const DEFAULT_API_BASE = typeof window === 'undefined'
   ? 'http://127.0.0.1:3001'
-  : `${window.location.protocol}//${window.location.hostname}:3001`;
+  : window.location.origin;
 
 export default function App() {
   const [apiBase, setApiBase] = useState(DEFAULT_API_BASE);
