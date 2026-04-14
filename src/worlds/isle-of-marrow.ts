@@ -268,6 +268,7 @@ export function createIsleOfMarrowWorld(options: CreateWorldOptions = {}): World
       timeConfig: { anchorIso: startedAt, startHour: 6 },
       tideConfig: { cycleMinutes: 720 },
       weatherConfig: { climate: 'temperate', seed: 'isle-of-marrow', cadenceMinutes: 60 },
+      scheduledProcesses: [],
       economyConfig: {
         goods: { salt_fish: 'abundant', silver: 'abundant', heartwater: 'scarce' },
       },

@@ -864,6 +864,7 @@ describe('TurnEngine', () => {
             timeConfig: { anchorIso: '2025-01-01T00:00:00Z', startHour: 0 },
             tideConfig: { cycleMinutes: 720 },
             weatherConfig: { climate: 'temperate', seed: 'x', cadenceMinutes: 60 },
+            scheduledProcesses: [],
           },
           ledger: [],
           knowledge: {},

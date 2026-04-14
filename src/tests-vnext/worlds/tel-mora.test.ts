@@ -41,62 +41,60 @@ describe('Tel Mora world module', () => {
     ]);
 
     assert.equal(world.actors['player-1']?.pos.x, 60);
-    assert.equal(world.actors['deshur']?.persona?.voice, 'Measured, careful, asks questions that sound idle but are not.');
+    assert.equal(world.actors['deshur']?.persona?.voice, 'Measured, careful, and exact.');
     assert.equal(world.actors['rana-tuq']?.tags?.includes('engineer'), true);
     assert.equal(world.actors['old-kesh']?.persona?.goals.includes('not be erased a second time'), true);
-    assert.equal(world.actors['siduri']?.persona?.background.includes('most informed person in Tel Mora'), true);
+    assert.equal(world.actors['siduri']?.persona?.background.includes('Technically neutral, practically indispensable.'), true);
 
     assert.equal(world.meta.openingSpec?.focalActorId, 'deshur');
     assert.equal(world.meta.openingSpec?.focusLocationId, 'the-assessors-shade');
     assert.equal(world.meta.openingSpec?.playerQuestion, 'What will the Assessor recommend, and can you shape it before he decides?');
-    assert.equal(world.meta.openingSpec?.hookText.includes('Rana Tuq has asked the player'), true);
+    assert.equal(world.meta.openingSpec?.hookText.includes('demonstration dig'), true);
 
-    assert.equal(world.directorState.scene.currentFocus, 'The day before the preliminary recommendation');
+    assert.equal(world.directorState.scene.currentFocus, 'The day before the Assessor’s preliminary recommendation');
     assert.equal(world.directorState.scene.pressures.length, 3);
-    assert.equal(world.directorState.world.activeThreads.includes('The Assessor\'s report'), true);
+    assert.equal(world.directorState.world.activeThreads.includes('The Assessor’s report.'), true);
     assert.equal(world.directorState.world.escalationHooks.some(text => text.includes('rationing disputes')), true);
-    assert.equal(world.directorState.activeThreads[0]?.status, 'rising');
-    assert.equal(world.directorState.activeThreads[1]?.domain, 'water');
+    assert.equal(world.directorState.activeThreads.length, 0);
+    assert.equal(world.directorState.factionPressures.length, 0);
 
     assert.equal(world.systems.timeConfig.anchorIso, '2025-01-01T06:00:00.000Z');
     assert.equal(world.systems.timeConfig.startHour, 6);
-    assert.equal(world.systems.tideConfig.cycleMinutes, 1440);
+    assert.equal(world.systems.tideConfig.cycleMinutes, 720);
     assert.equal(world.systems.weatherConfig.climate, 'desert');
     assert.equal(world.systems.weatherConfig.seed, 'tel-mora');
-    assert.equal(world.systems.weatherConfig.cadenceMinutes, 45);
+    assert.equal(world.systems.weatherConfig.cadenceMinutes, 60);
     assert.deepEqual(world.systems.economyConfig?.goods, {
       copper: 'scarce',
-      'reed-cloth': 'abundant',
-      'dried-fish': 'abundant',
-      'clean-water': 'scarce',
-      clay: 'abundant',
-      mudbrick: 'abundant',
+      reed_cloth: 'abundant',
+      dried_fish: 'abundant',
+      clean_water: 'scarce',
+      clay_mudbrick: 'abundant',
     });
 
     assert.equal(world.actors['player-1']?.inventory.includes('surveyors-rod'), true);
     assert.equal(world.actors['player-1']?.inventory.includes('survey-kit'), true);
-    assert.equal(world.actors['deshur']?.inventory.includes('deshur-tablet'), true);
-    assert.equal(world.actors['deshur']?.inventory.includes('deshur-stylus'), true);
+    assert.deepEqual(world.actors['deshur']?.inventory, []);
 
     assert.deepEqual(getItemPlacement(world.spine, 'surveyors-rod'), { type: 'carried_by', actorId: 'player-1' });
     assert.deepEqual(getItemPlacement(world.spine, 'survey-kit'), { type: 'carried_by', actorId: 'player-1' });
-    assert.deepEqual(getItemPlacement(world.spine, 'wax-tablet'), { type: 'inside', containerId: 'survey-kit' });
-    assert.deepEqual(getItemPlacement(world.spine, 'stylus'), { type: 'inside', containerId: 'survey-kit' });
-    assert.deepEqual(getItemPlacement(world.spine, 'chalk-stick'), { type: 'inside', containerId: 'survey-kit' });
-    assert.deepEqual(getItemPlacement(world.spine, 'measuring-cord'), { type: 'inside', containerId: 'survey-kit' });
-    assert.deepEqual(getItemPlacement(world.spine, 'deshur-tablet'), { type: 'carried_by', actorId: 'deshur' });
-    assert.deepEqual(getItemPlacement(world.spine, 'deshur-stylus'), { type: 'carried_by', actorId: 'deshur' });
+    assert.equal(getItemPlacement(world.spine, 'wax-tablet'), null);
+    assert.equal(getItemPlacement(world.spine, 'stylus'), null);
+    assert.equal(getItemPlacement(world.spine, 'chalk-stick'), null);
+    assert.equal(getItemPlacement(world.spine, 'measuring-cord'), null);
+    assert.equal(getItemPlacement(world.spine, 'deshur-tablet'), null);
+    assert.equal(getItemPlacement(world.spine, 'deshur-stylus'), null);
 
-    assert.equal(world.spine.entities['survey-kit']?.components.container?.capacityL, 1.2);
-    assert.equal(world.spine.entities['survey-kit']?.components.container?.sealed, false);
-    assert.equal(world.spine.entities['surveyors-rod']?.components.physical?.lengthCm, 180);
-    assert.equal(world.spine.entities['surveyors-rod']?.components.material?.primary, 'reedwood');
+    assert.equal(world.spine.entities['survey-kit']?.components.container?.capacityL, undefined);
+    assert.equal(world.spine.entities['survey-kit']?.components.container?.sealed, undefined);
+    assert.equal(world.spine.entities['surveyors-rod']?.components.physical?.lengthCm, undefined);
+    assert.equal(world.spine.entities['surveyors-rod']?.components.material?.primary, undefined);
 
-    assert.equal(world.ledger.length >= 5, true);
-    assert.equal(world.ledger.some(entry => entry.text.includes('preliminary recommendation')), true);
-    assert.equal(world.ledger.some(entry => entry.text.includes("surveyor's rod carried to the Silted Lock")), true);
-    assert.equal(world.ledger.some(entry => entry.text.includes('Old Kesh wants the Cut walked')), true);
-    assert.equal(world.ledger.some(entry => entry.tags?.includes('water')), true);
+    assert.equal(world.ledger.length >= 4, true);
+    assert.equal(world.ledger.some(entry => entry.text.includes('preliminary recommendation')), false);
+    assert.equal(world.ledger.some(entry => entry.text.includes('demonstration dig at the Silted Lock')), true);
+    assert.equal(world.ledger.some(entry => entry.text.includes('Old Kesh wants the Cut walked')), false);
+    assert.equal(world.ledger.some(entry => entry.tags?.includes('water')), false);
 
     assert.equal(world.knowledge['player-1']?.seenLocations['the-assessors-shade'], true);
     assert.equal(world.knowledge['player-1']?.seenActors['deshur'], true);

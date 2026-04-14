@@ -867,6 +867,34 @@ function summarizeToolInput(tool: string, input: unknown, mode: 'summary' | 'raw
       : '';
     return `resolution=${record.resolutionId} action=${action}${feedback}`;
   }
+  if (tool === 'schedule_task') {
+    if (mode === 'summary') {
+      return 'schedule: drafting timed world changes';
+    }
+    const parts: string[] = [];
+    if (typeof record.task === 'string' && record.task.trim()) {
+      parts.push(`task=${JSON.stringify(record.task)}`);
+    }
+    if (typeof record.actorId === 'string' && record.actorId.trim()) {
+      parts.push(`actor=${record.actorId}`);
+    }
+    if (typeof record.timeHint === 'string' && record.timeHint.trim()) {
+      parts.push(`time_hint=${JSON.stringify(record.timeHint)}`);
+    }
+    return parts.join(' ');
+  }
+  if (tool === 'review_schedule_resolution' && typeof record.scheduleResolutionId === 'string') {
+    const action = typeof record.action === 'string' ? record.action : 'review';
+    if (mode === 'summary') {
+      if (action === 'approve') return 'schedule: GM approved draft';
+      if (action === 'revise') return 'schedule: GM asked for a revision';
+      if (action === 'reject') return 'schedule: GM rejected draft';
+    }
+    const feedback = typeof record.feedback === 'string' && record.feedback.trim()
+      ? ` feedback=${JSON.stringify(record.feedback)}`
+      : '';
+    return `schedule_resolution=${record.scheduleResolutionId} action=${action}${feedback}`;
+  }
   if (tool === 'finish_turn') {
     if (mode === 'summary') {
       const finishIntent = summarizeFinishTurnIntent(record);
@@ -964,6 +992,44 @@ function summarizeToolOutput(tool: string, output: unknown, mode: 'summary' | 'r
     ].filter(Boolean);
     return parts.join(' ');
   }
+  if (tool === 'schedule_task') {
+    const resolutionId = typeof record.scheduleResolutionId === 'string' ? record.scheduleResolutionId : null;
+    const status = typeof record.status === 'string' ? record.status : null;
+    const rationale = typeof record.rationale === 'string' ? record.rationale.trim() : 'schedule draft';
+    const confidence = typeof record.confidence === 'number' ? record.confidence : null;
+    const eventCount = Array.isArray(record.events) ? record.events.length : 0;
+    if (mode === 'summary') {
+      if (status === 'cannot_resolve') return 'schedule: could not draft a safe schedule';
+      if (status === 'needs_clarification') return 'schedule: needs clarification';
+      const confidenceLabel = formatConfidence(confidence);
+      return `schedule: drafted ${rationale}${confidenceLabel ? ` (${confidenceLabel} confidence)` : ''}`;
+    }
+    const parts = [
+      resolutionId ? `schedule_resolution=${resolutionId}` : '',
+      status ? `status=${status}` : '',
+      confidence != null ? `confidence=${confidence.toFixed(2)}` : '',
+      `events=${eventCount}`,
+      typeof record.clarificationNeeded === 'string' ? `clarification=${JSON.stringify(record.clarificationNeeded)}` : '',
+    ].filter(Boolean);
+    return parts.join(' ');
+  }
+  if (tool === 'review_schedule_resolution') {
+    const status = typeof record.status === 'string' ? record.status : null;
+    if (mode === 'summary') {
+      if (status === 'approved') return 'schedule: GM approved draft';
+      if (status === 'revised') return 'schedule: drafted revision ready';
+      if (status === 'rejected') return 'schedule: no world changes after review';
+    }
+    const parts = [
+      status ? `status=${status}` : '',
+      typeof record.scheduleResolutionId === 'string' ? `schedule_resolution=${record.scheduleResolutionId}` : '',
+      typeof record.previousScheduleResolutionId === 'string' ? `previous=${record.previousScheduleResolutionId}` : '',
+      record.resolution && typeof record.resolution === 'object' && typeof (record.resolution as Record<string, unknown>).scheduleResolutionId === 'string'
+        ? `next=${String((record.resolution as Record<string, unknown>).scheduleResolutionId)}`
+        : '',
+    ].filter(Boolean);
+    return parts.join(' ');
+  }
   if (tool === 'finish_turn') {
     if (mode === 'summary') {
       return 'reply ready';
@@ -1025,6 +1091,10 @@ function summarizeWorldEvent(event: WorldEvent): string {
       if (subject) return `record clue about ${subject}`;
       return `record clue: ${clipDebugText(event.text)}`;
     }
+    case 'ScheduleProcess':
+      return `schedule process ${event.process.label}`;
+    case 'SetNpcSchedule':
+      return `set schedule for ${event.actorId}`;
     default:
       return fallbackWorldEventSummary(event as { type: string });
   }
@@ -1057,6 +1127,10 @@ function formatToolName(tool: string, mode: 'summary' | 'raw'): string {
       return 'mechanics resolution';
     case 'review_mechanics_resolution':
       return 'mechanics review';
+    case 'schedule_task':
+      return 'schedule drafting';
+    case 'review_schedule_resolution':
+      return 'schedule review';
     case 'finish_turn':
       return 'finalizing reply';
     default:

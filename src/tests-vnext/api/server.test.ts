@@ -74,6 +74,7 @@ describe('vNext API compatibility', () => {
         intro: 'The landing is already awake when you arrive.',
       },
       metadata: {
+        summary: 'A coastal settlement carved from leviathan bones, where salvage and survival shape every bargain.',
         settlement: 'The Landing',
         tone: 'coastal, resource-pressured, grounded',
       },
@@ -127,6 +128,7 @@ describe('vNext API compatibility', () => {
         intro: 'A recommendation is coming, and everyone is listening for it.',
       },
       metadata: {
+        summary: 'A dead canal junction where restoration, housing, and water scarcity collide.',
         settlement: 'Tel Mora',
         tone: 'political, compact, resource-pressured',
         economy: {
@@ -184,6 +186,7 @@ describe('vNext API compatibility', () => {
         intro: 'The landing is already awake when you arrive.',
       },
       metadata: {
+        summary: 'A coastal settlement carved from leviathan bones, where salvage and survival shape every bargain.',
         settlement: 'The Landing',
         tone: 'coastal, resource-pressured, grounded',
       },

@@ -72,7 +72,7 @@ export interface TurnTrace {
   mechanicsDebug?: MechanicsDebugRecord[];
   specialistOutputs?: SpecialistConsultation[];
   llmCalls?: Array<{
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;

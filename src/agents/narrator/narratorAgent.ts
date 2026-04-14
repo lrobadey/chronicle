@@ -31,7 +31,7 @@ export interface NarratorParams {
   debug?: DebugSink;
   trace?: {
     llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
+      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -286,7 +286,7 @@ function formatAttemptedAction(playerText: string): string {
 function pushLLMTrace(
   trace: NarratorParams['trace'] | undefined,
   entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;

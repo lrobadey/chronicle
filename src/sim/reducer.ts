@@ -1,9 +1,10 @@
-import type { WorldEvent } from './events';
-import type { KnowledgeState, WorldState } from './state';
+import type { SchedulableEvent, WorldEvent } from './events';
+import type { KnowledgeState, ScheduledProcess, WorldState } from './state';
 import { runReputationDrift } from './systems/reputation';
 import { getItemPlacement, setItemPlacement, syncWorldSpine } from './spine';
 import { applyAffectItem } from './itemEffects';
 import { deriveTide, isTideBlocked } from './systems/tide';
+import { deriveTime } from './systems/time';
 import { deriveConstraints } from './systems/constraints';
 import { distance, locationsWithinRadius } from './utils';
 import { resolveMoveTarget } from './validate';
@@ -55,6 +56,10 @@ function applyEventBase(state: WorldState, event: WorldEvent): WorldState {
       return applyModifyReputation(state, event);
     case 'SpreadRumor':
       return applySpreadRumor(state, event);
+    case 'ScheduleProcess':
+      return applyScheduleProcess(state, event);
+    case 'SetNpcSchedule':
+      return applySetNpcSchedule(state, event);
     default:
       return state;
   }
@@ -258,8 +263,45 @@ function applyTransferItem(state: WorldState, event: Extract<WorldEvent, { type:
 
 function advanceTime(state: WorldState, minutes: number, note?: string): WorldState {
   const next = cloneState(state);
+  const previousElapsedMinutes = next.systems.time.elapsedMinutes;
   next.systems.time.elapsedMinutes += minutes;
   addLedgerInPlace(next, note || `${minutes} minutes pass`);
+  const afterFire = fireScheduledProcesses(next, previousElapsedMinutes);
+  return hydrateNpcSchedules(afterFire);
+}
+
+function applyScheduleProcess(state: WorldState, event: Extract<WorldEvent, { type: 'ScheduleProcess' }>): WorldState {
+  const next = cloneState(state);
+  upsertScheduledProcess(next, {
+    id: event.process.id,
+    label: event.process.label,
+    dueAtMinutes: event.process.dueAtMinutes,
+    cadenceMinutes: event.process.cadenceMinutes,
+    payload: event.process.payload as ScheduledProcess['payload'],
+    createdTurn: state.meta.turn,
+  });
+  addLedgerInPlace(next, event.note || `Scheduled process registered: ${event.process.label}`);
+  return next;
+}
+
+function applySetNpcSchedule(state: WorldState, event: Extract<WorldEvent, { type: 'SetNpcSchedule' }>): WorldState {
+  const actor = state.actors[event.actorId];
+  if (!actor) return state;
+
+  const next = cloneState(state);
+  next.actors[event.actorId] = {
+    ...next.actors[event.actorId],
+    schedule: {
+      entries: event.entries.map(entry => ({
+        id: entry.id,
+        label: entry.label,
+        atHour: entry.atHour,
+        payload: entry.payload as { type: string; [key: string]: unknown },
+      })),
+      lastHydratedDay: undefined,
+    },
+  };
+  addLedgerInPlace(next, event.note || `Updated schedule for ${actor.name}`);
   return next;
 }
 
@@ -391,6 +433,101 @@ function applySpreadRumor(
     event.note || `${recipient.name} hears rumor from ${from}: "${event.rumor}"`,
   );
   return next;
+}
+
+function fireScheduledProcesses(state: WorldState, previousElapsedMinutes: number): WorldState {
+  const currentElapsedMinutes = state.systems.time.elapsedMinutes;
+  const dueProcesses = state.systems.scheduledProcesses
+    .filter(process => process.dueAtMinutes > previousElapsedMinutes && process.dueAtMinutes <= currentElapsedMinutes)
+    .sort((a, b) => a.dueAtMinutes - b.dueAtMinutes);
+
+  if (!dueProcesses.length) return state;
+
+  let next = cloneState(state);
+  const dueIds = new Set(dueProcesses.map(process => process.id));
+  next.systems.scheduledProcesses = next.systems.scheduledProcesses.filter(process => !dueIds.has(process.id));
+
+  for (const process of dueProcesses) {
+    addLedgerInPlace(next, `[Process: ${process.label}]`);
+
+    if (process.payload.type === 'ScheduleProcess' || process.payload.type === 'AdvanceTime') {
+      if (typeof process.cadenceMinutes === 'number' && Number.isFinite(process.cadenceMinutes)) {
+        upsertScheduledProcess(next, {
+          ...process,
+          dueAtMinutes: process.dueAtMinutes + process.cadenceMinutes,
+          createdTurn: next.meta.turn,
+        });
+      }
+      continue;
+    }
+
+    next = syncWorldSpine(applyEventBase(next, process.payload as SchedulableEvent));
+
+    if (typeof process.cadenceMinutes === 'number' && Number.isFinite(process.cadenceMinutes)) {
+      upsertScheduledProcess(next, {
+        ...process,
+        dueAtMinutes: process.dueAtMinutes + process.cadenceMinutes,
+        createdTurn: next.meta.turn,
+      });
+    }
+  }
+
+  return next;
+}
+
+function hydrateNpcSchedules(state: WorldState): WorldState {
+  const currentDay = deriveTime(state).currentDay - 1;
+  let next = cloneState(state);
+  let changed = false;
+
+  for (const actor of Object.values(next.actors)) {
+    if (!actor.schedule?.entries.length) continue;
+    const lastHydratedDay = actor.schedule.lastHydratedDay ?? -1;
+    if (lastHydratedDay >= currentDay + 1) continue;
+
+    for (const day of [currentDay, currentDay + 1]) {
+      for (const entry of actor.schedule.entries) {
+        const dueAtMinutes = toElapsedMinutesForScheduledHour(next, day, entry.atHour);
+        if (dueAtMinutes <= next.systems.time.elapsedMinutes) continue;
+
+        const processId = `npc-sched-${actor.id}-${entry.id}-d${day}`;
+        if (next.systems.scheduledProcesses.some(process => process.id === processId)) continue;
+
+        next.systems.scheduledProcesses.push({
+          id: processId,
+          label: entry.label,
+          dueAtMinutes,
+          payload: entry.payload,
+          createdTurn: next.meta.turn,
+        });
+        changed = true;
+      }
+    }
+
+    actor.schedule = {
+      ...actor.schedule,
+      lastHydratedDay: currentDay + 1,
+    };
+    changed = true;
+  }
+
+  return changed ? next : state;
+}
+
+function upsertScheduledProcess(state: WorldState, process: ScheduledProcess) {
+  const index = state.systems.scheduledProcesses.findIndex(existing => existing.id === process.id);
+  if (index >= 0) {
+    state.systems.scheduledProcesses[index] = process;
+    return;
+  }
+  state.systems.scheduledProcesses.push(process);
+}
+
+function toElapsedMinutesForScheduledHour(state: WorldState, dayIndex: number, atHour: number): number {
+  const anchor = new Date(state.systems.timeConfig.anchorIso);
+  const startHour = state.systems.timeConfig.startHour ?? anchor.getUTCHours();
+  const startMinute = anchor.getUTCMinutes();
+  return dayIndex * 1440 + atHour * 60 - (startHour * 60 + startMinute);
 }
 
 function emptyKnowledge(): KnowledgeState {

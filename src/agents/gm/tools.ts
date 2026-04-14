@@ -64,6 +64,7 @@ const DIRECTOR_UPDATES_SCHEMA = strictObjectSchema(
 );
 
 const MECHANICS_RESOLUTION_ID_SCHEMA = { type: 'string' } as const;
+const SCHEDULE_RESOLUTION_ID_SCHEMA = { type: 'string' } as const;
 
 const MECHANICS_PENDING_PROMPT_SCHEMA = strictObjectSchema(
   {
@@ -146,6 +147,32 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
     parameters: {
       ...strictObjectSchema({
         resolutionId: MECHANICS_RESOLUTION_ID_SCHEMA,
+        action: { type: 'string', enum: ['approve', 'revise', 'reject'] },
+        feedback: { type: ['string', 'null'] },
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'schedule_task',
+    description: 'Ask the schedule agent to draft ScheduleProcess and/or SetNpcSchedule events for a task. Returns a scheduleResolutionId to review.',
+    parameters: {
+      ...strictObjectSchema({
+        task: { type: 'string' },
+        actorId: { type: ['string', 'null'] },
+        timeHint: { type: ['string', 'null'] },
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'review_schedule_resolution',
+    description: "Approve, revise, or reject a schedule draft. When action='revise', feedback must describe what is wrong.",
+    parameters: {
+      ...strictObjectSchema({
+        scheduleResolutionId: SCHEDULE_RESOLUTION_ID_SCHEMA,
         action: { type: 'string', enum: ['approve', 'revise', 'reject'] },
         feedback: { type: ['string', 'null'] },
       }),

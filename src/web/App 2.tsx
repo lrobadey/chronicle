@@ -41,25 +41,9 @@ interface TurnResponse {
 }
 
 const SESSION_STORAGE_KEY = 'chronicle.web.sessionId';
-const DEFAULT_API_BASE = resolveDefaultApiBase();
-
-function resolveDefaultApiBase() {
-  const viteEnv = readViteEnv();
-  const configured = typeof viteEnv?.VITE_API_BASE_URL === 'string'
-    ? viteEnv.VITE_API_BASE_URL.trim()
-    : '';
-  if (configured) return configured;
-  if (viteEnv?.DEV || typeof window === 'undefined') return 'http://127.0.0.1:3001';
-  return window.location.origin;
-}
-
-function readViteEnv(): { VITE_API_BASE_URL?: string; DEV?: boolean } | undefined {
-  try {
-    return eval('import.meta.env') as { VITE_API_BASE_URL?: string; DEV?: boolean } | undefined;
-  } catch {
-    return undefined;
-  }
-}
+const DEFAULT_API_BASE = typeof window === 'undefined'
+  ? 'http://127.0.0.1:3001'
+  : `${window.location.protocol}//${window.location.hostname}:3001`;
 
 export default function App() {
   const [apiBase, setApiBase] = useState(DEFAULT_API_BASE);
@@ -77,7 +61,6 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [advancedSessionOpen, setAdvancedSessionOpen] = useState(false);
-  const [headerCondensed, setHeaderCondensed] = useState(false);
   const initialBootStartedRef = useRef(false);
   const bootRequestIdRef = useRef(0);
   const turnRequestIdRef = useRef(0);
@@ -107,15 +90,6 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  useEffect(() => {
-    const onScroll = () => {
-      setHeaderCondensed(window.scrollY > 28);
-    };
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
   async function bootSession(forceFresh = false) {
@@ -251,7 +225,7 @@ export default function App() {
   return (
     <div className="chronicle-app">
       <div className="chronicle-backdrop" />
-      <header className={`app-header${headerCondensed ? ' compact' : ''}`}>
+      <header className="app-header">
         <div className="brand-block">
           <span className="eyebrow">Chronicle vNext</span>
           <h1>{formatWorldTitle(world)}</h1>

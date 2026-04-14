@@ -27,6 +27,7 @@ import { buildObservation } from '../sim/views/observe';
 import { buildTelemetry } from '../sim/views/telemetry';
 import { computeTurnDiff } from '../sim/views/diff';
 import { deriveTide } from '../sim/systems/tide';
+import { deriveTime } from '../sim/systems/time';
 import { estimateTravel, LONG_TRAVEL_MINUTES } from '../sim/systems/travel';
 import { getItemPlacement, isItemInteractable, isItemVisible, summarizeItemComponents } from '../sim/spine';
 import { distance } from '../sim/utils';
@@ -59,6 +60,12 @@ import {
   type MechanicsResolution,
   type MechanicsWorkerRequest,
 } from '../agents/mechanics';
+import {
+  runScheduleAgent,
+  type ScheduleResolution,
+  type ScheduleResolutionRecord,
+  type ScheduleTaskInput,
+} from '../agents/schedule';
 import { closeStewardTurn, openStewardTurn } from '../agents/steward';
 import { resolveWorldModule } from '../worlds/registry';
 import { describeWorldModule, type WorldModule, type WorldPresentation } from '../worlds/types';
@@ -269,6 +276,8 @@ export class TurnEngine {
     const specialistOutputs: Array<Omit<SpecialistConsultation, 'usedSuggestion' | 'usedCandidateEvents'>> = [];
     const mechanicsResolutions = new Map<string, MechanicsResolutionRecord>();
     let activeMechanicsResolutionId: string | null = null;
+    const scheduleResolutions = new Map<string, ScheduleResolutionRecord>();
+    let activeScheduleResolutionId: string | null = null;
     let systemsNarratorPacket: SystemsNarratorPacket | null = null;
     const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [], llmCalls: [] } : undefined;
     draft.meta.turn = nextTurn;
@@ -341,6 +350,11 @@ export class TurnEngine {
       return events.some(event => isSimpleMechanicsEvent(event));
     };
 
+    const requiresScheduleReview = (events: WorldEvent[]) => {
+      if (!activeScheduleResolutionId) return false;
+      return events.some(event => event.type === 'ScheduleProcess' || event.type === 'SetNpcSchedule');
+    };
+
     const buildMechanicsRequest = (input: {
       playerText?: string | null;
       objective?: string | null;
@@ -370,6 +384,54 @@ export class TurnEngine {
       };
     };
 
+    const buildScheduleTaskInput = (input: {
+      task: string;
+      actorId?: string | null;
+      timeHint?: string | null;
+      revisionFeedback?: string;
+      previousDraft?: ScheduleTaskInput['previousDraft'];
+    }): ScheduleTaskInput => {
+      const actorId = typeof input.actorId === 'string' && input.actorId.trim() ? input.actorId.trim() : undefined;
+      const actor = actorId ? draft.actors[actorId] : undefined;
+      const time = deriveTime(draft);
+      const absoluteTime = new Date(time.absoluteIso);
+      const currentMinutesOfDay = absoluteTime.getUTCHours() * 60 + absoluteTime.getUTCMinutes();
+
+      return {
+        task: input.task,
+        actorId,
+        actorName: actor?.name,
+        currentElapsedMinutes: draft.systems.time.elapsedMinutes,
+        worldTimeContext: {
+          clockDisplay: `Day ${time.currentDay}, ${formatClockDisplay(currentMinutesOfDay)}`,
+          currentDayIndex: time.currentDay - 1,
+          namedTimepoints: {
+            dawn: 480,
+            noon: 720,
+            dusk: 1080,
+            midnight: 0,
+          },
+        },
+        existingSchedule: actor?.schedule?.entries.map(entry => ({
+          id: entry.id,
+          label: entry.label,
+          atHour: entry.atHour,
+        })),
+        pendingProcessesForActor: actorId
+          ? draft.systems.scheduledProcesses
+              .filter(process => process.id.includes(actorId) || process.payload.actorId === actorId)
+              .map(process => ({
+                id: process.id,
+                label: process.label,
+                dueAtMinutes: process.dueAtMinutes,
+              }))
+          : undefined,
+        timeHint: typeof input.timeHint === 'string' && input.timeHint.trim() ? input.timeHint.trim() : undefined,
+        revisionFeedback: input.revisionFeedback,
+        previousDraft: input.previousDraft,
+      };
+    };
+
     const pushMechanicsTrace = (resolution: MechanicsResolution) => {
       if (!trace) return;
       trace.mechanicsResolutions = trace.mechanicsResolutions || [];
@@ -379,6 +441,15 @@ export class TurnEngine {
         trace.mechanicsDebug.push(resolution.debug);
       }
     };
+
+    const scheduleResolutionForGM = (resolution: ScheduleResolution) => ({
+      scheduleResolutionId: resolution.id,
+      status: resolution.status,
+      rationale: resolution.rationale,
+      confidence: resolution.confidence,
+      events: resolution.events,
+      clarificationNeeded: resolution.clarificationNeeded,
+    });
 
     const applyApprovedMechanicsResolution = (resolution: MechanicsResolution) => {
       const result = applyProposedEvents(resolution.candidateEvents || []);
@@ -717,6 +788,15 @@ export class TurnEngine {
               summary: active?.resolution.summary,
             };
           }
+          if (requiresScheduleReview(input.events || [])) {
+            const active = scheduleResolutions.get(activeScheduleResolutionId!);
+            return {
+              ok: false,
+              error: 'schedule_review_required',
+              scheduleResolutionId: activeScheduleResolutionId,
+              summary: active?.resolution.rationale,
+            };
+          }
           const result = applyProposedEvents(input.events || []);
           return { ok: true, ...result };
         },
@@ -843,6 +923,112 @@ export class TurnEngine {
             resolution: resolutionForGM,
           };
         },
+        schedule_task: async (input: {
+          task: string;
+          actorId?: string | null;
+          timeHint?: string | null;
+        }) => {
+          const request = buildScheduleTaskInput(input);
+          const resolution = await runScheduleAgent({
+            apiKey,
+            input: request,
+            llm: this.llm,
+            trace,
+          });
+          scheduleResolutions.set(resolution.id, { request, resolution, revisionCount: 0 });
+          activeScheduleResolutionId = resolution.id;
+          return scheduleResolutionForGM(resolution);
+        },
+        review_schedule_resolution: async (input: {
+          scheduleResolutionId: string;
+          action: 'approve' | 'revise' | 'reject';
+          feedback?: string | null;
+        }) => {
+          const cached = scheduleResolutions.get(input.scheduleResolutionId);
+          if (!cached) {
+            return { ok: false, error: 'schedule_resolution_not_found', scheduleResolutionId: input.scheduleResolutionId };
+          }
+
+          if (input.action === 'approve') {
+            const result = applyProposedEvents(cached.resolution.events as WorldEvent[]);
+            scheduleResolutions.delete(input.scheduleResolutionId);
+            if (activeScheduleResolutionId === input.scheduleResolutionId) {
+              activeScheduleResolutionId = null;
+            }
+            return {
+              ok: result.ok,
+              status: 'approved',
+              scheduleResolutionId: input.scheduleResolutionId,
+              accepted: result.accepted,
+              rejected: result.rejected,
+              rationale: cached.resolution.rationale,
+            };
+          }
+
+          if (input.action === 'reject') {
+            scheduleResolutions.delete(input.scheduleResolutionId);
+            if (activeScheduleResolutionId === input.scheduleResolutionId) {
+              activeScheduleResolutionId = null;
+            }
+            return { ok: true, status: 'rejected', scheduleResolutionId: input.scheduleResolutionId };
+          }
+
+          const feedback = typeof input.feedback === 'string' ? input.feedback.trim() : '';
+          if (!feedback) {
+            return { ok: false, error: 'revision_feedback_required', scheduleResolutionId: input.scheduleResolutionId };
+          }
+
+          const MAX_REVISIONS = 2;
+          if (cached.revisionCount >= MAX_REVISIONS) {
+            scheduleResolutions.delete(input.scheduleResolutionId);
+            if (activeScheduleResolutionId === input.scheduleResolutionId) {
+              activeScheduleResolutionId = null;
+            }
+            return { ok: true, status: 'rejected', scheduleResolutionId: input.scheduleResolutionId, reason: 'max_revisions_exceeded' };
+          }
+
+          const resolution = await runScheduleAgent({
+            apiKey,
+            input: buildScheduleTaskInput({
+              task: cached.request.task,
+              actorId: cached.request.actorId,
+              timeHint: cached.request.timeHint,
+              revisionFeedback: feedback,
+              previousDraft: {
+                status: cached.resolution.status,
+                rationale: cached.resolution.rationale,
+                confidence: cached.resolution.confidence,
+                events: cached.resolution.events,
+                clarificationNeeded: cached.resolution.clarificationNeeded,
+              },
+            }),
+            llm: this.llm,
+            trace,
+          });
+          scheduleResolutions.delete(input.scheduleResolutionId);
+          scheduleResolutions.set(resolution.id, {
+            request: {
+              ...cached.request,
+              revisionFeedback: feedback,
+              previousDraft: {
+                status: cached.resolution.status,
+                rationale: cached.resolution.rationale,
+                confidence: cached.resolution.confidence,
+                events: cached.resolution.events,
+                clarificationNeeded: cached.resolution.clarificationNeeded,
+              },
+            },
+            resolution,
+            revisionCount: cached.revisionCount + 1,
+          });
+          activeScheduleResolutionId = resolution.id;
+          return {
+            ok: true,
+            status: 'revised',
+            previousScheduleResolutionId: input.scheduleResolutionId,
+            resolution: scheduleResolutionForGM(resolution),
+          };
+        },
         finish_turn: async (input: GMFinishTurnInput) => {
           if (activeMechanicsResolutionId) {
             const active = mechanicsResolutions.get(activeMechanicsResolutionId);
@@ -851,6 +1037,15 @@ export class TurnEngine {
               error: 'mechanics_review_required',
               resolutionId: activeMechanicsResolutionId,
               summary: active?.resolution.summary,
+            };
+          }
+          if (activeScheduleResolutionId) {
+            const active = scheduleResolutions.get(activeScheduleResolutionId);
+            return {
+              ok: false,
+              error: 'schedule_review_required',
+              scheduleResolutionId: activeScheduleResolutionId,
+              summary: active?.resolution.rationale,
             };
           }
           const clear = input.playerPrompt?.clear === true;
@@ -1022,6 +1217,15 @@ function createRuntimeId(): string {
     // Fall through to node:crypto helper.
   }
   return randomUUID();
+}
+
+function formatClockDisplay(minutesOfDay: number): string {
+  const normalized = ((minutesOfDay % 1440) + 1440) % 1440;
+  const hour24 = Math.floor(normalized / 60);
+  const minute = normalized % 60;
+  const suffix = hour24 >= 12 ? 'PM' : 'AM';
+  const hour12 = hour24 % 12 || 12;
+  return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
 }
 
 function isSimpleMechanicsEvent(event: WorldEvent): boolean {
