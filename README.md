@@ -1,14 +1,16 @@
 # Chronicle vNext
 
-Chronicle vNext is the active Chronicle runtime: a deterministic simulation core with an agentic GM layer, a small HTTP API, and an interactive CLI. The default world is **Isle of Marrow**.
+Chronicle vNext is the active Chronicle runtime: a deterministic simulation core with an agentic GM layer, a small HTTP API, an interactive CLI, and a browser UI. The shipped worlds are **Isle of Marrow** and **Tel Mora**.
 
 ## What's In This Repo
 
 - `src/sim/*`: world state, events, reducers, validation, invariants, systems, and telemetry/observation views.
 - `src/engine/*`: turn orchestration, persistence, replay, and debug plumbing.
-- `src/agents/*`: OpenAI-powered GM, NPC, and narrator agents plus the shared LLM client.
-- `src/server.ts`: HTTP API for session initialization and turns.
+- `src/agents/*`: OpenAI-powered GM, NPC, narrator, specialist, mechanics, steward, and staff-interview agents plus the shared LLM client.
+- `src/worlds/*`: world modules and world selection.
+- `src/server.ts`: HTTP API for session initialization, turns, health checks, and static web serving.
 - `src/cli.ts` and `src/cli/app.ts`: interactive command-line play loop.
+- `src/staff-cli.ts`: staff interview CLI.
 - `deprecated/*`: legacy source snapshots kept for reference only.
 
 ## Requirements
@@ -16,9 +18,9 @@ Chronicle vNext is the active Chronicle runtime: a deterministic simulation core
 - Node.js 20.x
 - npm
 - Optional: `OPENAI_API_KEY`
-- Optional: `VITE_OPENAI_API_KEY` for CLI startup
+- Optional: `VITE_OPENAI_API_KEY`
 
-If no API key is available, Chronicle runs in deterministic fallback mode.
+If no API key is available, Chronicle falls back to deterministic runtime behavior.
 
 ## Getting Started
 
@@ -28,10 +30,23 @@ Install dependencies:
 npm install
 ```
 
-Run the CLI:
+Run the main CLI:
 
 ```bash
 npm run cli
+```
+
+Start directly in Isle of Marrow or Tel Mora:
+
+```bash
+npm run cli:isle-of-marrow
+npm run cli:tel-mora
+```
+
+Run the staff interview CLI:
+
+```bash
+npm run staff-cli
 ```
 
 Run the HTTP server:
@@ -40,31 +55,32 @@ Run the HTTP server:
 npm run server
 ```
 
-Run the browser UI (served by Vite):
+Run the browser UI with Vite:
 
 ```bash
 npm run web
 ```
 
-Or run both API + web app in one command (also auto-opens your browser):
+Run the API server and browser app together, then open the browser:
 
 ```bash
 npm run web:dev
 ```
 
-The web app defaults to calling the API server at `http://localhost:3001` (or change API Base in the UI).
-
-By default the server listens on `http://localhost:3001` or the `PORT` environment variable if set.
+The web app defaults to `http://127.0.0.1:3001` for its API base. The server listens on `http://localhost:3001` by default, or on `PORT` if set.
 
 ## Commands
 
 - `npm run cli`: start the interactive CLI.
+- `npm run cli:isle-of-marrow`: start the CLI in Isle of Marrow without world selection.
+- `npm run cli:tel-mora`: start the CLI in Tel Mora without world selection.
+- `npm run staff-cli`: start the staff interview CLI.
 - `npm run server`: start the HTTP API server.
-- `npm run web`: start the browser app with live reload (Vite).
-- `npm run web:dev`: start API server + browser app together and open the app in your browser.
+- `npm run web`: start the browser app with live reload.
+- `npm run web:dev`: start API server + browser app together and open the app.
 - `npm run web:build`: build the browser app for static hosting.
 - `npm run web:preview`: preview the built browser app.
-- `npm test`: run the active vNext test suite.
+- `npm test`: run the vNext test suite.
 - `npm run test:vnext`: same test suite, explicitly named.
 - `npm run typecheck`: run TypeScript type checking.
 - `npm run lint`: typecheck-backed local lint gate.
@@ -80,16 +96,19 @@ Available commands:
 - `/state`: print the current telemetry snapshot.
 - `/session`: show session and mode information.
 - `/style <lyric|cinematic|michener>`: change narrator style.
+- `/reasoning <low|medium|high>`: change GM reasoning effort.
 - `/debug [on|off]`: toggle the live debug timeline.
 - `/trace [on|off]`: alias for `/debug`.
 - `/detail <summary|raw>`: change debug verbosity.
-- `/new [sessionId]`: start or resume a session.
+- `/new [sessionId]`: start or resume a session in the current world.
 - `/exit`: leave the CLI.
 
 CLI environment variables:
 
 - `CHRONICLE_API_MODE`: `auto`, `fallback`, or `live`.
 - `CHRONICLE_SESSION_ROOT`: override the session storage directory.
+- `CHRONICLE_STARTUP_WORLD_ID`: set the startup world before the world prompt runs.
+- `CHRONICLE_SKIP_WORLD_PROMPT`: set to `1`, `true`, `yes`, or `on` to skip world selection.
 - `CHRONICLE_ALLOW_NON_TTY`: set to `1`, `true`, `yes`, or `on` to allow non-interactive runs.
 - `CHRONICLE_CLI_TRANSCRIPT`: write a JSONL transcript of prompts, inputs, and outputs to this path.
 
@@ -106,7 +125,7 @@ The server exposes a small compatibility API:
 Request body:
 
 ```json
-{ "sessionId": "optional", "apiKey": "optional", "stream": true }
+{ "sessionId": "optional", "worldId": "optional", "apiKey": "optional", "stream": true }
 ```
 
 Response:
@@ -117,6 +136,8 @@ Response:
   "created": true,
   "initialNarration": "string",
   "telemetry": {},
+  "history": {},
+  "world": {},
   "runtime": "vnext"
 }
 ```
@@ -146,6 +167,7 @@ Response:
   "telemetry": {},
   "acceptedEvents": [],
   "rejectedEvents": [],
+  "summary": {},
   "trace": {}
 }
 ```
@@ -178,6 +200,7 @@ Replay is intended to be deterministic from `initial.json` plus `events.jsonl`.
 ## Development Notes
 
 - `src/index.ts` exports the active vNext surface.
-- The current world seed is `isle-of-marrow`.
-- The API server uses `OPENAI_API_KEY` if present, but requests may also pass `apiKey` in the body.
+- The current default world id is `isle-of-marrow`.
+- `OPENAI_API_KEY` and `VITE_OPENAI_API_KEY` are both recognized by the CLI.
+- The HTTP server uses `OPENAI_API_KEY` if present, but requests may also pass `apiKey` in the body.
 - In `auto` mode, the CLI can fall back to deterministic behavior if the live OpenAI request fails.
