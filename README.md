@@ -2,6 +2,15 @@
 
 Chronicle vNext is the active Chronicle runtime: a deterministic simulation core with an agentic GM layer, a small HTTP API, and an interactive CLI. The default world is **Isle of Marrow**.
 
+## Agent Architecture
+
+Chronicle is currently in a transition state between a legacy GM-centric loop and the planned Steward + Council hierarchy.
+
+- The implemented current-state architecture is documented in [`docs/CURRENT_AGENT_ARCHITECTURE.md`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/docs/CURRENT_AGENT_ARCHITECTURE.md).
+- The long-term target remains [`docs/CHRONICLE_NORTH_STAR.md`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/docs/CHRONICLE_NORTH_STAR.md).
+
+Short version: the steward is real in the active runtime, but only owns a narrow systems slice today. The full multi-domain council is not yet in place, and the GM still handles most turns.
+
 ## What's In This Repo
 
 - `src/sim/*`: world state, events, reducers, validation, invariants, systems, and telemetry/observation views.
