@@ -194,6 +194,26 @@ describe('narrator streaming', () => {
           rejected: [],
         },
       ],
+      currentTurnSpeech: [
+        {
+          speakerActorId: 'mira-salt',
+          speakerName: 'Mira Salt',
+          text: 'Storm coming.',
+          recipientActorIds: ['player-1'],
+          recipientNames: ['You'],
+          source: 'npc_consult',
+        },
+      ],
+      recentSpeech: [
+        {
+          turn: 1,
+          speakerActorId: 'tamar-vane',
+          speakerName: 'Tamar Vane',
+          text: 'Keep clear of the pilings.',
+          recipientActorIds: ['player-1'],
+          recipientNames: ['You'],
+        },
+      ],
       llm,
     });
 
@@ -205,6 +225,26 @@ describe('narrator streaming', () => {
         narration: 'You set out toward the market.',
         accepted: ['Traveled to Dock Approach'],
         rejected: [],
+      },
+    ]);
+    assert.deepEqual(input.currentTurnSpeech, [
+      {
+        speakerActorId: 'mira-salt',
+        speakerName: 'Mira Salt',
+        text: 'Storm coming.',
+        recipientActorIds: ['player-1'],
+        recipientNames: ['You'],
+        source: 'npc_consult',
+      },
+    ]);
+    assert.deepEqual(input.recentSpeech, [
+      {
+        turn: 1,
+        speakerActorId: 'tamar-vane',
+        speakerName: 'Tamar Vane',
+        text: 'Keep clear of the pilings.',
+        recipientActorIds: ['player-1'],
+        recipientNames: ['You'],
       },
     ]);
   });
@@ -263,6 +303,8 @@ describe('narrator streaming', () => {
       telemetry: finalTelemetry as any,
       diff,
       recentTurns: [],
+      currentTurnSpeech: [],
+      recentSpeech: [],
       llm: new QueueLLM([]),
     });
 

@@ -3,6 +3,7 @@ import type { WorldEvent } from '../sim/events';
 import type {
   RecentTurnDigest,
   RejectedEventRecord,
+  TurnSpeechRecord,
   TurnRecord,
   WebHistorySummary,
   WebTranscriptHistory,
@@ -29,12 +30,21 @@ export interface ConversationTranscriptEntry {
   speakerId?: string;
   speakerName?: string;
   text: string;
-  source: 'openingNarration' | 'playerText' | 'npcPublicUtterance' | 'turnNarration';
+  source: 'openingNarration' | 'playerText' | 'npcPublicUtterance' | 'turnNarration' | 'turnSpeech';
 }
 
 export interface NPCConversationContext {
   conversationHistory: ConversationTranscriptEntry[];
   olderTurnsSummary?: string;
+}
+
+export interface RecentSpeechDigest {
+  turn: number;
+  speakerActorId: string;
+  speakerName: string;
+  text: string;
+  recipientActorIds: string[];
+  recipientNames: string[];
 }
 
 export interface GMWorldContext {
@@ -114,6 +124,9 @@ const RECENT_TURN_LIMIT = 10;
 const RECENT_PLAYER_TEXT_MAX_CHARS = 240;
 const RECENT_NARRATION_MAX_CHARS = 240;
 const RECENT_REASON_MAX_CHARS = 80;
+const RECENT_SPEECH_TURN_LIMIT = 6;
+const RECENT_SPEECH_ENTRY_LIMIT = 16;
+const RECENT_SPEECH_TEXT_MAX_CHARS = 240;
 
 export interface StaffInterviewHeuristics {
   repeatedClarificationCount: number;
@@ -375,6 +388,16 @@ export function buildRecentTurnDigests(state: WorldState, turnHistory: TurnRecor
   }));
 }
 
+export function buildRecentSpeechDigests(turnHistory: TurnRecord[]): RecentSpeechDigest[] {
+  const recentTurns = turnHistory.slice(-RECENT_SPEECH_TURN_LIMIT);
+  const digests = recentTurns.flatMap(turn =>
+    (turn.turnSpeech || [])
+      .map(speech => summarizeSpeechRecord(turn.turn, speech))
+      .filter((speech): speech is RecentSpeechDigest => Boolean(speech)),
+  );
+  return digests.slice(-RECENT_SPEECH_ENTRY_LIMIT);
+}
+
 export function buildWebTurnSummary(
   state: WorldState,
   params: {
@@ -484,14 +507,30 @@ export function buildNPCConversationContext(params: {
       source: 'playerText',
     });
 
-    for (const npcOutput of turn.npcOutputs || []) {
+    const speechRecords = (turn.turnSpeech && turn.turnSpeech.length)
+      ? turn.turnSpeech
+      : (turn.npcOutputs || []).map<TurnSpeechRecord | null>(npcOutput => {
+          const text = npcOutput.publicUtterance.trim();
+          if (!text) return null;
+          const speakerName = state.actors[npcOutput.npcId]?.name || npcOutput.npcId;
+          return {
+            speakerActorId: npcOutput.npcId,
+            speakerName,
+            text,
+            recipientActorIds: [],
+            recipientNames: [],
+            source: 'npc_consult',
+          };
+        }).filter((record): record is TurnSpeechRecord => Boolean(record));
+
+    for (const speech of speechRecords) {
       pushTranscriptEntry(conversationHistory, {
         turn: turn.turn,
-        role: 'npc',
-        speakerId: npcOutput.npcId,
-        speakerName: state.actors[npcOutput.npcId]?.name,
-        text: npcOutput.publicUtterance,
-        source: 'npcPublicUtterance',
+        role: speech.speakerActorId === turn.playerId ? 'player' : 'npc',
+        speakerId: speech.speakerActorId,
+        speakerName: speech.speakerName,
+        text: speech.text,
+        source: speech.source === 'npc_consult' ? 'npcPublicUtterance' : 'turnSpeech',
       });
     }
 
@@ -577,6 +616,21 @@ function summarizeNarration(narration: string | undefined): string | null {
   if (typeof narration !== 'string') return null;
   const trimmed = narration.trim();
   return trimmed ? clipText(trimmed, RECENT_NARRATION_MAX_CHARS) : null;
+}
+
+function summarizeSpeechRecord(turn: number, speech: TurnSpeechRecord): RecentSpeechDigest | null {
+  const speakerActorId = speech.speakerActorId?.trim();
+  const speakerName = speech.speakerName?.trim();
+  const text = speech.text?.trim();
+  if (!speakerActorId || !speakerName || !text) return null;
+  return {
+    turn,
+    speakerActorId,
+    speakerName,
+    text: clipText(text, RECENT_SPEECH_TEXT_MAX_CHARS),
+    recipientActorIds: speech.recipientActorIds || [],
+    recipientNames: speech.recipientNames || [],
+  };
 }
 
 function summarizeAcceptedEvent(state: WorldState, event: WorldEvent): string {

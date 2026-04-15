@@ -143,6 +143,16 @@ describe('TurnEngine', () => {
       assert.equal(log.length, 1);
       assert.equal(log[0]?.npcOutputs?.[0]?.npcId, 'mira-salt');
       assert.equal(log[0]?.npcOutputs?.[0]?.privateIntent, 'warn_player');
+      assert.deepEqual(log[0]?.turnSpeech, [
+        {
+          speakerActorId: 'mira-salt',
+          speakerName: 'Mira Salt',
+          text: 'Storm coming.',
+          recipientActorIds: ['player-1'],
+          recipientNames: ['You'],
+          source: 'npc_consult',
+        },
+      ]);
     } finally {
       await removeDir(rootDir);
     }
@@ -194,6 +204,16 @@ describe('TurnEngine', () => {
         playerText: 'Ask Tamar about the weed-line',
         acceptedEvents: [],
         rejectedEvents: [],
+        turnSpeech: [
+          {
+            speakerActorId: 'tamar-vane',
+            speakerName: 'Tamar Vane',
+            text: 'Fresh drag marks. Not from this tide.',
+            recipientActorIds: ['player-1'],
+            recipientNames: ['You'],
+            source: 'npc_consult',
+          },
+        ],
         npcOutputs: [
           {
             npcId: 'tamar-vane',
@@ -444,6 +464,93 @@ describe('TurnEngine', () => {
       ]);
       assert.deepEqual(secondNarratorInput.opening, firstContext.world.opening);
       assert.deepEqual(secondNarratorInput.recentTurns, secondContext.world.recentTurns);
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('passes current-turn and recent speech into narrator input', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        {
+          id: 'gm-1',
+          output: [
+            {
+              type: 'function_call',
+              name: 'propose_events',
+              arguments: '{"events":[{"type":"Speak","actorId":"tamar-vane","text":"Stay off the slick boards.","toActorId":"player-1"}]}',
+              call_id: 'gm-speak',
+            },
+          ],
+          output_text: '',
+        },
+        {
+          id: 'gm-2',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-finish' }],
+          output_text: '',
+        },
+        {
+          id: 'narr-1',
+          output: [],
+          output_text: 'Tamar warns you off the boards.',
+        },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const state = await store.loadSession(init.sessionId);
+      assert.ok(state);
+      state.meta.turn = 1;
+      await store.saveSnapshot(init.sessionId, state);
+      await store.appendTurn(init.sessionId, {
+        sessionId: init.sessionId,
+        turn: 1,
+        atIso: new Date().toISOString(),
+        playerId: 'player-1',
+        playerText: 'Who warned me before?',
+        acceptedEvents: [],
+        rejectedEvents: [],
+        turnSpeech: [
+          {
+            speakerActorId: 'mira-salt',
+            speakerName: 'Mira Salt',
+            text: 'Storm coming.',
+            recipientActorIds: ['player-1'],
+            recipientNames: ['You'],
+            source: 'npc_consult',
+          },
+        ],
+        narration: 'Mira studies the waterline.',
+      });
+
+      await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'ask Tamar to say it plain',
+        apiKey: 'test-key',
+      });
+
+      const narratorInput = JSON.parse(String(llm.calls[2]?.input || '{}'));
+      assert.deepEqual(narratorInput.currentTurnSpeech, [
+        {
+          speakerActorId: 'tamar-vane',
+          speakerName: 'Tamar Vane',
+          text: 'Stay off the slick boards.',
+          recipientActorIds: ['player-1'],
+          recipientNames: ['You'],
+          source: 'speak_event',
+        },
+      ]);
+      assert.deepEqual(narratorInput.recentSpeech, [
+        {
+          turn: 1,
+          speakerActorId: 'mira-salt',
+          speakerName: 'Mira Salt',
+          text: 'Storm coming.',
+          recipientActorIds: ['player-1'],
+          recipientNames: ['You'],
+        },
+      ]);
     } finally {
       await removeDir(rootDir);
     }

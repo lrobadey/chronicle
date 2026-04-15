@@ -10,8 +10,10 @@ import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
 import type { OpeningContext, OpeningRecap } from '../../engine/contextBuilders';
 import type { RecentTurnDigest } from '../../engine/session/types';
+import type { TurnSpeechRecord } from '../../engine/session/types';
 import type { SpecialistType } from '../specialists';
 import type { SystemsNarratorPacket } from '../council';
+import type { RecentSpeechDigest } from '../../engine/contextBuilders';
 
 export type NarratorStyle = 'lyric' | 'cinematic' | 'michener';
 export type OpeningMode = 'first-world' | 'resume';
@@ -24,6 +26,8 @@ export interface NarratorParams {
   telemetry: Telemetry;
   diff: TurnDiff;
   recentTurns: RecentTurnDigest[];
+  currentTurnSpeech?: TurnSpeechRecord[];
+  recentSpeech?: RecentSpeechDigest[];
   opening?: OpeningRecap | null;
   pendingPrompt?: PendingPrompt | null;
   rejectedEvents?: Array<{ reason: string; event?: unknown }>;
@@ -67,6 +71,8 @@ export function buildNarratorParamsFromSystemsPacket(input: {
   telemetry: Telemetry;
   diff: TurnDiff;
   recentTurns: RecentTurnDigest[];
+  currentTurnSpeech?: TurnSpeechRecord[];
+  recentSpeech?: RecentSpeechDigest[];
   opening?: OpeningRecap | null;
   pendingPrompt?: PendingPrompt | null;
   rejectedEvents?: Array<{ reason: string; event?: unknown }>;
@@ -83,6 +89,8 @@ export function buildNarratorParamsFromSystemsPacket(input: {
     telemetry: input.telemetry,
     diff: input.diff,
     recentTurns: input.recentTurns,
+    currentTurnSpeech: input.currentTurnSpeech,
+    recentSpeech: input.recentSpeech,
     opening: input.opening,
     pendingPrompt: input.pendingPrompt,
     rejectedEvents: input.rejectedEvents,
@@ -94,7 +102,7 @@ export function buildNarratorParamsFromSystemsPacket(input: {
 }
 
 export async function narrateTurn(params: NarratorParams): Promise<string> {
-  const { apiKey, model = DEFAULT_MODEL, style = 'michener', playerText, telemetry, diff, recentTurns, opening = null, pendingPrompt, rejectedEvents, llm, onNarrationDelta, debug, trace } = params;
+  const { apiKey, model = DEFAULT_MODEL, style = 'michener', playerText, telemetry, diff, recentTurns, currentTurnSpeech = [], recentSpeech = [], opening = null, pendingPrompt, rejectedEvents, llm, onNarrationDelta, debug, trace } = params;
   emitDebugEvent(debug, { type: 'narrator.started', phase: 'turn', style });
   if (pendingPrompt?.question?.trim()) {
     const question = pendingPrompt.question.trim();
@@ -123,6 +131,8 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
         attemptedAction: playerText,
         opening,
         recentTurns,
+        currentTurnSpeech,
+        recentSpeech,
         telemetry,
         diff,
         rejectedEventReasons: (rejectedEvents || []).map(rejection => rejection.reason),
@@ -283,4 +293,3 @@ function formatAttemptedAction(playerText: string): string {
   if (/^you\s+/i.test(trimmed)) return trimmed[0].toUpperCase() + trimmed.slice(1);
   return `You try to ${trimmed}`;
 }
-

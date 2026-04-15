@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   buildNPCConversationContext,
+  buildRecentSpeechDigests,
   buildWebTranscriptHistory,
   buildWebTurnSummary,
 } from '../../engine/contextBuilders';
@@ -22,16 +23,22 @@ describe('contextBuilders', () => {
         playerText: 'What did the tide leave here?',
         acceptedEvents: [],
         rejectedEvents: [],
-        npcOutputs: [
+        turnSpeech: [
           {
-            npcId: 'tamar-vane',
-            publicUtterance: 'Kelp too high for this tide.',
-            privateIntent: 'warn_player',
+            speakerActorId: 'tamar-vane',
+            speakerName: 'Tamar Vane',
+            text: 'Kelp too high for this tide.',
+            recipientActorIds: ['player-1'],
+            recipientNames: ['You'],
+            source: 'npc_consult',
           },
           {
-            npcId: 'mira-salt',
-            publicUtterance: 'And it is fresh.',
-            privateIntent: 'reinforce_warning',
+            speakerActorId: 'mira-salt',
+            speakerName: 'Mira Salt',
+            text: 'And it is fresh.',
+            recipientActorIds: ['player-1'],
+            recipientNames: ['You'],
+            source: 'npc_consult',
           },
         ],
         narration: 'The dock ropes creak in the wind.',
@@ -128,11 +135,14 @@ describe('contextBuilders', () => {
         playerText: '   look closer   ',
         acceptedEvents: [],
         rejectedEvents: [],
-        npcOutputs: [
+        turnSpeech: [
           {
-            npcId: 'tamar-vane',
-            publicUtterance: '   ',
-            privateIntent: 'hold_back',
+            speakerActorId: 'tamar-vane',
+            speakerName: 'Tamar Vane',
+            text: '   ',
+            recipientActorIds: [],
+            recipientNames: [],
+            source: 'npc_consult',
           },
         ],
         narration: '   ',
@@ -163,6 +173,41 @@ describe('contextBuilders', () => {
         speakerName: 'You',
         text: 'keep watching',
         source: 'playerText',
+      },
+    ]);
+  });
+
+  it('builds bounded recent speech digests from persisted structured speech', () => {
+    const turnHistory: TurnRecord[] = [
+      {
+        sessionId: 'session-4',
+        turn: 1,
+        atIso: '2025-01-01T14:01:00.000Z',
+        playerId: 'player-1',
+        playerText: 'hello',
+        acceptedEvents: [],
+        rejectedEvents: [],
+        turnSpeech: [
+          {
+            speakerActorId: 'tamar-vane',
+            speakerName: 'Tamar Vane',
+            text: 'Keep your hands dry.',
+            recipientActorIds: ['player-1'],
+            recipientNames: ['You'],
+            source: 'speak_event',
+          },
+        ],
+      },
+    ];
+
+    assert.deepEqual(buildRecentSpeechDigests(turnHistory), [
+      {
+        turn: 1,
+        speakerActorId: 'tamar-vane',
+        speakerName: 'Tamar Vane',
+        text: 'Keep your hands dry.',
+        recipientActorIds: ['player-1'],
+        recipientNames: ['You'],
       },
     ]);
   });

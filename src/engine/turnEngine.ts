@@ -4,6 +4,7 @@ import { JsonlSessionStore } from './session/jsonlStore';
 import type {
   RejectedEventRecord,
   SessionStore,
+  TurnSpeechRecord,
   TurnRecord,
   TurnTrace,
   WebTranscriptHistory,
@@ -76,6 +77,7 @@ import {
   buildOpeningRecap,
   buildGMWorldContext,
   buildNPCConversationContext,
+  buildRecentSpeechDigests,
   buildRecentTurnDigests,
   buildSpecialistContext,
   buildStaffInterviewContext,
@@ -273,6 +275,7 @@ export class TurnEngine {
     const acceptedEvents: WorldEvent[] = [];
     const rejectedEvents: RejectedEventRecord[] = [];
     const npcOutputs: NpcAgentOutput[] = [];
+    const turnSpeech: TurnSpeechRecord[] = [];
     const specialistOutputs: Array<Omit<SpecialistConsultation, 'usedSuggestion' | 'usedCandidateEvents'>> = [];
     const mechanicsResolutions = new Map<string, MechanicsResolutionRecord>();
     let activeMechanicsResolutionId: string | null = null;
@@ -338,6 +341,12 @@ export class TurnEngine {
       }
 
       acceptedEvents.push(...stagedAccepted);
+      for (const event of stagedAccepted) {
+        const speech = buildTurnSpeechFromEvent(draft, event);
+        if (speech) {
+          turnSpeech.push(speech);
+        }
+      }
       for (const event of stagedAccepted) {
         emitDebugEvent(emit, { type: 'event.accepted', event });
       }
@@ -748,6 +757,10 @@ export class TurnEngine {
             trace,
           });
           npcOutputs.push(output);
+          const npcSpeech = buildNpcConsultSpeechRecord(draft, output, playerId);
+          if (npcSpeech) {
+            turnSpeech.push(npcSpeech);
+          }
           return output;
         },
         consult_specialist: async (input: { specialistType: SpecialistType; question: string; focus?: string | null }) => {
@@ -1123,6 +1136,7 @@ export class TurnEngine {
       diffSummary: diff.summary,
     });
     const recentTurns = buildRecentTurnDigests(draft, turnHistory);
+    const recentSpeech = buildRecentSpeechDigests(turnHistory);
     stream?.onNarrationStart?.(afterTelemetry);
     const narration = await narrateTurn(
       systemsNarratorPacket
@@ -1133,6 +1147,8 @@ export class TurnEngine {
             telemetry: afterTelemetry,
             diff,
             recentTurns,
+            currentTurnSpeech: turnSpeech,
+            recentSpeech,
             opening: buildOpeningRecap(draft),
             pendingPrompt: draft.meta.pendingPrompt || null,
             rejectedEvents,
@@ -1148,6 +1164,8 @@ export class TurnEngine {
             telemetry: afterTelemetry,
             diff,
             recentTurns,
+            currentTurnSpeech: turnSpeech,
+            recentSpeech,
             opening: buildOpeningRecap(draft),
             pendingPrompt: draft.meta.pendingPrompt || null,
             rejectedEvents,
@@ -1173,6 +1191,7 @@ export class TurnEngine {
       acceptedEvents,
       rejectedEvents,
       npcOutputs,
+      turnSpeech,
       specialistOutputs: finalizedSpecialistOutputs,
       narration,
       telemetry: afterTelemetry,
@@ -1194,6 +1213,37 @@ export class TurnEngine {
       trace,
     };
   }
+}
+
+function buildTurnSpeechFromEvent(state: WorldState, event: WorldEvent): TurnSpeechRecord | null {
+  if (event.type !== 'Speak') return null;
+  const text = event.text.trim();
+  const speaker = state.actors[event.actorId];
+  if (!text || !speaker) return null;
+  const recipient = event.toActorId ? state.actors[event.toActorId] : undefined;
+  return {
+    speakerActorId: speaker.id,
+    speakerName: speaker.name,
+    text,
+    recipientActorIds: recipient ? [recipient.id] : [],
+    recipientNames: recipient ? [recipient.name] : [],
+    source: 'speak_event',
+  };
+}
+
+function buildNpcConsultSpeechRecord(state: WorldState, output: NpcAgentOutput, defaultRecipientActorId: string): TurnSpeechRecord | null {
+  const text = output.publicUtterance.trim();
+  const speaker = state.actors[output.npcId];
+  if (!text || !speaker) return null;
+  const recipient = state.actors[defaultRecipientActorId];
+  return {
+    speakerActorId: speaker.id,
+    speakerName: speaker.name,
+    text,
+    recipientActorIds: recipient ? [recipient.id] : [],
+    recipientNames: recipient ? [recipient.name] : [],
+    source: 'npc_consult',
+  };
 }
 
 function stampEvent(event: WorldEvent, turn: number): WorldEvent {

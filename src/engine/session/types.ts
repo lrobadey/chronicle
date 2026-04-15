@@ -5,6 +5,15 @@ import type { NpcAgentOutput } from '../../agents/npc/npcAgent';
 import type { MechanicsDebugRecord, MechanicsResolution } from '../../agents/mechanics';
 import type { SpecialistConsultation, SpecialistType } from '../../agents/specialists';
 
+export interface TurnSpeechRecord {
+  speakerActorId: string;
+  speakerName: string;
+  text: string;
+  recipientActorIds: string[];
+  recipientNames: string[];
+  source?: 'speak_event' | 'npc_consult';
+}
+
 export interface RejectedEventRecord {
   event: WorldEvent;
   reason: string;
@@ -60,6 +69,7 @@ export interface TurnRecord {
   acceptedEvents: WorldEvent[];
   rejectedEvents: RejectedEventRecord[];
   npcOutputs?: NpcAgentOutput[];
+  turnSpeech?: TurnSpeechRecord[];
   specialistOutputs?: SpecialistConsultation[];
   narration?: string;
   telemetry?: Telemetry;
