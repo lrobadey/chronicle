@@ -1,7 +1,7 @@
 import type { AffectItemEffect, WorldEvent } from './events';
 import type { Item, ItemLifecycleState, WorldState } from './state';
 import { getItemLifecycleState, getItemPlacement, setItemPlacement } from './spine';
-import { distance, getActor, resolveContainingLocationId } from './utils';
+import { distance, getActor, resolveMostSpecificContainingLocationId } from './utils';
 
 export function validateAffectItem(
   state: WorldState,
@@ -195,7 +195,7 @@ function setLifecycle(item: Item, state: ItemLifecycleState) {
 }
 
 function toGroundPlacement(state: WorldState, anchor: { x: number; y: number; z?: number }) {
-  const locationId = resolveContainingLocationId(anchor, state.locations, 20);
+  const locationId = resolveMostSpecificContainingLocationId(anchor, state.locations, 20);
   if (!locationId) throw new Error('item_location_out_of_bounds');
   return { type: 'located_in' as const, locationId, anchor };
 }

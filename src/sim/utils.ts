@@ -52,6 +52,23 @@ export function resolveContainingLocationId(
   return matches[0]?.id ?? null;
 }
 
+export function resolveMostSpecificContainingLocationId(
+  pos: GridPos,
+  locations: Record<string, LocationPOI>,
+  defaultRadiusCells = 0,
+): string | null {
+  let bestId: string | null = null;
+  let bestRadius = Number.POSITIVE_INFINITY;
+  for (const location of Object.values(locations)) {
+    const radius = location.radiusCells ?? defaultRadiusCells;
+    if (distance(pos, location.anchor) <= radius && radius < bestRadius) {
+      bestId = location.id;
+      bestRadius = radius;
+    }
+  }
+  return bestId;
+}
+
 export function resolveNearestLocationId(pos: GridPos, locations: Record<string, LocationPOI>): string | null {
   let nearest: LocationPOI | null = null;
   let nearestDist = Number.POSITIVE_INFINITY;

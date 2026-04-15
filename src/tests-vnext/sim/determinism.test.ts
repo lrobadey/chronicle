@@ -224,6 +224,27 @@ describe('sim determinism', () => {
     assert.equal(observedJar?.components?.condition, 'broken');
   });
 
+  it('uses the most specific containing POI for affect-item ground placement in overlaps', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    world.actors['player-1'].pos = { x: 15, y: 20, z: 0 };
+    setItemPlacement(world.spine, 'heartwater-jar', { type: 'carried_by', actorId: 'player-1' }, world.locations);
+
+    const broken = applyEvent(world, {
+      type: 'AffectItem',
+      actorId: 'player-1',
+      itemId: 'heartwater-jar',
+      effect: 'break',
+      at: { x: 15, y: 20, z: 0 },
+    });
+
+    const placement = getItemPlacement(broken.spine, 'heartwater-jar');
+    assert.deepEqual(placement, {
+      type: 'located_in',
+      locationId: 'dock-approach',
+      anchor: { x: 15, y: 20, z: 0 },
+    });
+  });
+
   it('throws when breaking a held item outside every location radius', () => {
     const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
     world.actors['player-1'].pos = { x: 400, y: 400, z: 0 };
