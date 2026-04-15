@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { SessionStore, TurnRecord } from './types';
-import type { WorldState } from '../../sim/state';
+import type { StewardMemory, WorldState } from '../../sim/state';
 import { syncWorldSpine } from '../../sim/spine';
 import { IncompatibleSessionError } from '../errors';
 
@@ -193,6 +193,13 @@ function normalizeLoadedState(state: WorldState): WorldState {
   // Migrate: ensure factions registry exists (not present in saves before reputation system)
   if (!state.factions || typeof state.factions !== 'object') state.factions = {};
 
+  // Migrate: ensure Steward memory exists for saves from before the steward planner.
+  if (!state.stewardMemory || typeof state.stewardMemory !== 'object') {
+    state.stewardMemory = createDefaultStewardMemory();
+  } else {
+    state.stewardMemory = normalizeStewardMemory(state.stewardMemory);
+  }
+
   // Migrate: ensure KnowledgeState.rumors exists for all actors
   for (const actorId of Object.keys(state.knowledge ?? {})) {
     const k = state.knowledge[actorId];
@@ -200,6 +207,36 @@ function normalizeLoadedState(state: WorldState): WorldState {
   }
 
   return syncWorldSpine(state);
+}
+
+function createDefaultStewardMemory(): StewardMemory {
+  return {
+    currentGoals: [],
+    workingHypotheses: [],
+    intendedBeats: [],
+    deferredQuestions: [],
+    continuityNotes: [],
+    lastUpdatedTurn: 0,
+  };
+}
+
+function normalizeStewardMemory(memory: StewardMemory): StewardMemory {
+  return {
+    currentGoals: normalizeStewardMemoryList(memory.currentGoals),
+    workingHypotheses: normalizeStewardMemoryList(memory.workingHypotheses),
+    intendedBeats: normalizeStewardMemoryList(memory.intendedBeats),
+    deferredQuestions: normalizeStewardMemoryList(memory.deferredQuestions),
+    continuityNotes: normalizeStewardMemoryList(memory.continuityNotes),
+    lastUpdatedTurn: typeof memory.lastUpdatedTurn === 'number' ? memory.lastUpdatedTurn : 0,
+  };
+}
+
+function normalizeStewardMemoryList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean);
 }
 
 export { normalizeLoadedState };

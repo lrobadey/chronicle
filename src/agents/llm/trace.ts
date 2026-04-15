@@ -13,7 +13,7 @@ export function isFunctionCallItem(item: ResponseOutputItem): item is {
 export function pushLLMTrace(
   trace: { llmCalls?: any[] } | undefined,
   entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule' | 'staff_interview';
+    agent: 'gm' | 'steward' | 'legacy_gm' | 'observer' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule' | 'staff_interview';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;

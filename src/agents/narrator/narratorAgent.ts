@@ -35,8 +35,8 @@ export interface NarratorParams {
   onNarrationDelta?: (delta: string) => void;
   debug?: DebugSink;
   trace?: {
-    llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
+      llmCalls?: Array<{
+      agent: 'gm' | 'steward' | 'legacy_gm' | 'observer' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule' | 'staff_interview';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -238,7 +238,7 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
 function openingInstructions(openingMode: OpeningMode): string {
   if (openingMode === 'first-world') {
     return [
-      'You are the Chronicle GM speaking directly to the player in a James Michener-inspired voice: grounded, observant, quietly vivid.',
+      'You are Chronicle\'s narrator speaking directly to the player in a James Michener-inspired voice: grounded, observant, quietly vivid.',
       'Write the absolute first message for a newly created world.',
       'Treat the player as a new arrival at early morning light.',
       'Anchor the scene at the docks or landing.',
@@ -249,7 +249,7 @@ function openingInstructions(openingMode: OpeningMode): string {
     ].join(' ');
   }
 
-  return 'You are the Chronicle GM speaking directly to the player in a James Michener-inspired voice: grounded, observant, quietly vivid. Write a brief opening paragraph that reorients the player to their current surroundings using the provided telemetry. You may add non-critical atmosphere consistent with what is already known, but do not invent new game-relevant facts. Avoid generic abstractions; favor concrete nouns and verbs.';
+  return 'You are Chronicle\'s narrator speaking directly to the player in a James Michener-inspired voice: grounded, observant, quietly vivid. Write a brief opening paragraph that reorients the player to their current surroundings using the provided telemetry. You may add non-critical atmosphere consistent with what is already known, but do not invent new game-relevant facts. Avoid generic abstractions; favor concrete nouns and verbs.';
 }
 
 function fallbackNarration(

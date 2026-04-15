@@ -1,4 +1,4 @@
-import type { PendingPrompt, WorldState } from '../sim/state';
+import type { PendingPrompt, StewardMemory, WorldState } from '../sim/state';
 import type { WorldEvent } from '../sim/events';
 import type {
   RecentTurnDigest,
@@ -94,6 +94,64 @@ export interface GMWorldContext {
   map: WorldState['map'];
   recentTurns: RecentTurnDigest[];
   playerTranscriptTail: PlayerTranscriptEntry[];
+}
+
+export interface StewardTelemetrySummary {
+  turn: number;
+  player: {
+    id: string;
+    name: string;
+    inventory: string[];
+  };
+  location: {
+    id: string | null;
+    name: string;
+    description: string;
+  };
+  nearbyActors: string[];
+  nearbyLocations: string[];
+  time: {
+    currentDay: number;
+    currentHour: number;
+    absoluteIso: string;
+  };
+  weather: {
+    type: string;
+    windKph: number;
+  };
+  scheduledProcesses: {
+    count: number;
+    nextLabel?: string;
+  };
+}
+
+export interface StewardSceneSummary {
+  currentFocus?: string;
+  pressures: string[];
+  unresolvedBeats: string[];
+  immediateTensions: string[];
+}
+
+export interface StewardWorldSummary {
+  activeThreads: string[];
+  introductionOpportunities: string[];
+  escalationHooks: string[];
+  heldBeatNotes: string[];
+  pendingEventSummaries: string[];
+}
+
+export interface StewardContext {
+  playerText: string;
+  turnNumber: number;
+  pendingPrompt: PendingPrompt | null;
+  opening: OpeningRecap | null;
+  recentTurns: RecentTurnDigest[];
+  playerTranscriptTail: PlayerTranscriptEntry[];
+  telemetry: StewardTelemetrySummary;
+  directorState: WorldState['directorState'];
+  stewardMemory: StewardMemory;
+  sceneSummary: StewardSceneSummary;
+  worldSummary: StewardWorldSummary;
 }
 
 export interface OpeningContext {
@@ -238,6 +296,66 @@ export function buildGMWorldContext(params: {
     map: state.map,
     recentTurns,
     playerTranscriptTail: buildPlayerTranscript(turnHistory).slice(-RECENT_TURN_LIMIT),
+  };
+}
+
+export function buildStewardContext(params: {
+  state: WorldState;
+  playerId: string;
+  playerText: string;
+  nextTurn: number;
+  turnHistory: TurnRecord[];
+  pendingPrompt: PendingPrompt | null;
+}): StewardContext {
+  const { state, playerId, playerText, nextTurn, turnHistory, pendingPrompt } = params;
+  const telemetry = buildTelemetry(state, playerId);
+
+  return {
+    playerText,
+    turnNumber: nextTurn,
+    pendingPrompt,
+    opening: buildOpeningRecap(state),
+    recentTurns: buildRecentTurnDigests(state, turnHistory),
+    playerTranscriptTail: buildPlayerTranscript(turnHistory).slice(-RECENT_TURN_LIMIT),
+    telemetry: {
+      turn: telemetry.turn,
+      player: {
+        id: telemetry.player.id,
+        name: telemetry.player.name,
+        inventory: telemetry.player.inventory.map(item => item.name),
+      },
+      location: telemetry.location,
+      nearbyActors: telemetry.nearbyActors.slice(0, 6).map(actor => actor.name),
+      nearbyLocations: telemetry.nearbyLocations.slice(0, 6).map(location => location.name),
+      time: {
+        currentDay: telemetry.time.currentDay,
+        currentHour: telemetry.time.currentHour,
+        absoluteIso: telemetry.time.absoluteIso,
+      },
+      weather: {
+        type: telemetry.weather.type,
+        windKph: telemetry.weather.windKph,
+      },
+      scheduledProcesses: {
+        count: telemetry.scheduledProcesses.count,
+        nextLabel: telemetry.scheduledProcesses.next?.label,
+      },
+    },
+    directorState: state.directorState,
+    stewardMemory: state.stewardMemory,
+    sceneSummary: {
+      currentFocus: state.directorState.scene.currentFocus,
+      pressures: state.directorState.scene.pressures,
+      unresolvedBeats: state.directorState.scene.unresolvedBeats,
+      immediateTensions: state.directorState.scene.immediateTensions,
+    },
+    worldSummary: {
+      activeThreads: state.directorState.world.activeThreads,
+      introductionOpportunities: state.directorState.world.introductionOpportunities,
+      escalationHooks: state.directorState.world.escalationHooks,
+      heldBeatNotes: state.directorState.heldBeats.map(beat => beat.note),
+      pendingEventSummaries: state.directorState.pendingWorldEvents.map(event => event.summary),
+    },
   };
 }
 
@@ -598,7 +716,9 @@ function getTurnPromptKind(turn: TurnRecord): PendingPrompt['kind'] | null {
     return turn.pendingPrompt.kind;
   }
 
-  const pending = turn.trace?.toolCalls.find(call => call.tool === 'finish_turn')?.input;
+  const pending = turn.trace?.toolCalls.find(
+    call => call.tool === 'finish_turn' || call.tool === 'finish_steward_turn',
+  )?.input;
   if (!pending || typeof pending !== 'object' || Array.isArray(pending)) return null;
   const playerPrompt = (pending as Record<string, unknown>).playerPrompt;
   if (!playerPrompt || typeof playerPrompt !== 'object' || Array.isArray(playerPrompt)) return null;

@@ -331,6 +331,14 @@ export function createTelMoraWorld(options: CreateWorldOptions = {}): WorldState
       factionPressures: [],
       reputationDriftLastMinutes: 0,
     },
+    stewardMemory: {
+      currentGoals: ['Keep the Assessor crisis legible and immediate to the player.'],
+      workingHypotheses: ['The water shortage and the report deadline will pull local factions into conflict.'],
+      intendedBeats: ['Force an early choice about who the player helps first in the Cut.'],
+      deferredQuestions: ['What proof will sway the Assessor before the recommendation lands?'],
+      continuityNotes: ['Requests from Rana and Kesh are both live from turn zero.'],
+      lastUpdatedTurn: 0,
+    },
     ledger: [
       { turn: 0, text: 'Tel Mora initialized' },
       { turn: 0, text: 'Deshur arrived from Kashru to determine whether the junction should be restored or struck from the registry.' },

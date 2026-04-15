@@ -16,7 +16,7 @@ export type AffectItemEffect =
 export interface EventMeta {
   id: string;
   turn: number;
-  by: 'player' | 'gm' | 'system';
+  by: 'player' | 'gm' | 'steward' | 'system';
   actorId?: ActorId;
 }
 

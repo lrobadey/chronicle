@@ -111,7 +111,7 @@ export interface MechanicsAgentParams {
   debug?: DebugSink;
   trace?: {
     llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
+      agent: 'gm' | 'steward' | 'legacy_gm' | 'observer' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule' | 'staff_interview';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -685,4 +685,3 @@ function isInterpretation(value: unknown): value is MechanicsInterpretation {
     value === 'clarify' ||
     value === 'none';
 }
-

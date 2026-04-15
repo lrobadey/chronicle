@@ -56,7 +56,7 @@ export async function runStaffCli(options: StaffCliOptions): Promise<StaffCliRun
 
     write('\n=== Chronicle Staff Interview ===\n\n');
     finalState = await openStaffSession({ engine, sessionId, playerId: 'player-1', apiKey, write });
-    write('Ask the GM-staff representative about context, friction, or goals.\n');
+    write('Ask the steward-staff representative about context, friction, or goals.\n');
     write('Type /help for commands.\n\n');
 
     while (true) {

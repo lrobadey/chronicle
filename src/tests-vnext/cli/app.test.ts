@@ -382,7 +382,7 @@ describe('CLI app', () => {
 
     ({ state } = await handleCliLine({ state, line: '/session', engine, write: text => writes.push(text), thinkingAnimation }));
     const output = writes.join('');
-    assert.ok(output.includes('GM reasoning: high'));
+    assert.ok(output.includes('Steward reasoning: high'));
     assert.ok(output.includes('Debug mode: on'));
     assert.ok(output.includes('Debug detail: raw'));
   });
@@ -499,6 +499,62 @@ describe('CLI app', () => {
     assert.ok(raw.includes('[tool] 2/2 propose_events call=call-2 events=1'));
     assert.ok(raw.includes('"callId": "call-2"'));
     assert.ok(raw.includes('"input"'));
+  });
+
+  it('renders steward tool names with natural summaries', () => {
+    const planned = renderDebugEvent({
+      type: 'steward.response.received',
+      iteration: 1,
+      toolCalls: 2,
+      toolCallCount: 2,
+      toolCallNames: ['inspect_world_summary', 'finish_steward_turn'],
+      responseId: 'resp-steward-1',
+      status: 'completed',
+    }, 'summary');
+    assert.equal(planned, '[steward] iteration 1 chose 2 next steps: checking the world, finalizing reply\n');
+
+    const fallbackCall = renderDebugEvent({
+      type: 'tool.called',
+      iteration: 1,
+      tool: 'delegate_legacy_gm',
+      callId: 'steward-call-1',
+      callIndex: 1,
+      callCount: 1,
+      input: { reason: 'needs richer authorship', focus: 'the dockside anomaly' },
+    }, 'summary');
+    assert.equal(fallbackCall, '[tool] steward: falling back to the legacy GM\n');
+
+    const mechanicsResult = renderDebugEvent({
+      type: 'tool.result',
+      iteration: 1,
+      tool: 'delegate_mechanics',
+      callId: 'steward-call-2',
+      callIndex: 1,
+      callCount: 1,
+      output: {
+        status: 'ok',
+        summary: 'inspect the tide-mark',
+        candidateEvents: [],
+        confidence: 0.91,
+      },
+      ok: true,
+    }, 'summary');
+    assert.equal(mechanicsResult, '[tool] mechanics: drafted inspect the tide-mark (high confidence)\n');
+
+    const finishRaw = renderDebugEvent({
+      type: 'tool.called',
+      iteration: 1,
+      tool: 'finish_steward_turn',
+      callId: 'steward-call-3',
+      callIndex: 1,
+      callCount: 1,
+      input: {
+        summary: 'done',
+        stewardMemoryUpdate: { currentGoals: ['Check the pilings.'] },
+      },
+    }, 'raw');
+    assert.ok(finishRaw.includes('call=steward-call-3'));
+    assert.ok(finishRaw.includes('steward_memory_update=true'));
   });
 
   it('renders finish_turn summary details inline', () => {

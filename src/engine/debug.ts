@@ -7,6 +7,17 @@ export type DebugEvent =
   | { type: 'init.started'; sessionId?: string }
   | { type: 'init.session_ready'; sessionId: string; created: boolean }
   | { type: 'turn.started'; sessionId: string; turn: number; playerText: string }
+  | { type: 'steward.iteration.started'; iteration: number }
+  | {
+      type: 'steward.response.received';
+      iteration: number;
+      toolCalls: number;
+      toolCallCount: number;
+      toolCallNames: string[];
+      status?: string;
+      responseId?: string;
+      error?: unknown;
+    }
   | { type: 'gm.iteration.started'; iteration: number }
   | {
       type: 'gm.response.received';

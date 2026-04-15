@@ -296,6 +296,14 @@ export function createIsleOfMarrowWorld(options: CreateWorldOptions = {}): World
       factionPressures: [],
       reputationDriftLastMinutes: 0,
     },
+    stewardMemory: {
+      currentGoals: ['Orient the player to the Landing and the tide-mark disruption.'],
+      workingHypotheses: ['Tamar Vane has noticed a real anomaly in the dock routine.'],
+      intendedBeats: ['Push the player toward Tamar Vane or the disturbed pilings.'],
+      deferredQuestions: ['What caused the weed-line to sit too high on the pilings?'],
+      continuityNotes: ['The island notices arrivals quickly at first light.'],
+      lastUpdatedTurn: 0,
+    },
     ledger: [
       { turn: 0, text: 'Isle of Marrow initialized' },
       { turn: 0, text: 'You arrive at first light at the Landing, where dark sand meets ancient bone.' },

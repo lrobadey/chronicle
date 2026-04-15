@@ -120,14 +120,14 @@ function buildFallbackInterview(
   const missingContext = [
     context.playerTranscriptTail.length ? '' : 'I do not have any recent player transcript yet.',
     context.heuristics.repeatedClarificationCount > 0 ? 'The transcript shows clarification loops, but not why the player was confused.' : '',
-    context.recentTurnDetails.some(turn => turn.specialistOutputs.length > 0) ? 'I can see specialist advice outcomes, but not whether the operator agreed with the GM reasoning.' : '',
+    context.recentTurnDetails.some(turn => turn.specialistOutputs.length > 0) ? 'I can see specialist advice outcomes, but not whether the operator agreed with the steward\'s final reasoning.' : '',
   ].filter(Boolean);
 
   const frictionPoints = [
     context.heuristics.pendingPromptActive ? 'A pending prompt is still open, which means intent is not fully resolved.' : '',
     context.heuristics.rejectedEventCount > 0 ? `Some proposed world changes were rejected (${context.heuristics.rejectedEventCount} total).` : '',
     context.heuristics.noAcceptedTurnCount > 0 ? `Several turns resolved without accepted events (${context.heuristics.noAcceptedTurnCount} total).` : '',
-    context.heuristics.specialistConsultCount > 0 ? `The GM has leaned on specialists ${context.heuristics.specialistConsultCount} time(s), which may indicate uncertain pacing or world follow-through.` : '',
+    context.heuristics.specialistConsultCount > 0 ? `The steward has leaned on specialists ${context.heuristics.specialistConsultCount} time(s), which may indicate uncertain pacing or world follow-through.` : '',
     errorMessage ? `Live reflection failed and I am answering from fallback heuristics (${errorMessage}).` : '',
   ].filter(Boolean);
 

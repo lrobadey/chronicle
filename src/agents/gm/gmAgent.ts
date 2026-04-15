@@ -71,6 +71,7 @@ export interface GMAgentParams {
   apiKey?: string;
   model?: string;
   gmReasoningEffort?: GMReasoningEffort;
+  traceAgent?: 'gm' | 'legacy_gm';
   playerText: string;
   worldContext?: unknown;
   runtime: GMToolRuntime;
@@ -80,7 +81,7 @@ export interface GMAgentParams {
   trace?: {
     toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
     llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
+      agent: 'gm' | 'steward' | 'legacy_gm' | 'observer' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule' | 'staff_interview';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -99,6 +100,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
     apiKey,
     model = DEFAULT_MODEL,
     gmReasoningEffort = 'low',
+    traceAgent = 'gm',
     playerText,
     worldContext,
     runtime,
@@ -178,7 +180,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
     } catch (error) {
       const classified = classifyLLMError(error);
       pushLLMTrace(trace, {
-        agent: 'gm',
+        agent: traceAgent,
         previousResponseId: previousResponseId,
         inputItems: pendingInput.length,
         status: 'failed',
@@ -200,7 +202,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       error: response.error ?? response.incomplete_details,
     });
     pushLLMTrace(trace, {
-      agent: 'gm',
+      agent: traceAgent,
       responseId: response.id,
       previousResponseId,
       inputItems: pendingInput.length,
@@ -313,4 +315,3 @@ function safeJSONStringify(value: unknown): string {
     return JSON.stringify({ error: 'non_serializable_tool_output' });
   }
 }
-

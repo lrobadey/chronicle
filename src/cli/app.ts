@@ -336,7 +336,7 @@ export async function handleCliLine(params: {
         write(`World: ${state.worldDisplayName} (${state.worldId})\n`);
         write(`New session default: ${state.startupWorldId}\n`);
         write(`Narrator style: ${state.narratorStyle}\n`);
-        write(`GM reasoning: ${state.gmReasoningEffort}\n`);
+        write(`Steward reasoning: ${state.gmReasoningEffort}\n`);
         write(`Debug mode: ${state.debugEnabled ? 'on' : 'off'}\n`);
         write(`Debug detail: ${state.debugDetail}\n`);
         write(`API mode: ${state.apiKey ? 'live' : 'fallback'}\n\n`);
@@ -358,7 +358,7 @@ export async function handleCliLine(params: {
           return { state, exit: false };
         }
         state = { ...state, gmReasoningEffort: next };
-        write(`\nGM reasoning: ${next}\n\n`);
+        write(`\nSteward reasoning: ${next}\n\n`);
         return { state, exit: false };
       }
       case 'trace':
@@ -596,7 +596,7 @@ Commands:
   /state                Show current state snapshot
   /session              Show session and mode info
   /style <name>         Set narrator style (lyric|cinematic|michener)
-  /reasoning <level>    Set GM reasoning (low|medium|high)
+  /reasoning <level>    Set steward reasoning (low|medium|high)
   /debug [on|off]       Toggle live debug timeline (default toggles)
   /trace [on|off]       Alias for /debug
   /detail <mode>        Set debug detail (summary|raw)
@@ -667,6 +667,8 @@ function thinkingPhaseForDebugEvent(event: DebugEvent): ThinkingPhase | null {
     case 'init.started':
       return 'opening';
     case 'turn.started':
+    case 'steward.iteration.started':
+    case 'steward.response.received':
     case 'gm.iteration.started':
     case 'gm.response.received':
     case 'tool.called':
@@ -704,6 +706,10 @@ function renderDebugSummary(event: DebugEvent): string {
       return `[init] session ${event.sessionId} ${event.created ? 'created' : 'resumed'}`;
     case 'turn.started':
       return `[turn] #${event.turn} ${JSON.stringify(event.playerText)}`;
+    case 'steward.iteration.started':
+      return `[steward] iteration ${event.iteration}`;
+    case 'steward.response.received':
+      return `[steward] iteration ${event.iteration} chose ${event.toolCallCount} next step${event.toolCallCount === 1 ? '' : 's'}: ${formatToolCallNames(event.toolCallNames, 'summary')}`;
     case 'gm.iteration.started':
       return `[gm] iteration ${event.iteration}`;
     case 'gm.response.received':
@@ -739,6 +745,9 @@ function renderRawDebugSummary(event: DebugEvent): string {
   if (event.type === 'narrator.completed') {
     return `[narrator] ${event.phase === 'opening' ? 'opening complete' : 'rendering complete'}`;
   }
+  if (event.type === 'steward.response.received') {
+    return `[steward] iteration ${event.iteration} planned ${event.toolCallCount} tool call${event.toolCallCount === 1 ? '' : 's'}: ${formatToolCallNames(event.toolCallNames, 'raw')}`;
+  }
   if (event.type === 'gm.response.received') {
     return `[gm] iteration ${event.iteration} planned ${event.toolCallCount} tool call${event.toolCallCount === 1 ? '' : 's'}: ${formatToolCallNames(event.toolCallNames, 'raw')}`;
   }
@@ -753,6 +762,15 @@ function renderRawDebugSummary(event: DebugEvent): string {
 
 function extractDebugPayload(event: DebugEvent): unknown {
   switch (event.type) {
+    case 'steward.response.received':
+      return {
+        responseId: event.responseId,
+        status: event.status,
+        toolCalls: event.toolCalls,
+        toolCallCount: event.toolCallCount,
+        toolCallNames: event.toolCallNames,
+        error: event.error,
+      };
     case 'gm.response.received':
       return {
         responseId: event.responseId,
@@ -811,6 +829,28 @@ function summarizeToolResult(event: Extract<DebugEvent, { type: 'tool.result' }>
 function summarizeToolInput(tool: string, input: unknown, mode: 'summary' | 'raw'): string {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return '';
   const record = input as Record<string, unknown>;
+  if (tool === 'inspect_world_summary') {
+    if (mode === 'summary') {
+      return 'checking the world';
+    }
+    const question = typeof record.question === 'string' && record.question.trim()
+      ? `question=${JSON.stringify(record.question)}`
+      : '';
+    return question;
+  }
+  if (tool === 'inspect_scene_detail') {
+    if (mode === 'summary') {
+      return 'checking the local scene';
+    }
+    const parts: string[] = [];
+    if (typeof record.question === 'string' && record.question.trim()) {
+      parts.push(`question=${JSON.stringify(record.question)}`);
+    }
+    if (typeof record.focus === 'string' && record.focus.trim()) {
+      parts.push(`focus=${JSON.stringify(record.focus)}`);
+    }
+    return parts.join(' ');
+  }
   if (tool === 'observe_world' && typeof record.perspective === 'string') {
     if (mode === 'summary') {
       return 'checking the world';
@@ -852,6 +892,35 @@ function summarizeToolInput(tool: string, input: unknown, mode: 'summary' | 'raw
     }
     if (record.pendingPrompt && typeof record.pendingPrompt === 'object') {
       parts.push('pending_prompt=true');
+    }
+    return parts.join(' ');
+  }
+  if (tool === 'delegate_mechanics') {
+    if (mode === 'summary') {
+      return 'mechanics: steward requested a draft';
+    }
+    const parts: string[] = [];
+    if (typeof record.objective === 'string' && record.objective.trim()) {
+      parts.push(`objective=${JSON.stringify(record.objective)}`);
+    }
+    if (typeof record.focus === 'string' && record.focus.trim()) {
+      parts.push(`focus=${JSON.stringify(record.focus)}`);
+    }
+    if (typeof record.playerText === 'string' && record.playerText.trim()) {
+      parts.push(`player_text=${JSON.stringify(record.playerText)}`);
+    }
+    return parts.join(' ');
+  }
+  if (tool === 'delegate_legacy_gm') {
+    if (mode === 'summary') {
+      return 'steward: falling back to the legacy GM';
+    }
+    const parts: string[] = [];
+    if (typeof record.reason === 'string' && record.reason.trim()) {
+      parts.push(`reason=${JSON.stringify(record.reason)}`);
+    }
+    if (typeof record.focus === 'string' && record.focus.trim()) {
+      parts.push(`focus=${JSON.stringify(record.focus)}`);
     }
     return parts.join(' ');
   }
@@ -918,6 +987,34 @@ function summarizeToolInput(tool: string, input: unknown, mode: 'summary' | 'raw
     }
     return parts.join(' ');
   }
+  if (tool === 'finish_steward_turn') {
+    if (mode === 'summary') {
+      return summarizeFinishTurnIntent(record);
+    }
+    const parts: string[] = [];
+    const pending = record.playerPrompt && typeof record.playerPrompt === 'object'
+      ? (record.playerPrompt as Record<string, unknown>).pending
+      : undefined;
+    if (pending && typeof pending === 'object') {
+      const kind = typeof (pending as Record<string, unknown>).kind === 'string'
+        ? String((pending as Record<string, unknown>).kind)
+        : 'pending';
+      parts.push(`pending=${kind}`);
+    }
+    if (record.playerPrompt && typeof record.playerPrompt === 'object' && (record.playerPrompt as Record<string, unknown>).clear === true) {
+      parts.push('clear_prompt=true');
+    }
+    if (record.agendaUpdates && typeof record.agendaUpdates === 'object') {
+      parts.push('agenda_updates=true');
+    }
+    if (record.directorUpdates && typeof record.directorUpdates === 'object') {
+      parts.push('director_updates=true');
+    }
+    if (record.stewardMemoryUpdate && typeof record.stewardMemoryUpdate === 'object') {
+      parts.push('steward_memory_update=true');
+    }
+    return parts.join(' ');
+  }
   return '';
 }
 
@@ -972,6 +1069,40 @@ function summarizeToolOutput(tool: string, output: unknown, mode: 'summary' | 'r
       typeof debug?.selectedModel === 'string' ? `model=${debug.selectedModel}` : '',
       debug?.usedFallback === true ? 'fallback_used=true' : '',
       typeof debug?.failureReason === 'string' ? `failure=${JSON.stringify(debug.failureReason)}` : '',
+    ].filter(Boolean);
+    return parts.join(' ');
+  }
+  if (tool === 'delegate_mechanics') {
+    const status = typeof record.status === 'string' ? record.status : null;
+    const summary = typeof record.summary === 'string' ? record.summary.trim() : 'mechanics draft';
+    const confidence = typeof record.confidence === 'number' ? record.confidence : null;
+    if (mode === 'summary') {
+      if (status === 'pending_prompt_requires_resolution') {
+        return 'mechanics: pending prompt must be resolved first';
+      }
+      if (status === 'no_safe_action') {
+        return 'mechanics: no safe action found';
+      }
+      const confidenceLabel = formatConfidence(confidence);
+      return `mechanics: drafted ${summary}${confidenceLabel ? ` (${confidenceLabel} confidence)` : ''}`;
+    }
+    const parts = [
+      status ? `status=${status}` : '',
+      confidence != null ? `confidence=${confidence.toFixed(2)}` : '',
+      Array.isArray(record.candidateEvents) ? `events=${record.candidateEvents.length}` : '',
+    ].filter(Boolean);
+    return parts.join(' ');
+  }
+  if (tool === 'delegate_legacy_gm') {
+    const summary = typeof record.summary === 'string' ? record.summary.trim() : 'legacy GM fallback ready';
+    if (mode === 'summary') {
+      return `steward: legacy GM fallback ready${summary ? ` (${summary})` : ''}`;
+    }
+    const parts = [
+      Array.isArray(record.candidateEvents) ? `events=${record.candidateEvents.length}` : '',
+      record.pendingPrompt && typeof record.pendingPrompt === 'object' ? 'pending_prompt=true' : '',
+      record.agendaUpdates && typeof record.agendaUpdates === 'object' ? 'agenda_updates=true' : '',
+      record.directorUpdates && typeof record.directorUpdates === 'object' ? 'director_updates=true' : '',
     ].filter(Boolean);
     return parts.join(' ');
   }
@@ -1031,6 +1162,14 @@ function summarizeToolOutput(tool: string, output: unknown, mode: 'summary' | 'r
     return parts.join(' ');
   }
   if (tool === 'finish_turn') {
+    if (mode === 'summary') {
+      return 'reply ready';
+    }
+    if (typeof record.ok === 'boolean') {
+      return record.ok ? 'ok' : 'failed';
+    }
+  }
+  if (tool === 'finish_steward_turn') {
     if (mode === 'summary') {
       return 'reply ready';
     }
@@ -1115,22 +1254,29 @@ function formatToolCallNames(names: string[], mode: 'summary' | 'raw'): string {
 function formatToolName(tool: string, mode: 'summary' | 'raw'): string {
   if (mode === 'raw') return tool;
   switch (tool) {
+    case 'inspect_world_summary':
     case 'observe_world':
       return 'checking the world';
+    case 'inspect_scene_detail':
+      return 'checking the local scene';
     case 'consult_npc':
       return 'asking for NPC input';
     case 'consult_specialist':
       return 'consulting a specialist';
     case 'propose_events':
       return 'considering world changes';
+    case 'delegate_mechanics':
     case 'resolve_mechanics':
       return 'mechanics resolution';
+    case 'delegate_legacy_gm':
+      return 'legacy GM fallback';
     case 'review_mechanics_resolution':
       return 'mechanics review';
     case 'schedule_task':
       return 'schedule drafting';
     case 'review_schedule_resolution':
       return 'schedule review';
+    case 'finish_steward_turn':
     case 'finish_turn':
       return 'finalizing reply';
     default:

@@ -261,6 +261,15 @@ export interface DirectorState {
   reputationDriftLastMinutes: number;
 }
 
+export interface StewardMemory {
+  currentGoals: string[];
+  workingHypotheses: string[];
+  intendedBeats: string[];
+  deferredQuestions: string[];
+  continuityNotes: string[];
+  lastUpdatedTurn: number;
+}
+
 export interface WorldState {
   meta: WorldMeta;
   map: GridMap;
@@ -272,6 +281,7 @@ export interface WorldState {
   spine: SpineState;
   systems: SystemsState;
   directorState: DirectorState;
+  stewardMemory: StewardMemory;
   ledger: Array<{ turn: number; text: string; tags?: string[] }>;
   knowledge: Record<ActorId, KnowledgeState>;
 }
