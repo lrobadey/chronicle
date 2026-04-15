@@ -121,6 +121,7 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
     const response = await llm.responsesCreate({
       apiKey,
       model,
+      reasoning: { effort: 'low' },
       stream: true,
       onOutputTextDelta: delta => {
         streamedText += delta;
@@ -195,6 +196,7 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
     const response = await llm.responsesCreate({
       apiKey,
       model,
+      reasoning: { effort: 'low' },
       stream: true,
       onOutputTextDelta: delta => {
         streamedText += delta;
