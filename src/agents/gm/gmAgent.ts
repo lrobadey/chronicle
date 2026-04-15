@@ -1,6 +1,7 @@
 import type { LLMClient, ResponseInputItem, ResponseOutputItem } from '../llm/types';
 import { DEFAULT_MODEL } from '../llm/defaults';
 import { classifyLLMError } from '../llm/errorUtils';
+import { isFunctionCallItem, pushLLMTrace } from '../llm/trace';
 import { GM_SYSTEM_PROMPT } from './prompts';
 import { GM_TOOL_DEFS } from './tools';
 import type { WorldEvent } from '../../sim/events';
@@ -313,31 +314,3 @@ function safeJSONStringify(value: unknown): string {
   }
 }
 
-function isFunctionCallItem(item: ResponseOutputItem): item is {
-  type: 'function_call';
-  name: string;
-  arguments: string;
-  call_id?: string;
-} {
-  return item.type === 'function_call' && typeof item.name === 'string' && typeof item.arguments === 'string';
-}
-
-function pushLLMTrace(
-  trace: GMAgentParams['trace'] | undefined,
-  entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
-    responseId?: string;
-    previousResponseId?: string;
-    inputItems?: number;
-    outputItems?: number;
-    toolCalls?: number;
-    usage?: unknown;
-    status?: string;
-    error?: unknown;
-    specialistType?: SpecialistType;
-  },
-) {
-  if (!trace) return;
-  trace.llmCalls = trace.llmCalls || [];
-  trace.llmCalls.push(entry);
-}

@@ -1,6 +1,7 @@
 import type { LLMClient, ResponseOutputItem, ResponseToolDefinition } from '../llm/types';
 import { DEFAULT_MODEL } from '../llm/defaults';
 import { classifyLLMError } from '../llm/errorUtils';
+import { isFunctionCallItem, pushLLMTrace } from '../llm/trace';
 import { emitDebugEvent, type DebugSink } from '../../engine/debug';
 import { EVENT_ITEM_SCHEMA, strictObjectSchema } from '../sharedSchemas';
 import { normalizeWorldEvent, type WorldEvent } from '../../sim/events';
@@ -205,33 +206,6 @@ function isUsableCandidateEvent(event: WorldEvent): boolean {
   return true;
 }
 
-function isFunctionCallItem(item: ResponseOutputItem): item is {
-  type: 'function_call';
-  name: string;
-  arguments: string;
-} {
-  return item.type === 'function_call' && typeof item.name === 'string' && typeof item.arguments === 'string';
-}
-
-function pushLLMTrace(
-  trace: SpecialistAgentParams['trace'] | undefined,
-  entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
-    responseId?: string;
-    previousResponseId?: string;
-    inputItems?: number;
-    outputItems?: number;
-    toolCalls?: number;
-    usage?: unknown;
-    status?: string;
-    error?: unknown;
-    specialistType?: SpecialistType;
-  },
-) {
-  if (!trace) return;
-  trace.llmCalls = trace.llmCalls || [];
-  trace.llmCalls.push(entry);
-}
 
 function eventsMatch(left: SpecialistAgentOutput['candidateEvents'][number], right: SpecialistAgentOutput['candidateEvents'][number]) {
   return JSON.stringify(stripMeta(left)) === JSON.stringify(stripMeta(right));

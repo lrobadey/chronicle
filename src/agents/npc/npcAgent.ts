@@ -1,6 +1,7 @@
 import type { LLMClient, ResponseOutputItem, ResponseToolDefinition } from '../llm/types';
 import { DEFAULT_MODEL } from '../llm/defaults';
 import { classifyLLMError } from '../llm/errorUtils';
+import { isFunctionCallItem, pushLLMTrace } from '../llm/trace';
 import { NPC_SYSTEM_PROMPT } from './prompts';
 import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
@@ -189,33 +190,6 @@ function parseNpcOutput(argumentsJSON: string): { publicUtterance: string; priva
   }
 }
 
-function isFunctionCallItem(item: ResponseOutputItem): item is {
-  type: 'function_call';
-  name: string;
-  arguments: string;
-} {
-  return item.type === 'function_call' && typeof item.name === 'string' && typeof item.arguments === 'string';
-}
-
-function pushLLMTrace(
-  trace: NpcAgentParams['trace'] | undefined,
-  entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
-    responseId?: string;
-    previousResponseId?: string;
-    inputItems?: number;
-    outputItems?: number;
-    toolCalls?: number;
-    usage?: unknown;
-    status?: string;
-    error?: unknown;
-    specialistType?: SpecialistType;
-  },
-) {
-  if (!trace) return;
-  trace.llmCalls = trace.llmCalls || [];
-  trace.llmCalls.push(entry);
-}
 
 function fitNPCConversationPayload(params: {
   persona: NpcAgentParams['persona'];

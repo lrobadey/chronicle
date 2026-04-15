@@ -1243,7 +1243,7 @@ function isSimpleMechanicsEvent(event: WorldEvent): boolean {
 }
 
 function deepClone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
+  return structuredClone(value);
 }
 
 function buildMechanicsLocalAffordances(state: WorldState, playerId: string) {

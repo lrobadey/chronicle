@@ -1,6 +1,7 @@
 import type { LLMClient } from '../llm/types';
 import { DEFAULT_MODEL } from '../llm/defaults';
 import { classifyLLMError } from '../llm/errorUtils';
+import { pushLLMTrace } from '../llm/trace';
 import { NARRATOR_STYLE_PROMPTS } from './prompts';
 import type { Telemetry } from '../../sim/views/telemetry';
 import type { TurnDiff } from '../../sim/views/diff';
@@ -283,22 +284,3 @@ function formatAttemptedAction(playerText: string): string {
   return `You try to ${trimmed}`;
 }
 
-function pushLLMTrace(
-  trace: NarratorParams['trace'] | undefined,
-  entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
-    responseId?: string;
-    previousResponseId?: string;
-    inputItems?: number;
-    outputItems?: number;
-    toolCalls?: number;
-    usage?: unknown;
-    status?: string;
-    error?: unknown;
-    specialistType?: SpecialistType;
-  },
-) {
-  if (!trace) return;
-  trace.llmCalls = trace.llmCalls || [];
-  trace.llmCalls.push(entry);
-}

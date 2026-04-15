@@ -53,6 +53,38 @@ describe('world spine mirror', () => {
     assert.deepEqual(dropped.actors['player-1']?.inventory, []);
   });
 
+  it('does not invent a containing location for actors outside every location radius', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    world.actors['player-1'].pos = { x: 400, y: 400, z: 0 };
+
+    const synced = syncWorldSpine(world);
+    const playerLocationRelations = Object.values(synced.spine.relations).filter(relation =>
+      relation.from === 'player-1' && relation.type === 'located_in');
+
+    assert.deepEqual(playerLocationRelations, []);
+  });
+
+  it('still falls back to the nearest location when dropping an item outside every location radius', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    world.actors['player-1'].pos = { x: 400, y: 400, z: 0 };
+    setItemPlacement(world.spine, 'heartwater-jar', { type: 'carried_by', actorId: 'player-1' }, world.locations);
+    syncWorldSpine(world);
+
+    const dropped = applyEvent(world, {
+      type: 'DropItem',
+      actorId: 'player-1',
+      itemId: 'heartwater-jar',
+      at: { x: 400, y: 400, z: 0 },
+    });
+
+    const placement = getItemPlacement(dropped.spine, 'heartwater-jar');
+    assert.deepEqual(placement, {
+      type: 'located_in',
+      locationId: 'under-the-ribs',
+      anchor: { x: 400, y: 400, z: 0 },
+    });
+  });
+
   it('translates item creation into spine placement and derived inventory state', () => {
     const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
 

@@ -6,7 +6,7 @@ import { applyAffectItem } from './itemEffects';
 import { deriveTide, isTideBlocked } from './systems/tide';
 import { deriveTime } from './systems/time';
 import { deriveConstraints } from './systems/constraints';
-import { distance, locationsWithinRadius } from './utils';
+import { distance, locationsWithinRadius, resolveContainingOrNearestLocationId } from './utils';
 import { resolveMoveTarget, validateSchedulablePayload } from './validate';
 import { estimateTravel, positionToward } from './systems/travel';
 
@@ -212,7 +212,7 @@ function applyDropItem(state: WorldState, event: Extract<WorldEvent, { type: 'Dr
 
   const next = cloneState(state);
   const anchor = event.at || actor.pos;
-  const locationId = resolvePlacementLocationId(next, anchor);
+  const locationId = resolveContainingOrNearestLocationId(anchor, next.locations);
   if (!locationId) return state;
 
   setItemPlacement(next.spine, item.id, { type: 'located_in', locationId, anchor }, next.locations);
@@ -253,7 +253,7 @@ function applyTransferItem(state: WorldState, event: Extract<WorldEvent, { type:
   }
 
   if (!event.at) return state;
-  const locationId = resolvePlacementLocationId(next, event.at);
+  const locationId = resolveContainingOrNearestLocationId(event.at, next.locations);
   if (!locationId) return state;
 
   setItemPlacement(next.spine, item.id, { type: 'located_in', locationId, anchor: event.at }, next.locations);
@@ -333,7 +333,7 @@ function applyCreateEntity(state: WorldState, event: Extract<WorldEvent, { type:
         next.locations,
       );
     } else {
-      const locationId = resolvePlacementLocationId(next, event.entity.data.location.pos);
+      const locationId = resolveContainingOrNearestLocationId(event.entity.data.location.pos, next.locations);
       if (locationId) {
         setItemPlacement(
           next.spine,
@@ -585,15 +585,25 @@ function updateKnowledgeForActor(state: WorldState, actorId: string) {
 }
 
 function cloneState(state: WorldState): WorldState {
-  return JSON.parse(JSON.stringify(state)) as WorldState;
+  return structuredClone(state);
 }
 
 function isLocationBlockedAtElapsed(state: WorldState, locationId: string, elapsedMinutes: number) {
-  const snapshot = cloneState(state);
-  snapshot.systems.time.elapsedMinutes = elapsedMinutes;
-  const location = snapshot.locations[locationId];
+  const location = state.locations[locationId];
   if (!location) return false;
-  return isTideBlocked(location, deriveTide(snapshot));
+
+  // Shallow clone to override time without deep-copying the entire state
+  const pseudoState = {
+    ...state,
+    systems: {
+      ...state.systems,
+      time: {
+        ...state.systems.time,
+        elapsedMinutes
+      }
+    }
+  };
+  return isTideBlocked(location, deriveTide(pseudoState as WorldState));
 }
 
 function resolveExploreVector(area: string, direction?: 'east' | 'west' | 'north' | 'south') {
@@ -614,15 +624,4 @@ function clampToBounds(state: WorldState, pos: { x: number; y: number; z?: numbe
     y: Math.max(minY, Math.min(maxY, pos.y)),
     z: pos.z ?? 0,
   };
-}
-
-function resolvePlacementLocationId(state: WorldState, pos: { x: number; y: number; z?: number }) {
-  const containing = Object.values(state.locations)
-    .filter(location => distance(pos, location.anchor) <= (location.radiusCells ?? 0))
-    .sort((a, b) => distance(pos, a.anchor) - distance(pos, b.anchor));
-  if (containing[0]) return containing[0].id;
-
-  const nearest = Object.values(state.locations)
-    .sort((a, b) => distance(pos, a.anchor) - distance(pos, b.anchor))[0];
-  return nearest?.id || null;
 }

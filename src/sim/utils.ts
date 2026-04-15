@@ -38,3 +38,37 @@ export function actorsWithinRadius(state: WorldState, pos: GridPos, radius: numb
 export function getActor(state: WorldState, id: ActorId): Actor | null {
   return state.actors[id] ?? null;
 }
+
+export function resolveContainingLocationId(
+  pos: GridPos,
+  locations: Record<string, LocationPOI>,
+  defaultRadiusCells = 0,
+): string | null {
+  const matches = Object.values(locations)
+    .filter(location => distance(pos, location.anchor) <= (location.radiusCells ?? defaultRadiusCells))
+    .sort((a, b) => {
+      return distance(pos, a.anchor) - distance(pos, b.anchor);
+    });
+  return matches[0]?.id ?? null;
+}
+
+export function resolveNearestLocationId(pos: GridPos, locations: Record<string, LocationPOI>): string | null {
+  let nearest: LocationPOI | null = null;
+  let nearestDist = Number.POSITIVE_INFINITY;
+  for (const loc of Object.values(locations)) {
+    const d = distance(pos, loc.anchor);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearest = loc;
+    }
+  }
+  return nearest?.id || null;
+}
+
+export function resolveContainingOrNearestLocationId(
+  pos: GridPos,
+  locations: Record<string, LocationPOI>,
+  defaultRadiusCells = 0,
+): string | null {
+  return resolveContainingLocationId(pos, locations, defaultRadiusCells) ?? resolveNearestLocationId(pos, locations);
+}

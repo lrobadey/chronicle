@@ -1,7 +1,7 @@
 import type { AffectItemEffect, WorldEvent } from './events';
 import type { Item, ItemLifecycleState, WorldState } from './state';
 import { getItemLifecycleState, getItemPlacement, setItemPlacement } from './spine';
-import { distance, getActor } from './utils';
+import { distance, getActor, resolveContainingLocationId } from './utils';
 
 export function validateAffectItem(
   state: WorldState,
@@ -195,24 +195,11 @@ function setLifecycle(item: Item, state: ItemLifecycleState) {
 }
 
 function toGroundPlacement(state: WorldState, anchor: { x: number; y: number; z?: number }) {
-  const locationId = resolvePlacementLocationId(state, anchor);
+  const locationId = resolveContainingLocationId(anchor, state.locations, 20);
   if (!locationId) throw new Error('item_location_out_of_bounds');
   return { type: 'located_in' as const, locationId, anchor };
 }
 
-function resolvePlacementLocationId(state: WorldState, anchor: { x: number; y: number; z?: number }) {
-  let bestId: string | null = null;
-  let bestRadius = Number.POSITIVE_INFINITY;
-  for (const location of Object.values(state.locations)) {
-    const radius = location.radiusCells ?? 20;
-    if (distance(anchor, location.anchor) <= radius && radius < bestRadius) {
-      bestId = location.id;
-      bestRadius = radius;
-    }
-  }
-  return bestId;
-}
-
 function cloneState<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
+  return structuredClone(value);
 }

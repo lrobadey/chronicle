@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { LLMClient, ResponseOutputItem, ResponseToolDefinition } from '../llm/types';
 import { MECHANICS_MODEL } from '../llm/defaults';
 import { classifyLLMError } from '../llm/errorUtils';
+import { isFunctionCallItem, pushLLMTrace } from '../llm/trace';
 import {
   NPC_SCHEDULE_ENTRY_SCHEMA,
   SCHEDULABLE_PAYLOAD_SCHEMA,
@@ -280,34 +281,6 @@ function isSchedulablePayload(value: unknown): value is { type: string; [key: st
   return typeof record.type === 'string' && record.type !== 'AdvanceTime' && record.type !== 'ScheduleProcess' && record.type !== 'SetNpcSchedule';
 }
 
-function isFunctionCallItem(item: ResponseOutputItem): item is {
-  type: 'function_call';
-  name: string;
-  arguments: string;
-  call_id?: string;
-} {
-  return item.type === 'function_call' && typeof item.name === 'string' && typeof item.arguments === 'string';
-}
-
-function pushLLMTrace(
-  trace: ScheduleAgentParams['trace'] | undefined,
-  entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
-    responseId?: string;
-    previousResponseId?: string;
-    inputItems?: number;
-    outputItems?: number;
-    toolCalls?: number;
-    usage?: unknown;
-    status?: string;
-    error?: unknown;
-    specialistType?: string;
-  },
-) {
-  if (!trace) return;
-  trace.llmCalls = trace.llmCalls || [];
-  trace.llmCalls.push(entry);
-}
 
 function createResolutionId(): string {
   try {

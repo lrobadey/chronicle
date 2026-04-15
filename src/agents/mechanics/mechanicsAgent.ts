@@ -1,6 +1,7 @@
 import type { LLMClient, ResponseOutputItem, ResponseToolDefinition } from '../llm/types';
 import { MECHANICS_FALLBACK_MODEL, MECHANICS_MODEL } from '../llm/defaults';
 import { classifyLLMError } from '../llm/errorUtils';
+import { isFunctionCallItem, pushLLMTrace } from '../llm/trace';
 import {
   NULLABLE_GRID_POS_SCHEMA,
   PENDING_PROMPT_DATA_SCHEMA,
@@ -685,30 +686,3 @@ function isInterpretation(value: unknown): value is MechanicsInterpretation {
     value === 'none';
 }
 
-function isFunctionCallItem(item: ResponseOutputItem): item is {
-  type: 'function_call';
-  name: string;
-  arguments: string;
-} {
-  return item.type === 'function_call' && typeof item.name === 'string' && typeof item.arguments === 'string';
-}
-
-function pushLLMTrace(
-  trace: MechanicsAgentParams['trace'] | undefined,
-  entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
-    responseId?: string;
-    previousResponseId?: string;
-    inputItems?: number;
-    outputItems?: number;
-    toolCalls?: number;
-    usage?: unknown;
-    status?: string;
-    error?: unknown;
-    specialistType?: string;
-  },
-) {
-  if (!trace) return;
-  trace.llmCalls = trace.llmCalls || [];
-  trace.llmCalls.push(entry);
-}

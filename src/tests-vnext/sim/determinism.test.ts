@@ -9,7 +9,7 @@ import { distance } from '../../sim/utils';
 import { buildTelemetry } from '../../sim/views/telemetry';
 import { buildObservation } from '../../sim/views/observe';
 import { computeTurnDiff } from '../../sim/views/diff';
-import { getItemPlacement } from '../../sim/spine';
+import { getItemPlacement, setItemPlacement } from '../../sim/spine';
 
 const FIXED_ANCHOR = '2025-01-01T14:00:00Z';
 
@@ -222,6 +222,22 @@ describe('sim determinism', () => {
     const observedJar = observation.nearbyItems.find(item => item.id === 'heartwater-jar');
     assert.ok(observedJar);
     assert.equal(observedJar?.components?.condition, 'broken');
+  });
+
+  it('throws when breaking a held item outside every location radius', () => {
+    const world = createIsleOfMarrowWorldVNext({ anchorIso: FIXED_ANCHOR });
+    world.actors['player-1'].pos = { x: 400, y: 400, z: 0 };
+    setItemPlacement(world.spine, 'heartwater-jar', { type: 'carried_by', actorId: 'player-1' }, world.locations);
+
+    assert.throws(() => {
+      applyEvent(world, {
+        type: 'AffectItem',
+        actorId: 'player-1',
+        itemId: 'heartwater-jar',
+        effect: 'break',
+        at: { x: 400, y: 400, z: 0 },
+      });
+    }, /item_location_out_of_bounds/);
   });
 
   it('rejects open, fill, and empty on broken or ruined items', () => {

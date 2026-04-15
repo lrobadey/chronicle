@@ -4,6 +4,7 @@ import {
   type SpineIntegrityIssue,
   type SpinePlacementType,
 } from '../engine/errors';
+import { resolveContainingLocationId, resolveContainingOrNearestLocationId } from './utils';
 import { getArchetypePreset, mergeItemComponents } from './archetypes';
 import { runDecayCatchUp } from './systems/decay';
 import { runReputationDrift } from './systems/reputation';
@@ -175,7 +176,7 @@ export function buildInitialSpine(
 
   for (const actor of Object.values(state.actors)) {
     entities[actor.id] = buildActorEntity(actor, carriedCounts[actor.id] || 0);
-    const containingLocationId = findContainingLocationId(actor.pos, state.locations);
+    const containingLocationId = resolveContainingLocationId(actor.pos, state.locations);
     if (containingLocationId) {
       addRelation(relations, {
         type: 'located_in',
@@ -236,7 +237,7 @@ export function syncWorldSpine(state: WorldState): WorldState {
 
   for (const actor of Object.values(state.actors)) {
     entities[actor.id] = buildActorEntity(actor, carriedCounts[actor.id] || 0);
-    const containingLocationId = findContainingLocationId(actor.pos, state.locations);
+    const containingLocationId = resolveContainingLocationId(actor.pos, state.locations);
     if (containingLocationId) {
       addRelation(relations, {
         type: 'located_in',
@@ -710,7 +711,7 @@ function placementFromInput(location: ItemLocationInput, locations: Record<strin
   }
   return {
     type: 'located_in',
-    locationId: findContainingLocationId(location.pos, locations) || findNearestLocationId(location.pos, locations) || 'unknown-location',
+    locationId: resolveContainingOrNearestLocationId(location.pos, locations) || 'unknown-location',
     anchor: location.pos,
   };
 }
@@ -1009,24 +1010,7 @@ function isGridPos(value: unknown): value is GridPos {
     && typeof (value as GridPos).y === 'number';
 }
 
-function findContainingLocationId(pos: GridPos, locations: Record<string, LocationPOI>): string | null {
-  return resolveContainingLocation(pos, locations)?.id || null;
-}
-
-function findNearestLocationId(pos: GridPos, locations: Record<string, LocationPOI>): string | null {
-  const nearest = Object.values(locations)
-    .sort((a, b) => distance(pos, a.anchor) - distance(pos, b.anchor))[0];
-  return nearest?.id || null;
-}
-
 function resolveContainingLocation(pos: GridPos, locations: Record<string, LocationPOI>): LocationPOI | null {
-  const matches = Object.values(locations)
-    .filter(location => distance(pos, location.anchor) <= (location.radiusCells ?? 0))
-    .sort((a, b) => distance(pos, a.anchor) - distance(pos, b.anchor));
-  return matches[0] || null;
-}
-
-function distance(a: GridPos, b: GridPos): number {
-  const dz = (a.z ?? 0) - (b.z ?? 0);
-  return Math.hypot(a.x - b.x, a.y - b.y, dz);
+  const id = resolveContainingLocationId(pos, locations);
+  return id ? (locations[id] || null) : null;
 }
