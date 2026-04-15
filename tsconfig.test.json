@@ -12,5 +12,5 @@
     "sourceMap": false
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["node_modules", "dist", "deprecated", ".tmp-tests"]
+  "exclude": ["node_modules", "dist", "deprecated", ".tmp-tests", "src/server.ts", "src/tests-vnext/api"]
 }

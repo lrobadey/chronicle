@@ -59,6 +59,12 @@ import {
   type MechanicsResolution,
   type MechanicsWorkerRequest,
 } from '../agents/mechanics';
+import {
+  runScheduleAgent,
+  type ScheduleResolutionRecord,
+  type ScheduleResolution,
+  type ScheduleTaskInput,
+} from '../agents/schedule';
 import { closeStewardTurn, openStewardTurn } from '../agents/steward';
 import { resolveWorldModule } from '../worlds/registry';
 import { describeWorldModule, type WorldModule, type WorldPresentation } from '../worlds/types';
@@ -269,6 +275,8 @@ export class TurnEngine {
     const specialistOutputs: Array<Omit<SpecialistConsultation, 'usedSuggestion' | 'usedCandidateEvents'>> = [];
     const mechanicsResolutions = new Map<string, MechanicsResolutionRecord>();
     let activeMechanicsResolutionId: string | null = null;
+    const scheduleResolutions = new Map<string, ScheduleResolutionRecord>();
+    let activeScheduleResolutionId: string | null = null;
     let systemsNarratorPacket: SystemsNarratorPacket | null = null;
     const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [], llmCalls: [] } : undefined;
     draft.meta.turn = nextTurn;
@@ -843,6 +851,139 @@ export class TurnEngine {
             resolution: resolutionForGM,
           };
         },
+        schedule_task: async (input: { task: string; actorId?: string | null; timeHint?: string | null }) => {
+          const actor = input.actorId ? draft.actors[input.actorId] : undefined;
+          const { deriveTime } = await import('../sim/systems/time');
+          const timeInfo = deriveTime(draft);
+
+          // Build named timepoints from the current day
+          const currentDay = Math.floor(draft.systems.time.elapsedMinutes / 1440);
+          const dayStartMinutes = currentDay * 1440;
+          const namedTimepoints: Record<string, number> = {
+            dawn: dayStartMinutes + 6 * 60,
+            noon: dayStartMinutes + 12 * 60,
+            dusk: dayStartMinutes + 18 * 60,
+            midnight: dayStartMinutes + 24 * 60,
+            tomorrow_dawn: dayStartMinutes + 30 * 60,
+            tomorrow_noon: dayStartMinutes + 36 * 60,
+          };
+
+          const h = timeInfo.currentHour;
+          const m = draft.systems.time.elapsedMinutes % 60;
+          const ampm = h < 12 ? 'AM' : 'PM';
+          const h12 = h % 12 === 0 ? 12 : h % 12;
+          const clockDisplay = `Day ${timeInfo.currentDay}, ${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+
+          const scheduleInput: ScheduleTaskInput = {
+            task: input.timeHint ? `${input.task} (timing hint: ${input.timeHint})` : input.task,
+            actorId: input.actorId || undefined,
+            actorName: actor?.name,
+            currentElapsedMinutes: draft.systems.time.elapsedMinutes,
+            worldTimeContext: {
+              clockDisplay,
+              currentDayIndex: currentDay,
+              namedTimepoints,
+            },
+            existingSchedule: actor?.schedule?.entries.map(e => ({
+              id: e.id,
+              label: e.label,
+              atHour: e.atHour,
+            })),
+            pendingProcessesForActor: input.actorId
+              ? draft.systems.scheduledProcesses
+                  .filter(p => {
+                    const payload = p.payload;
+                    return (
+                      typeof payload === 'object' &&
+                      payload !== null &&
+                      'actorId' in payload &&
+                      payload.actorId === input.actorId
+                    );
+                  })
+                  .map(p => ({ id: p.id, label: p.label, dueAtMinutes: p.dueAtMinutes }))
+              : undefined,
+          };
+
+          const resolution = await runScheduleAgent({
+            apiKey,
+            input: scheduleInput,
+            llm: this.llm,
+          });
+
+          scheduleResolutions.set(resolution.id, { input: scheduleInput, resolution, revisionCount: 0 });
+          activeScheduleResolutionId = resolution.id;
+
+          const { ...resolutionForGM } = resolution;
+          return resolutionForGM;
+        },
+
+        review_schedule_resolution: async (input: {
+          scheduleResolutionId: string;
+          action: 'approve' | 'revise' | 'reject';
+          feedback?: string | null;
+        }): Promise<unknown> => {
+          const cached = scheduleResolutions.get(input.scheduleResolutionId);
+          if (!cached) {
+            return { ok: false, error: 'schedule_resolution_not_found', resolutionId: input.scheduleResolutionId };
+          }
+
+          if (input.action === 'approve') {
+            // Apply all events from the resolution through propose_events validation
+            const result = applyProposedEvents(cached.resolution.events as WorldEvent[]);
+            scheduleResolutions.delete(input.scheduleResolutionId);
+            if (activeScheduleResolutionId === input.scheduleResolutionId) {
+              activeScheduleResolutionId = null;
+            }
+            return { ok: result.ok, status: 'approved', resolutionId: input.scheduleResolutionId, ...result };
+          }
+
+          if (input.action === 'reject') {
+            scheduleResolutions.delete(input.scheduleResolutionId);
+            if (activeScheduleResolutionId === input.scheduleResolutionId) {
+              activeScheduleResolutionId = null;
+            }
+            return { ok: true, status: 'rejected', resolutionId: input.scheduleResolutionId };
+          }
+
+          // revise
+          if (!input.feedback?.trim()) {
+            return { ok: false, error: 'feedback_required_for_revision' };
+          }
+          const MAX_REVISIONS = 2;
+          if (cached.revisionCount >= MAX_REVISIONS) {
+            scheduleResolutions.delete(input.scheduleResolutionId);
+            if (activeScheduleResolutionId === input.scheduleResolutionId) {
+              activeScheduleResolutionId = null;
+            }
+            return { ok: true, status: 'rejected', resolutionId: input.scheduleResolutionId, reason: 'max_revisions_exceeded' };
+          }
+
+          const revisedResolution = await runScheduleAgent({
+            apiKey,
+            input: {
+              ...cached.input,
+              revisionFeedback: input.feedback,
+              previousDraft: cached.resolution,
+            },
+            llm: this.llm,
+          });
+
+          const nextResolutionId = revisedResolution.id;
+          scheduleResolutions.delete(input.scheduleResolutionId);
+          scheduleResolutions.set(nextResolutionId, {
+            input: cached.input,
+            resolution: revisedResolution,
+            revisionCount: cached.revisionCount + 1,
+          });
+          activeScheduleResolutionId = nextResolutionId;
+          return {
+            ok: true,
+            status: 'revised',
+            previousResolutionId: input.scheduleResolutionId,
+            resolution: revisedResolution,
+          };
+        },
+
         finish_turn: async (input: GMFinishTurnInput) => {
           if (activeMechanicsResolutionId) {
             const active = mechanicsResolutions.get(activeMechanicsResolutionId);

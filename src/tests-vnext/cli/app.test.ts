@@ -82,6 +82,7 @@ class StubCliEngine implements CliEngine {
       },
       ledgerTail: ['init'],
       knowledge: { seenLocations: ['the-landing'], seenActors: ['player-1'], seenItems: [], notes: [] },
+      scheduledProcesses: { count: 0, upcoming: [] },
     };
   }
 

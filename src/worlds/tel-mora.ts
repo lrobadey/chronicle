@@ -288,6 +288,7 @@ export function createTelMoraWorld(options: CreateWorldOptions = {}): WorldState
           clay_mudbrick: 'abundant',
         },
       },
+      scheduledProcesses: [],
     },
     directorState: {
       scene: {

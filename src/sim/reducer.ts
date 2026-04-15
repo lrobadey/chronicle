@@ -1,5 +1,5 @@
 import type { WorldEvent } from './events';
-import type { KnowledgeState, WorldState } from './state';
+import type { KnowledgeState, NpcScheduleEntry, ScheduledProcess, WorldState } from './state';
 import { runReputationDrift } from './systems/reputation';
 import { getItemPlacement, setItemPlacement, syncWorldSpine } from './spine';
 import { applyAffectItem } from './itemEffects';
@@ -55,6 +55,10 @@ function applyEventBase(state: WorldState, event: WorldEvent): WorldState {
       return applyModifyReputation(state, event);
     case 'SpreadRumor':
       return applySpreadRumor(state, event);
+    case 'ScheduleProcess':
+      return applyScheduleProcess(state, event);
+    case 'SetNpcSchedule':
+      return applySetNpcSchedule(state, event);
     default:
       return state;
   }
@@ -258,8 +262,151 @@ function applyTransferItem(state: WorldState, event: Extract<WorldEvent, { type:
 
 function advanceTime(state: WorldState, minutes: number, note?: string): WorldState {
   const next = cloneState(state);
+  const prevMinutes = next.systems.time.elapsedMinutes;
   next.systems.time.elapsedMinutes += minutes;
   addLedgerInPlace(next, note || `${minutes} minutes pass`);
+  const afterFire = fireScheduledProcesses(next, prevMinutes);
+  return hydrateNpcSchedules(afterFire);
+}
+
+/**
+ * Fire all scheduled processes whose dueAtMinutes fell within the time window
+ * (prevMinutes, state.systems.time.elapsedMinutes]. Processes are sorted by
+ * dueAtMinutes ascending, fired in order, and removed after firing.
+ * Recurring processes (cadenceMinutes set) re-register themselves.
+ */
+function fireScheduledProcesses(state: WorldState, prevMinutes: number): WorldState {
+  const processes = state.systems.scheduledProcesses ?? [];
+  const due = processes
+    .filter(p => p.dueAtMinutes > prevMinutes && p.dueAtMinutes <= state.systems.time.elapsedMinutes)
+    .sort((a, b) => a.dueAtMinutes - b.dueAtMinutes);
+
+  if (due.length === 0) return state;
+
+  const dueIds = new Set(due.map(p => p.id));
+  let next = cloneState(state);
+  next.systems.scheduledProcesses = next.systems.scheduledProcesses.filter(p => !dueIds.has(p.id));
+
+  for (const proc of due) {
+    addLedgerInPlace(next, `[Process: ${proc.label}]`);
+    // Guard: do not allow ScheduleProcess or AdvanceTime payloads to prevent recursion/loops
+    if (proc.payload.type === 'ScheduleProcess' || proc.payload.type === 'AdvanceTime') continue;
+    next = syncWorldSpine(applyEventBase(next, proc.payload as WorldEvent));
+
+    // Re-schedule recurring processes
+    if (proc.cadenceMinutes && proc.cadenceMinutes > 0) {
+      const recurring: ScheduledProcess = {
+        ...proc,
+        dueAtMinutes: proc.dueAtMinutes + proc.cadenceMinutes,
+        createdTurn: next.meta.turn,
+      };
+      next.systems.scheduledProcesses = [...next.systems.scheduledProcesses, recurring];
+    }
+  }
+
+  return next;
+}
+
+/**
+ * Convert NPC daily schedule entries into scheduledProcesses for the current
+ * day and tomorrow, if not already present. Called after every time advance
+ * so schedules stay hydrated a day ahead without over-scheduling.
+ */
+function hydrateNpcSchedules(state: WorldState): WorldState {
+  const currentDay = Math.floor(state.systems.time.elapsedMinutes / 1440);
+
+  let next: WorldState | null = null; // lazy clone — only allocate if changed
+
+  for (const actor of Object.values(state.actors)) {
+    const schedule = actor.schedule;
+    if (!schedule?.entries.length) continue;
+
+    const lastHydrated = schedule.lastHydratedDay ?? -1;
+    if (lastHydrated >= currentDay + 1) continue; // already hydrated through tomorrow
+
+    if (!next) next = cloneState(state);
+
+    for (const day of [currentDay, currentDay + 1]) {
+      const dayStartMinutes = day * 1440;
+      for (const entry of schedule.entries) {
+        const dueAtMinutes = dayStartMinutes + entry.atHour * 60;
+        if (dueAtMinutes <= state.systems.time.elapsedMinutes) continue; // in the past
+
+        const processId = `npc-sched-${actor.id}-${entry.id}-d${day}`;
+        if (next!.systems.scheduledProcesses.some(p => p.id === processId)) continue;
+
+        const proc: ScheduledProcess = {
+          id: processId,
+          label: entry.label,
+          dueAtMinutes,
+          payload: entry.payload,
+          createdTurn: state.meta.turn,
+        };
+        next!.systems.scheduledProcesses = [...next!.systems.scheduledProcesses, proc];
+      }
+    }
+
+    next!.actors[actor.id] = {
+      ...next!.actors[actor.id],
+      schedule: { ...schedule, lastHydratedDay: currentDay + 1 },
+    };
+  }
+
+  return next ?? state;
+}
+
+function applyScheduleProcess(
+  state: WorldState,
+  event: Extract<WorldEvent, { type: 'ScheduleProcess' }>,
+): WorldState {
+  const next = cloneState(state);
+  const existing = next.systems.scheduledProcesses;
+  const idx = existing.findIndex(p => p.id === event.process.id);
+  const entry: ScheduledProcess = {
+    id: event.process.id,
+    label: event.process.label,
+    dueAtMinutes: event.process.dueAtMinutes,
+    cadenceMinutes: event.process.cadenceMinutes,
+    payload: event.process.payload,
+    createdTurn: state.meta.turn,
+  };
+  if (idx >= 0) {
+    next.systems.scheduledProcesses = existing.map((p, i) => (i === idx ? entry : p));
+  } else {
+    next.systems.scheduledProcesses = [...existing, entry];
+  }
+  addLedgerInPlace(
+    next,
+    event.note || `Scheduled: "${entry.label}" at ${entry.dueAtMinutes} min${entry.cadenceMinutes ? ` (every ${entry.cadenceMinutes} min)` : ''}`,
+  );
+  return next;
+}
+
+function applySetNpcSchedule(
+  state: WorldState,
+  event: Extract<WorldEvent, { type: 'SetNpcSchedule' }>,
+): WorldState {
+  const actor = state.actors[event.actorId];
+  if (!actor) return state;
+
+  const next = cloneState(state);
+  const entries: NpcScheduleEntry[] = event.entries.map(e => ({
+    id: e.id,
+    label: e.label,
+    atHour: e.atHour,
+    payload: e.payload,
+  }));
+  next.actors[event.actorId] = {
+    ...actor,
+    schedule: {
+      entries,
+      lastHydratedDay: undefined, // reset so hydrateNpcSchedules re-runs
+    },
+  };
+  addLedgerInPlace(
+    next,
+    event.note || `${actor.name}'s schedule updated (${entries.length} entr${entries.length === 1 ? 'y' : 'ies'})`,
+  );
   return next;
 }
 
