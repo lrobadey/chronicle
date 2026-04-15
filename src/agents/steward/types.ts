@@ -115,14 +115,26 @@ export interface StewardToolRuntime {
     focus?: string | null;
     deterministicOnly?: boolean | null;
   }): Promise<unknown>;
-  delegate_legacy_gm(input: {
-    reason: string;
+  consult_npc(input: { npcId: string; topic?: string | null }): Promise<unknown>;
+  consult_specialist(input: { specialistType: string; question: string; focus?: string | null }): Promise<unknown>;
+  propose_events(input: { events: WorldEvent[] }): Promise<unknown>;
+  resolve_mechanics(input: {
+    playerText?: string | null;
+    objective?: string | null;
     focus?: string | null;
-    seedToolCall?: {
-      name: string;
-      arguments: Record<string, unknown>;
-    } | null;
-  }): Promise<LegacyGMProposal>;
+    pendingPrompt?: unknown;
+  }): Promise<unknown>;
+  review_mechanics_resolution(input: {
+    resolutionId: string;
+    action: 'approve' | 'revise' | 'reject';
+    feedback?: string | null;
+  }): Promise<unknown>;
+  schedule_task(input: { task: string; actorId?: string | null; timeHint?: string | null }): Promise<unknown>;
+  review_schedule_resolution(input: {
+    scheduleResolutionId: string;
+    action: 'approve' | 'revise' | 'reject';
+    feedback?: string | null;
+  }): Promise<unknown>;
   finish_steward_turn(input: StewardFinishTurnInput): Promise<unknown>;
 }
 

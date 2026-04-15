@@ -1071,6 +1071,215 @@ export class TurnEngine {
         buildSceneDetailPacket(input.question, input.focus),
       delegate_mechanics: async (input: { playerText?: string | null; objective?: string | null; focus?: string | null; deterministicOnly?: boolean | null }) =>
         buildMechanicsDelegation(input),
+      consult_npc: async (input: { npcId: string; topic?: string | null }) => {
+        const npc = draft.actors[input.npcId];
+        if (!npc || npc.kind !== 'npc' || !npc.persona) {
+          return { error: 'npc_not_found' };
+        }
+        const npcContext = buildNPCConversationContext({ state: draft, turnHistory, playerId, playerText, nextTurn });
+        const output = await runNpcAgent({
+          apiKey,
+          npcId: npc.id,
+          persona: {
+            name: npc.name,
+            tagline: npc.persona.tagline,
+            background: npc.persona.background,
+            voice: npc.persona.voice,
+            goals: npc.persona.goals,
+          },
+          observation: buildObservation(draft, playerId),
+          conversationHistory: npcContext.conversationHistory,
+          olderTurnsSummary: npcContext.olderTurnsSummary,
+          currentTurn: { turn: nextTurn, playerId },
+          llm: this.llm,
+          debug: undefined,
+          trace,
+        });
+        npcOutputs.push(output);
+        const speech = buildNpcConsultSpeechRecord(draft, output, playerId);
+        if (speech) turnSpeech.push(speech);
+        return output;
+      },
+      consult_specialist: async (input: { specialistType: SpecialistType; question: string; focus?: string | null }) => {
+        const output = await runSpecialistAgent({
+          apiKey,
+          specialistType: input.specialistType,
+          question: input.question,
+          focus: input.focus || undefined,
+          context: buildSpecialistContext({
+            state: draft,
+            playerId,
+            playerText,
+            nextTurn,
+            turnHistory,
+            specialistType: input.specialistType,
+            pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
+          }),
+          llm: this.llm,
+          debug: undefined,
+          trace,
+        });
+        specialistOutputs.push({
+          specialistType: input.specialistType,
+          question: input.question,
+          focus: input.focus || undefined,
+          output,
+        });
+        return output;
+      },
+      propose_events: async (input: { events: WorldEvent[] }) => {
+        if (activeMechanicsResolutionId && requiresMechanicsReview(input.events || [])) {
+          const active = mechanicsResolutions.get(activeMechanicsResolutionId);
+          return { ok: false, error: 'mechanics_review_required', resolutionId: activeMechanicsResolutionId, summary: active?.resolution.summary };
+        }
+        if (activeScheduleResolutionId && requiresScheduleReview(input.events || [])) {
+          const active = scheduleResolutions.get(activeScheduleResolutionId);
+          return { ok: false, error: 'schedule_review_required', scheduleResolutionId: activeScheduleResolutionId, summary: active?.resolution.rationale };
+        }
+        return { ok: true, ...applyProposedEvents(input.events || []) };
+      },
+      resolve_mechanics: async (input: { playerText?: string | null; objective?: string | null; focus?: string | null; pendingPrompt?: PendingPrompt | null }) => {
+        const request = {
+          ...buildMechanicsRequest({
+            playerText: input.playerText,
+            objective: input.objective,
+            focus: input.focus,
+            pendingPrompt: input.pendingPrompt,
+          }),
+          pendingPrompt: normalizePendingPrompt(input.pendingPrompt) || currentPendingPrompt || draft.meta.pendingPrompt || null,
+        };
+        const draftResolution = await runMechanicsAgent({ apiKey, request, llm: this.llm, debug: undefined, trace });
+        const resolutionId = createRuntimeId();
+        const resolution = attachResolutionMetadata(draftResolution, resolutionId, request.pendingPrompt, nextTurn);
+        mechanicsResolutions.set(resolutionId, { request, resolution, revisionCount: 0 });
+        activeMechanicsResolutionId = resolutionId;
+        pushMechanicsTrace(resolution);
+        const { debug: _debug, ...resolutionForSteward } = resolution;
+        return resolutionForSteward;
+      },
+      review_mechanics_resolution: async (input: { resolutionId: string; action: 'approve' | 'revise' | 'reject'; feedback?: string | null }) => {
+        const cached = mechanicsResolutions.get(input.resolutionId);
+        if (!cached) {
+          return { ok: false, error: 'mechanics_resolution_not_found', resolutionId: input.resolutionId };
+        }
+        if (input.action === 'approve') {
+          const result = applyApprovedMechanicsResolution(cached.resolution);
+          mechanicsResolutions.delete(input.resolutionId);
+          if (activeMechanicsResolutionId === input.resolutionId) activeMechanicsResolutionId = null;
+          return { ok: result.ok, status: 'approved', resolutionId: input.resolutionId, accepted: result.accepted, rejected: result.rejected };
+        }
+        if (input.action === 'reject') {
+          mechanicsResolutions.delete(input.resolutionId);
+          if (activeMechanicsResolutionId === input.resolutionId) activeMechanicsResolutionId = null;
+          return { ok: true, status: 'rejected', resolutionId: input.resolutionId };
+        }
+        const feedback = typeof input.feedback === 'string' ? input.feedback.trim() : '';
+        if (!feedback) {
+          return { ok: false, error: 'revision_feedback_required', resolutionId: input.resolutionId };
+        }
+        const revisedDraft = await runMechanicsAgent({
+          apiKey,
+          request: {
+            ...cached.request,
+            revisionFeedback: feedback,
+            previousDraft: {
+              interpretation: cached.resolution.interpretation,
+              summary: cached.resolution.summary,
+              candidateEvents: cached.resolution.candidateEvents,
+              confidence: cached.resolution.confidence,
+            },
+          },
+          llm: this.llm,
+          debug: undefined,
+          trace,
+        });
+        const nextResolutionId = createRuntimeId();
+        const resolution = attachResolutionMetadata(revisedDraft, nextResolutionId, cached.request.pendingPrompt, nextTurn);
+        pushMechanicsTrace(resolution);
+        mechanicsResolutions.delete(input.resolutionId);
+        mechanicsResolutions.set(nextResolutionId, {
+          request: {
+            ...cached.request,
+            revisionFeedback: feedback,
+            previousDraft: {
+              interpretation: cached.resolution.interpretation,
+              summary: cached.resolution.summary,
+              candidateEvents: cached.resolution.candidateEvents,
+              confidence: cached.resolution.confidence,
+            },
+          },
+          resolution,
+          revisionCount: cached.revisionCount + 1,
+        });
+        activeMechanicsResolutionId = nextResolutionId;
+        const { debug: _debug, ...resolutionForSteward } = resolution;
+        return { ok: true, status: 'revised', previousResolutionId: input.resolutionId, resolution: resolutionForSteward };
+      },
+      schedule_task: async (input: { task: string; actorId?: string | null; timeHint?: string | null }) => {
+        const request = buildScheduleTaskInput(input);
+        const resolution = await runScheduleAgent({ apiKey, input: request, llm: this.llm, trace });
+        scheduleResolutions.set(resolution.id, { request, resolution, revisionCount: 0 });
+        activeScheduleResolutionId = resolution.id;
+        return scheduleResolutionForGM(resolution);
+      },
+      review_schedule_resolution: async (input: { scheduleResolutionId: string; action: 'approve' | 'revise' | 'reject'; feedback?: string | null }) => {
+        const cached = scheduleResolutions.get(input.scheduleResolutionId);
+        if (!cached) {
+          return { ok: false, error: 'schedule_resolution_not_found', scheduleResolutionId: input.scheduleResolutionId };
+        }
+        if (input.action === 'approve') {
+          const result = applyProposedEvents(cached.resolution.events as WorldEvent[]);
+          scheduleResolutions.delete(input.scheduleResolutionId);
+          if (activeScheduleResolutionId === input.scheduleResolutionId) activeScheduleResolutionId = null;
+          return { ok: result.ok, status: 'approved', scheduleResolutionId: input.scheduleResolutionId, accepted: result.accepted, rejected: result.rejected };
+        }
+        if (input.action === 'reject') {
+          scheduleResolutions.delete(input.scheduleResolutionId);
+          if (activeScheduleResolutionId === input.scheduleResolutionId) activeScheduleResolutionId = null;
+          return { ok: true, status: 'rejected', scheduleResolutionId: input.scheduleResolutionId };
+        }
+        const feedback = typeof input.feedback === 'string' ? input.feedback.trim() : '';
+        if (!feedback) {
+          return { ok: false, error: 'revision_feedback_required', scheduleResolutionId: input.scheduleResolutionId };
+        }
+        const resolution = await runScheduleAgent({
+          apiKey,
+          input: buildScheduleTaskInput({
+            task: cached.request.task,
+            actorId: cached.request.actorId,
+            timeHint: cached.request.timeHint,
+            revisionFeedback: feedback,
+            previousDraft: {
+              status: cached.resolution.status,
+              rationale: cached.resolution.rationale,
+              confidence: cached.resolution.confidence,
+              events: cached.resolution.events,
+              clarificationNeeded: cached.resolution.clarificationNeeded,
+            },
+          }),
+          llm: this.llm,
+          trace,
+        });
+        scheduleResolutions.delete(input.scheduleResolutionId);
+        scheduleResolutions.set(resolution.id, {
+          request: {
+            ...cached.request,
+            revisionFeedback: feedback,
+            previousDraft: {
+              status: cached.resolution.status,
+              rationale: cached.resolution.rationale,
+              confidence: cached.resolution.confidence,
+              events: cached.resolution.events,
+              clarificationNeeded: cached.resolution.clarificationNeeded,
+            },
+          },
+          resolution,
+          revisionCount: cached.revisionCount + 1,
+        });
+        activeScheduleResolutionId = resolution.id;
+        return { ok: true, status: 'revised', previousScheduleResolutionId: input.scheduleResolutionId, resolution: scheduleResolutionForGM(resolution) };
+      },
+      // Internal-only: not in STEWARD_TOOL_DEFS, used by the council fallback path.
       delegate_legacy_gm: async (input: {
         reason: string;
         focus?: string | null;

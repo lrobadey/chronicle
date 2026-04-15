@@ -6,6 +6,18 @@ import {
   strictObjectSchema,
 } from '../sharedSchemas';
 
+const MECHANICS_PENDING_PROMPT_SCHEMA = strictObjectSchema(
+  {
+    id: { type: 'string' },
+    kind: { type: 'string', enum: ['confirm_travel', 'clarify_target', 'clarify_explore'] },
+    question: { type: 'string' },
+    options: { type: ['array', 'null'], items: PROMPT_OPTION_SCHEMA },
+    data: PENDING_PROMPT_DATA_SCHEMA,
+    createdTurn: { type: 'number' },
+  },
+  { nullable: true },
+);
+
 const MEMORY_UPDATE_SCHEMA = strictObjectSchema(
   {
     currentGoals: { type: ['array', 'null'], items: { type: 'string' } },
@@ -125,12 +137,89 @@ export const STEWARD_TOOL_DEFS: ResponseToolDefinition[] = [
   },
   {
     type: 'function',
-    name: 'delegate_legacy_gm',
-    description: 'Use the legacy GM as a fallback worker when the turn needs broader authorship than the current bounded delegates can safely provide.',
+    name: 'consult_npc',
+    description: 'Ask a specific NPC for their dialogue and intent. Call this before proposing any Speak event on their behalf.',
     parameters: {
       ...strictObjectSchema({
-        reason: { type: 'string' },
+        npcId: { type: 'string' },
+        topic: { type: ['string', 'null'] },
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'consult_specialist',
+    description: 'Ask a bounded specialist advisor for structured guidance before deciding on world mutations.',
+    parameters: {
+      ...strictObjectSchema({
+        specialistType: { type: 'string', enum: ['scene', 'world'] },
+        question: { type: 'string' },
         focus: { type: ['string', 'null'] },
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'propose_events',
+    description: 'Propose and immediately apply one or more domain events. Use this for incremental world mutations during the turn (e.g. NPC speech, position changes). Do not re-include these events in finish_steward_turn candidateEvents.',
+    parameters: {
+      ...strictObjectSchema({
+        events: { type: 'array', items: EVENT_ITEM_SCHEMA },
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'resolve_mechanics',
+    description: 'Ask the mechanics worker to draft a mechanical resolution for the current player action. Returns a resolutionId to review.',
+    parameters: {
+      ...strictObjectSchema({
+        playerText: { type: ['string', 'null'] },
+        objective: { type: ['string', 'null'] },
+        focus: { type: ['string', 'null'] },
+        pendingPrompt: MECHANICS_PENDING_PROMPT_SCHEMA,
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'review_mechanics_resolution',
+    description: "Approve, revise, or reject a mechanics draft by resolution id. When action='revise', feedback is required.",
+    parameters: {
+      ...strictObjectSchema({
+        resolutionId: { type: 'string' },
+        action: { type: 'string', enum: ['approve', 'revise', 'reject'] },
+        feedback: { type: ['string', 'null'] },
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'schedule_task',
+    description: 'Ask the schedule agent to draft ScheduleProcess and/or SetNpcSchedule events for a task. Returns a scheduleResolutionId to review.',
+    parameters: {
+      ...strictObjectSchema({
+        task: { type: 'string' },
+        actorId: { type: ['string', 'null'] },
+        timeHint: { type: ['string', 'null'] },
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'review_schedule_resolution',
+    description: "Approve, revise, or reject a schedule draft. When action='revise', feedback must describe what is wrong.",
+    parameters: {
+      ...strictObjectSchema({
+        scheduleResolutionId: { type: 'string' },
+        action: { type: 'string', enum: ['approve', 'revise', 'reject'] },
+        feedback: { type: ['string', 'null'] },
       }),
     },
     strict: true,

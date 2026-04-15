@@ -11,12 +11,6 @@ const STEWARD_TOOL_NAMES = new Set([
   'inspect_world_summary',
   'inspect_scene_detail',
   'delegate_mechanics',
-  'delegate_legacy_gm',
-  'finish_steward_turn',
-]);
-
-const LEGACY_GM_TOOL_NAMES = new Set([
-  'observe_world',
   'consult_npc',
   'consult_specialist',
   'propose_events',
@@ -24,7 +18,7 @@ const LEGACY_GM_TOOL_NAMES = new Set([
   'review_mechanics_resolution',
   'schedule_task',
   'review_schedule_resolution',
-  'finish_turn',
+  'finish_steward_turn',
 ]);
 
 export async function runStewardAgent(params: StewardAgentParams): Promise<{ finished: boolean }> {
@@ -51,11 +45,6 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
     emitDebugEvent(debug, { type: 'steward.iteration.started', iteration: 1 });
     const mechanicsOutput = await runtime.delegate_mechanics({ playerText, objective: 'Resolve a bounded local action if one is safe.' });
     trace?.toolCalls.push({
-      tool: 'delegate_mechanics',
-      input: { playerText, objective: 'Resolve a bounded local action if one is safe.' },
-      output: mechanicsOutput,
-    });
-    trace?.toolCalls.push({
       tool: 'steward_preflight_mechanics',
       input: { playerText, objective: 'Resolve a bounded local action if one is safe.' },
       output: mechanicsOutput,
@@ -72,35 +61,12 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
           clear: mechanicsRecord.clearPendingPrompt === true,
         },
       });
-      trace?.toolCalls.push({
-        tool: 'finish_steward_turn',
-        input: {
-          summary: typeof mechanicsRecord.summary === 'string' ? mechanicsRecord.summary : 'Steward resolved the turn through mechanics.',
-        },
-        output: finish,
-      });
+      trace?.toolCalls.push({ tool: 'finish_steward_turn', input: { summary: mechanicsRecord.summary }, output: finish });
       return { finished: true };
     }
 
-    const fallback = await runtime.delegate_legacy_gm({
-      reason: 'No API key available for steward planning; using legacy fallback worker.',
-      focus: null,
-    });
-    trace?.toolCalls.push({
-      tool: 'delegate_legacy_gm',
-      input: { reason: 'No API key available for steward planning; using legacy fallback worker.', focus: null },
-      output: fallback,
-    });
-    await runtime.finish_steward_turn({
-      summary: fallback.summary,
-      candidateEvents: fallback.candidateEvents,
-      playerPrompt: {
-        pending: fallback.pendingPrompt,
-        clear: fallback.clearPendingPrompt === true,
-      },
-      agendaUpdates: fallback.agendaUpdates,
-      directorUpdates: fallback.directorUpdates,
-    });
+    const finish = await runtime.finish_steward_turn({ summary: 'No API key available; turn completed without world changes.' });
+    trace?.toolCalls.push({ tool: 'finish_steward_turn', input: { summary: 'no_api_key_fallback' }, output: finish });
     return { finished: true };
   }
 
@@ -130,9 +96,8 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
   }
 
   let previousResponseId: string | undefined;
-  const compatibilityWorld = buildLegacyWorldCompatibilityContext(context);
   let pendingInput: ResponseInputItem[] = [
-    { role: 'system', content: JSON.stringify({ steward: context, world: compatibilityWorld }) },
+    { role: 'system', content: JSON.stringify(context) },
     { role: 'user', content: playerText },
   ];
 
@@ -270,92 +235,35 @@ async function dispatchTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<{ output: unknown; finished: boolean }> {
-  if (LEGACY_GM_TOOL_NAMES.has(name)) {
-    const legacyProposal = await runtime.delegate_legacy_gm({
-      reason: `Steward requested legacy GM tool "${name}" via compatibility routing.`,
-      focus: resolveLegacyFocus(args),
-      seedToolCall: { name, arguments: args },
-    });
-    const finishInput = mapLegacyProposalToFinishInput(legacyProposal);
-    const finishOutput = await runtime.finish_steward_turn(finishInput);
-    return {
-      output: {
-        ok: deriveToolResultOk(finishOutput) !== false,
-        delegated: true,
-        legacyToolName: name,
-        legacyProposal,
-        finishResult: finishOutput,
-      },
-      finished: true,
-    };
-  }
   if (!STEWARD_TOOL_NAMES.has(name)) {
     return { output: { ok: false, error: 'unknown_tool', name }, finished: false };
   }
   switch (name) {
     case 'inspect_world_summary':
-      return {
-        output: await runtime.inspect_world_summary(args as Parameters<typeof runtime.inspect_world_summary>[0]),
-        finished: false,
-      };
+      return { output: await runtime.inspect_world_summary(args as Parameters<typeof runtime.inspect_world_summary>[0]), finished: false };
     case 'inspect_scene_detail':
-      return {
-        output: await runtime.inspect_scene_detail(args as Parameters<typeof runtime.inspect_scene_detail>[0]),
-        finished: false,
-      };
+      return { output: await runtime.inspect_scene_detail(args as Parameters<typeof runtime.inspect_scene_detail>[0]), finished: false };
     case 'delegate_mechanics':
-      return {
-        output: await runtime.delegate_mechanics(args as Parameters<typeof runtime.delegate_mechanics>[0]),
-        finished: false,
-      };
-    case 'delegate_legacy_gm':
-      return {
-        output: await runtime.delegate_legacy_gm(args as Parameters<typeof runtime.delegate_legacy_gm>[0]),
-        finished: false,
-      };
+      return { output: await runtime.delegate_mechanics(args as Parameters<typeof runtime.delegate_mechanics>[0]), finished: false };
+    case 'consult_npc':
+      return { output: await runtime.consult_npc(args as Parameters<typeof runtime.consult_npc>[0]), finished: false };
+    case 'consult_specialist':
+      return { output: await runtime.consult_specialist(args as Parameters<typeof runtime.consult_specialist>[0]), finished: false };
+    case 'propose_events':
+      return { output: await runtime.propose_events(args as Parameters<typeof runtime.propose_events>[0]), finished: false };
+    case 'resolve_mechanics':
+      return { output: await runtime.resolve_mechanics(args as Parameters<typeof runtime.resolve_mechanics>[0]), finished: false };
+    case 'review_mechanics_resolution':
+      return { output: await runtime.review_mechanics_resolution(args as Parameters<typeof runtime.review_mechanics_resolution>[0]), finished: false };
+    case 'schedule_task':
+      return { output: await runtime.schedule_task(args as Parameters<typeof runtime.schedule_task>[0]), finished: false };
+    case 'review_schedule_resolution':
+      return { output: await runtime.review_schedule_resolution(args as Parameters<typeof runtime.review_schedule_resolution>[0]), finished: false };
     case 'finish_steward_turn':
-      return {
-        output: await runtime.finish_steward_turn(args as unknown as StewardFinishTurnInput),
-        finished: true,
-      };
+      return { output: await runtime.finish_steward_turn(args as unknown as StewardFinishTurnInput), finished: true };
   }
 }
 
-function buildLegacyWorldCompatibilityContext(context: StewardAgentParams['context']) {
-  return {
-    opening: context.opening,
-    recentTurns: context.recentTurns,
-    playerTranscriptTail: context.playerTranscriptTail,
-    pendingPrompt: context.pendingPrompt,
-    telemetry: context.telemetry,
-    agendas: context.directorState,
-    stewardMemory: context.stewardMemory,
-    sceneSummary: context.sceneSummary,
-    worldSummary: context.worldSummary,
-  };
-}
-
-function mapLegacyProposalToFinishInput(
-  proposal: Awaited<ReturnType<StewardAgentParams['runtime']['delegate_legacy_gm']>>,
-): StewardFinishTurnInput {
-  return {
-    summary: proposal.summary,
-    candidateEvents: proposal.candidateEvents,
-    playerPrompt: {
-      pending: proposal.pendingPrompt,
-      clear: proposal.clearPendingPrompt === true,
-    },
-    agendaUpdates: proposal.agendaUpdates,
-    directorUpdates: proposal.directorUpdates,
-  };
-}
-
-function resolveLegacyFocus(args: Record<string, unknown>): string | null {
-  if (typeof args.focus === 'string' && args.focus.trim()) return args.focus.trim();
-  if (typeof args.question === 'string' && args.question.trim()) return args.question.trim();
-  if (typeof args.topic === 'string' && args.topic.trim()) return args.topic.trim();
-  return null;
-}
 
 function parseToolArgs(value: string | undefined): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
   if (!value || !value.trim()) return { ok: true, value: {} };
