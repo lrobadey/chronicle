@@ -55,6 +55,10 @@ function resolveDefaultApiBase() {
 
 function readViteEnv(): { VITE_API_BASE_URL?: string; DEV?: boolean } | undefined {
   try {
+    // eval defers the import.meta.env access to runtime so this file can be compiled
+    // as CommonJS (for tests) without a parse error. In Node/test contexts eval throws
+    // a SyntaxError which is caught here; in the Vite browser bundle it returns the env object.
+    // eslint-disable-next-line no-eval
     return eval('import.meta.env') as { VITE_API_BASE_URL?: string; DEV?: boolean } | undefined;
   } catch {
     return undefined;

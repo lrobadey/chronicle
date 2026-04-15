@@ -436,6 +436,7 @@ function applySpreadRumor(
 }
 
 function fireScheduledProcesses(state: WorldState, previousElapsedMinutes: number): WorldState {
+  if (!Array.isArray(state.systems.scheduledProcesses)) return state;
   const currentElapsedMinutes = state.systems.time.elapsedMinutes;
   const dueProcesses = state.systems.scheduledProcesses
     .filter(process => process.dueAtMinutes > previousElapsedMinutes && process.dueAtMinutes <= currentElapsedMinutes)
@@ -476,6 +477,7 @@ function fireScheduledProcesses(state: WorldState, previousElapsedMinutes: numbe
 }
 
 function hydrateNpcSchedules(state: WorldState): WorldState {
+  if (!Array.isArray(state.systems.scheduledProcesses)) return state;
   const currentDay = deriveTime(state).currentDay - 1;
   let next = cloneState(state);
   let changed = false;
@@ -488,6 +490,7 @@ function hydrateNpcSchedules(state: WorldState): WorldState {
     for (const day of [currentDay, currentDay + 1]) {
       for (const entry of actor.schedule.entries) {
         const dueAtMinutes = toElapsedMinutesForScheduledHour(next, day, entry.atHour);
+        if (dueAtMinutes < 0) continue; // entry is before world start on this day
         if (dueAtMinutes <= next.systems.time.elapsedMinutes) continue;
 
         const processId = `npc-sched-${actor.id}-${entry.id}-d${day}`;
