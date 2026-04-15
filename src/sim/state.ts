@@ -48,6 +48,8 @@ export interface Actor {
   relationships?: Record<ActorId, { trust: number; fear: number; affinity: number }>;
   /** Standing with each faction. Range: −100 (hostile) to 100 (revered). 0 = neutral/unknown. */
   factionStandings?: Record<FactionId, number>;
+  /** Daily recurring schedule for this actor (NPCs only). Hydrated into scheduledProcesses by the reducer. */
+  schedule?: NpcSchedule;
 }
 
 /**
@@ -118,12 +120,52 @@ export interface EconomyConfig {
   goods: Record<string, 'abundant' | 'scarce'>;
 }
 
+/**
+ * A single entry in an NPC's daily schedule.
+ * `atHour` (0–23) fires once per in-world day at that hour.
+ * Payload is stored loosely to avoid a circular import with events.ts;
+ * always a SchedulableEvent in practice, enforced by the reducer and schema.
+ */
+export interface NpcScheduleEntry {
+  id: string;
+  label: string;
+  atHour: number;
+  payload: { type: string; [key: string]: unknown };
+}
+
+/**
+ * A recurring daily schedule attached to an NPC actor.
+ */
+export interface NpcSchedule {
+  entries: NpcScheduleEntry[];
+  /** World-day index (floor(elapsedMinutes / 1440)) through which processes have been hydrated. */
+  lastHydratedDay?: number;
+}
+
+/**
+ * A one-shot or recurring time-triggered world event in the Pulse kernel.
+ * Fires when elapsedMinutes >= dueAtMinutes. If cadenceMinutes is set,
+ * re-schedules itself at dueAtMinutes + cadenceMinutes after firing.
+ * Payload is stored loosely to avoid a circular import with events.ts;
+ * always a SchedulableEvent in practice, cast in the reducer.
+ */
+export interface ScheduledProcess {
+  id: string;
+  label: string;
+  dueAtMinutes: number;
+  cadenceMinutes?: number;
+  payload: { type: string; [key: string]: unknown };
+  createdTurn: number;
+}
+
 export interface SystemsState {
   time: TimeState;
   timeConfig: TimeConfig;
   tideConfig: TideConfig;
   weatherConfig: WeatherConfig;
   economyConfig?: EconomyConfig;
+  /** Pulse-layer event queue: processes fire in dueAtMinutes order when time advances. */
+  scheduledProcesses: ScheduledProcess[];
 }
 
 export interface WorldMeta {

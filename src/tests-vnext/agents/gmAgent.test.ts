@@ -19,6 +19,14 @@ function createMechanicsStub() {
       warnings: [],
     }),
     review_mechanics_resolution: async () => ({ ok: true, status: 'rejected', resolutionId: 'res-1' }),
+    schedule_task: async () => ({
+      id: 'sched-stub',
+      status: 'cannot_resolve' as const,
+      rationale: 'stub',
+      confidence: 0,
+      events: [],
+    }),
+    review_schedule_resolution: async () => ({ ok: true, action: 'rejected' }),
   };
 }
 
@@ -266,6 +274,8 @@ describe('GM agent loop', () => {
             warnings: [],
           };
         },
+        schedule_task: async () => ({ id: 'sched-stub', status: 'cannot_resolve' as const, rationale: 'stub', confidence: 0, events: [] }),
+        review_schedule_resolution: async () => ({ ok: true, action: 'rejected' }),
         review_mechanics_resolution: async input => {
           reviewCalls += 1;
           assert.equal(input.resolutionId, 'res-1');

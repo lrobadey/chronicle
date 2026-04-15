@@ -271,6 +271,7 @@ export function createIsleOfMarrowWorld(options: CreateWorldOptions = {}): World
       economyConfig: {
         goods: { salt_fish: 'abundant', silver: 'abundant', heartwater: 'scarce' },
       },
+      scheduledProcesses: [],
     },
     directorState: {
       scene: {

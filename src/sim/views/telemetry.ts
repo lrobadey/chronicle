@@ -30,6 +30,11 @@ export interface Telemetry {
     seenItems: string[];
     notes: string[];
   };
+  scheduledProcesses: {
+    count: number;
+    next?: { label: string; dueAtMinutes: number; dueIn: string };
+    upcoming: Array<{ id: string; label: string; dueAtMinutes: number }>;
+  };
 }
 
 export function buildTelemetry(state: WorldState, playerId: ActorId): Telemetry {
@@ -51,6 +56,24 @@ export function buildTelemetry(state: WorldState, playerId: ActorId): Telemetry 
     .sort((a, b) => a.distance - b.distance);
 
   const knowledge = state.knowledge[playerId] || { seenActors: {}, seenItems: {}, seenLocations: {}, notes: [] };
+
+  const allProcesses = (state.systems.scheduledProcesses ?? [])
+    .slice()
+    .sort((a, b) => a.dueAtMinutes - b.dueAtMinutes);
+  const nextProcess = allProcesses[0];
+  const scheduledProcesses: Telemetry['scheduledProcesses'] = {
+    count: allProcesses.length,
+    ...(nextProcess
+      ? {
+          next: {
+            label: nextProcess.label,
+            dueAtMinutes: nextProcess.dueAtMinutes,
+            dueIn: formatDueIn(nextProcess.dueAtMinutes - state.systems.time.elapsedMinutes),
+          },
+        }
+      : {}),
+    upcoming: allProcesses.slice(0, 3).map(p => ({ id: p.id, label: p.label, dueAtMinutes: p.dueAtMinutes })),
+  };
 
   return {
     turn: state.meta.turn,
@@ -83,5 +106,15 @@ export function buildTelemetry(state: WorldState, playerId: ActorId): Telemetry 
       seenItems: Object.keys(knowledge.seenItems),
       notes: knowledge.notes,
     },
+    scheduledProcesses,
   };
+}
+
+function formatDueIn(deltaMinutes: number): string {
+  if (deltaMinutes <= 0) return 'overdue';
+  const h = Math.floor(deltaMinutes / 60);
+  const m = Math.round(deltaMinutes % 60);
+  if (h === 0) return `in ${m}m`;
+  if (m === 0) return `in ${h}h`;
+  return `in ${h}h ${m}m`;
 }

@@ -154,6 +154,32 @@ export const GM_TOOL_DEFS: ResponseToolDefinition[] = [
   },
   {
     type: 'function',
+    name: 'schedule_task',
+    description: 'Ask the schedule agent to draft ScheduleProcess and/or SetNpcSchedule events for a scheduling task. Returns a scheduleResolutionId — review it with review_schedule_resolution before those events take effect.',
+    parameters: {
+      ...strictObjectSchema({
+        task: { type: 'string' },
+        actorId: { type: ['string', 'null'] },
+        timeHint: { type: ['string', 'null'] },
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
+    name: 'review_schedule_resolution',
+    description: "Approve, revise, or reject a schedule draft by scheduleResolutionId. When action='revise', feedback is required and must describe what is wrong.",
+    parameters: {
+      ...strictObjectSchema({
+        scheduleResolutionId: { type: 'string' },
+        action: { type: 'string', enum: ['approve', 'revise', 'reject'] },
+        feedback: { type: ['string', 'null'] },
+      }),
+    },
+    strict: true,
+  },
+  {
+    type: 'function',
     name: 'finish_turn',
     description: 'Finish the turn when done.',
     parameters: {

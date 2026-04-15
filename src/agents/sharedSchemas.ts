@@ -186,7 +186,12 @@ export const PENDING_PROMPT_DATA_SCHEMA = strictObjectSchema(
 
 const NON_EMPTY_STRING_SCHEMA = { type: 'string', minLength: 1 } as const;
 
-export const EVENT_ITEM_SCHEMA = {
+/**
+ * Schemas for event types that may appear as a payload inside ScheduleProcess
+ * or SetNpcSchedule (i.e. all schedulable WorldEvent variants).
+ * Exported so the schedule agent and GM tools can reference them.
+ */
+export const SCHEDULABLE_PAYLOAD_SCHEMA = {
   anyOf: [
     strictObjectSchema({
       type: { type: 'string', enum: ['MoveActor'] },
@@ -194,6 +199,14 @@ export const EVENT_ITEM_SCHEMA = {
       to: GRID_POS_SCHEMA,
       toLocationId: { type: ['string', 'null'] },
       mode: { type: ['string', 'null'], enum: ['walk', 'run', null] },
+      note: { type: ['string', 'null'] },
+    }),
+    strictObjectSchema({
+      type: { type: 'string', enum: ['TravelToLocation'] },
+      actorId: { type: 'string' },
+      locationId: NON_EMPTY_STRING_SCHEMA,
+      pace: { type: ['string', 'null'], enum: ['walk', 'run', null] },
+      confirmId: { type: ['string', 'null'] },
       note: { type: ['string', 'null'] },
     }),
     strictObjectSchema({
@@ -238,11 +251,6 @@ export const EVENT_ITEM_SCHEMA = {
       note: { type: ['string', 'null'] },
     }),
     strictObjectSchema({
-      type: { type: 'string', enum: ['AdvanceTime'] },
-      minutes: { type: 'number' },
-      note: { type: ['string', 'null'] },
-    }),
-    strictObjectSchema({
       type: { type: 'string', enum: ['CreateEntity'] },
       entity: CREATE_ENTITY_SCHEMA,
       note: { type: ['string', 'null'] },
@@ -254,11 +262,38 @@ export const EVENT_ITEM_SCHEMA = {
       note: { type: ['string', 'null'] },
     }),
     strictObjectSchema({
-      type: { type: 'string', enum: ['TravelToLocation'] },
+      type: { type: 'string', enum: ['ModifyReputation'] },
       actorId: { type: 'string' },
-      locationId: NON_EMPTY_STRING_SCHEMA,
-      pace: { type: ['string', 'null'], enum: ['walk', 'run', null] },
-      confirmId: { type: ['string', 'null'] },
+      factionId: { type: 'string' },
+      delta: { type: 'number' },
+      reason: { type: ['string', 'null'] },
+      note: { type: ['string', 'null'] },
+    }),
+    strictObjectSchema({
+      type: { type: 'string', enum: ['SpreadRumor'] },
+      fromActorId: { type: ['string', 'null'] },
+      toActorId: { type: 'string' },
+      rumor: NON_EMPTY_STRING_SCHEMA,
+      subject: { type: ['string', 'null'] },
+      note: { type: ['string', 'null'] },
+    }),
+  ],
+} as const;
+
+/** Schema for a single NPC schedule entry (used in SetNpcSchedule and the schedule agent). */
+export const NPC_SCHEDULE_ENTRY_SCHEMA = strictObjectSchema({
+  id: { type: 'string' },
+  label: { type: 'string' },
+  atHour: { type: 'number' },
+  payload: SCHEDULABLE_PAYLOAD_SCHEMA,
+});
+
+export const EVENT_ITEM_SCHEMA = {
+  anyOf: [
+    ...SCHEDULABLE_PAYLOAD_SCHEMA.anyOf,
+    strictObjectSchema({
+      type: { type: 'string', enum: ['AdvanceTime'] },
+      minutes: { type: 'number' },
       note: { type: ['string', 'null'] },
     }),
     strictObjectSchema({
@@ -279,6 +314,25 @@ export const EVENT_ITEM_SCHEMA = {
       actorId: { type: 'string' },
       text: NON_EMPTY_STRING_SCHEMA,
       subject: { type: ['string', 'null'] },
+      note: { type: ['string', 'null'] },
+    }),
+    // ScheduleProcess: register a future world event by elapsed-minutes threshold
+    strictObjectSchema({
+      type: { type: 'string', enum: ['ScheduleProcess'] },
+      process: strictObjectSchema({
+        id: { type: 'string' },
+        label: { type: 'string' },
+        dueAtMinutes: { type: 'number' },
+        cadenceMinutes: { type: ['number', 'null'] },
+        payload: SCHEDULABLE_PAYLOAD_SCHEMA,
+      }),
+      note: { type: ['string', 'null'] },
+    }),
+    // SetNpcSchedule: set or replace an NPC's daily recurring schedule
+    strictObjectSchema({
+      type: { type: 'string', enum: ['SetNpcSchedule'] },
+      actorId: { type: 'string' },
+      entries: { type: 'array', items: NPC_SCHEDULE_ENTRY_SCHEMA },
       note: { type: ['string', 'null'] },
     }),
   ],
