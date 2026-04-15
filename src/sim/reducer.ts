@@ -7,7 +7,7 @@ import { deriveTide, isTideBlocked } from './systems/tide';
 import { deriveTime } from './systems/time';
 import { deriveConstraints } from './systems/constraints';
 import { distance, locationsWithinRadius } from './utils';
-import { resolveMoveTarget } from './validate';
+import { resolveMoveTarget, validateSchedulablePayload } from './validate';
 import { estimateTravel, positionToward } from './systems/travel';
 
 const DEFAULT_VIS_RADIUS = 120;
@@ -94,7 +94,7 @@ function applyMoveActor(state: WorldState, event: Extract<WorldEvent, { type: 'M
     updateKnowledgeForActor(next, actor.id);
   }
 
-  return next;
+  return applyPostTimeAdvanceEffects(next, state.systems.time.elapsedMinutes);
 }
 
 function applyTravelToLocation(state: WorldState, event: Extract<WorldEvent, { type: 'TravelToLocation' }>): WorldState {
@@ -129,7 +129,7 @@ function applyTravelToLocation(state: WorldState, event: Extract<WorldEvent, { t
   if (actor.kind === 'player') {
     updateKnowledgeForActor(next, actor.id);
   }
-  return next;
+  return applyPostTimeAdvanceEffects(next, state.systems.time.elapsedMinutes);
 }
 
 function applyExplore(state: WorldState, event: Extract<WorldEvent, { type: 'Explore' }>): WorldState {
@@ -156,7 +156,7 @@ function applyExplore(state: WorldState, event: Extract<WorldEvent, { type: 'Exp
   if (actor.kind === 'player') {
     updateKnowledgeForActor(next, actor.id);
   }
-  return next;
+  return applyPostTimeAdvanceEffects(next, state.systems.time.elapsedMinutes);
 }
 
 function applyInspect(state: WorldState, event: Extract<WorldEvent, { type: 'Inspect' }>): WorldState {
@@ -170,7 +170,7 @@ function applyInspect(state: WorldState, event: Extract<WorldEvent, { type: 'Ins
   if (actor.kind === 'player') {
     updateKnowledgeForActor(next, actor.id);
   }
-  return next;
+  return applyPostTimeAdvanceEffects(next, state.systems.time.elapsedMinutes);
 }
 
 function applyRecordClue(state: WorldState, event: Extract<WorldEvent, { type: 'RecordClue' }>): WorldState {
@@ -263,11 +263,9 @@ function applyTransferItem(state: WorldState, event: Extract<WorldEvent, { type:
 
 function advanceTime(state: WorldState, minutes: number, note?: string): WorldState {
   const next = cloneState(state);
-  const previousElapsedMinutes = next.systems.time.elapsedMinutes;
   next.systems.time.elapsedMinutes += minutes;
   addLedgerInPlace(next, note || `${minutes} minutes pass`);
-  const afterFire = fireScheduledProcesses(next, previousElapsedMinutes);
-  return hydrateNpcSchedules(afterFire);
+  return applyPostTimeAdvanceEffects(next, state.systems.time.elapsedMinutes);
 }
 
 function applyScheduleProcess(state: WorldState, event: Extract<WorldEvent, { type: 'ScheduleProcess' }>): WorldState {
@@ -289,6 +287,10 @@ function applySetNpcSchedule(state: WorldState, event: Extract<WorldEvent, { typ
   if (!actor) return state;
 
   const next = cloneState(state);
+  const processPrefix = `npc-sched-${event.actorId}-`;
+  next.systems.scheduledProcesses = next.systems.scheduledProcesses.filter(
+    process => !process.id.startsWith(processPrefix),
+  );
   next.actors[event.actorId] = {
     ...next.actors[event.actorId],
     schedule: {
@@ -451,7 +453,8 @@ function fireScheduledProcesses(state: WorldState, previousElapsedMinutes: numbe
   for (const process of dueProcesses) {
     addLedgerInPlace(next, `[Process: ${process.label}]`);
 
-    if (process.payload.type === 'ScheduleProcess' || process.payload.type === 'AdvanceTime') {
+    const payloadValidation = validateSchedulablePayload(next, process.payload);
+    if (!payloadValidation.ok) {
       if (typeof process.cadenceMinutes === 'number' && Number.isFinite(process.cadenceMinutes)) {
         upsertScheduledProcess(next, {
           ...process,
@@ -515,6 +518,11 @@ function hydrateNpcSchedules(state: WorldState): WorldState {
   }
 
   return changed ? next : state;
+}
+
+function applyPostTimeAdvanceEffects(state: WorldState, previousElapsedMinutes: number): WorldState {
+  const afterFire = fireScheduledProcesses(state, previousElapsedMinutes);
+  return hydrateNpcSchedules(afterFire);
 }
 
 function upsertScheduledProcess(state: WorldState, process: ScheduledProcess) {

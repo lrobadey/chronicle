@@ -6,7 +6,7 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { URL } from 'node:url';
+import { URL, fileURLToPath } from 'node:url';
 import { TurnEngine } from './engine/turnEngine';
 import { InputValidationError, isChronicleError } from './engine/errors';
 
@@ -103,7 +103,26 @@ function normalizeError(err: unknown): { status: number; code: string; error: st
   };
 }
 
-const STATIC_DIR = path.resolve(process.cwd(), 'dist');
+function readImportMetaUrl(): string | undefined {
+  try {
+    // eval defers the import.meta.url access to runtime so this file can still be
+    // compiled as CommonJS for tests. In Node ESM runtime it returns the module URL.
+    // eslint-disable-next-line no-eval
+    return eval('import.meta.url') as string | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function resolveStaticDir(moduleUrl?: string) {
+  const effectiveModuleUrl = moduleUrl || readImportMetaUrl();
+  if (effectiveModuleUrl) {
+    return path.resolve(path.dirname(fileURLToPath(effectiveModuleUrl)), 'dist');
+  }
+  return path.resolve(process.cwd(), 'dist');
+}
+
+const STATIC_DIR = resolveStaticDir();
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',

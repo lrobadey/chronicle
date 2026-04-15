@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { applyEvent } from '../../sim/reducer';
+import { validateEvent } from '../../sim/validate';
 import { createIsleOfMarrowWorldVNext } from '../../worlds/isle-of-marrow.vnext';
 
 const FIXED_ANCHOR = '2025-01-01T06:00:00Z';
@@ -49,6 +50,58 @@ describe('scheduled processes', () => {
     const result = applyEvent(world, {
       type: 'AdvanceTime',
       minutes: 5,
+    });
+
+    assert.deepEqual(result.actors['tamar-vane']?.pos, { x: 29, y: 42, z: 0 });
+    assert.ok(result.ledger.some(entry => entry.text === '[Process: Tamar steps aside]'));
+  });
+
+  it('fires when Explore crosses dueAtMinutes', () => {
+    const world = applyEvent(baseWorld(), {
+      type: 'ScheduleProcess',
+      process: {
+        id: 'proc-explore',
+        label: 'Market bell',
+        dueAtMinutes: 5,
+        payload: {
+          type: 'MoveActor',
+          actorId: 'tamar-vane',
+          to: { x: 29, y: 42, z: 0 },
+        },
+      },
+    });
+
+    const result = applyEvent(world, {
+      type: 'Explore',
+      actorId: 'player-1',
+      area: 'shore',
+    });
+
+    assert.deepEqual(result.actors['tamar-vane']?.pos, { x: 29, y: 42, z: 0 });
+    assert.ok(result.ledger.some(entry => entry.text === '[Process: Market bell]'));
+  });
+
+  it('fires when MoveActor crosses dueAtMinutes', () => {
+    const world = baseWorld();
+    const playerPos = world.actors['player-1']!.pos;
+    const scheduled = applyEvent(world, {
+      type: 'ScheduleProcess',
+      process: {
+        id: 'proc-step-aside',
+        label: 'Tamar steps aside',
+        dueAtMinutes: 1,
+        payload: {
+          type: 'MoveActor',
+          actorId: 'tamar-vane',
+          to: { x: 29, y: 42, z: 0 },
+        },
+      },
+    });
+
+    const result = applyEvent(scheduled, {
+      type: 'MoveActor',
+      actorId: 'player-1',
+      to: { ...playerPos, x: playerPos.x + 1 },
     });
 
     assert.deepEqual(result.actors['tamar-vane']?.pos, { x: 29, y: 42, z: 0 });
@@ -298,5 +351,88 @@ describe('scheduled processes', () => {
     assert.equal(firstHydration.systems.scheduledProcesses.filter(process => process.label === 'Still ahead').length, 2);
     assert.equal(secondHydration.systems.scheduledProcesses.filter(process => process.label === 'Already missed').length, 1);
     assert.equal(secondHydration.systems.scheduledProcesses.filter(process => process.label === 'Still ahead').length, 2);
+  });
+
+  it('replacing an NPC schedule removes hydrated queued processes for that actor', () => {
+    const world = applyEvent(baseWorld(), {
+      type: 'SetNpcSchedule',
+      actorId: 'tamar-vane',
+      entries: [
+        {
+          id: 'old',
+          label: 'Old plan',
+          atHour: 8,
+          payload: {
+            type: 'SetFlag',
+            key: 'old-plan',
+            value: true,
+          },
+        },
+      ],
+    });
+
+    const hydrated = applyEvent(world, {
+      type: 'AdvanceTime',
+      minutes: 1,
+    });
+    assert.equal(hydrated.systems.scheduledProcesses.every(process => process.id.includes('-old-')), true);
+
+    const replaced = applyEvent(hydrated, {
+      type: 'SetNpcSchedule',
+      actorId: 'tamar-vane',
+      entries: [
+        {
+          id: 'new',
+          label: 'New plan',
+          atHour: 9,
+          payload: {
+            type: 'SetFlag',
+            key: 'new-plan',
+            value: true,
+          },
+        },
+      ],
+    });
+
+    assert.equal(replaced.systems.scheduledProcesses.some(process => process.id.includes('-old-')), false);
+    assert.equal(replaced.systems.scheduledProcesses.some(process => process.id.includes('-new-')), false);
+    assert.equal(replaced.actors['tamar-vane']?.schedule?.entries[0]?.id, 'new');
+  });
+
+  it('rejects malformed ScheduleProcess payloads during validation', () => {
+    const result = validateEvent(baseWorld(), {
+      type: 'ScheduleProcess',
+      process: {
+        id: 'proc-invalid-shape',
+        label: 'Invalid shape',
+        dueAtMinutes: 5,
+        payload: {
+          type: 'MoveActor',
+        } as never,
+      },
+    });
+
+    assert.deepEqual(result, { ok: false, reason: 'schedule_process_payload_invalid' });
+  });
+
+  it('rejects malformed SetNpcSchedule entry payloads during validation', () => {
+    const result = validateEvent(baseWorld(), {
+      type: 'SetNpcSchedule',
+      actorId: 'tamar-vane',
+      entries: [
+        {
+          id: 'bad-entry',
+          label: 'Bad entry',
+          atHour: 8,
+          payload: {
+            type: 'TravelToLocation',
+            actorId: 'tamar-vane',
+            locationId: 'the-smugglers-lantern',
+          } as never,
+        },
+      ],
+    });
+
+    assert.deepEqual(result, { ok: false, reason: 'schedule_entry_payload_invalid' });
   });
 });

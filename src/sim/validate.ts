@@ -1,4 +1,4 @@
-import type { WorldEvent } from './events';
+import type { SchedulableEvent, WorldEvent } from './events';
 import type { PendingPrompt, WorldState } from './state';
 import { getItemPlacement } from './spine';
 import { validateAffectItem } from './itemEffects';
@@ -113,8 +113,9 @@ export function validateEvent(state: WorldState, event: WorldEvent, pendingPromp
       if (!event.process.id.trim()) return { ok: false, reason: 'schedule_process_id_required' };
       if (!event.process.label.trim()) return { ok: false, reason: 'schedule_process_label_required' };
       if (!Number.isFinite(event.process.dueAtMinutes)) return { ok: false, reason: 'schedule_process_due_invalid' };
-      if (!isValidScheduledPayload(event.process.payload)) return { ok: false, reason: 'schedule_process_payload_invalid' };
-      return { ok: true };
+      const payloadValidation = validateSchedulablePayload(state, event.process.payload);
+      if (!payloadValidation.ok) return { ok: false, reason: 'schedule_process_payload_invalid' };
+      return payloadValidation;
     }
     case 'SetNpcSchedule': {
       if (!state.actors[event.actorId]) return { ok: false, reason: 'actor_not_found' };
@@ -125,7 +126,7 @@ export function validateEvent(state: WorldState, event: WorldEvent, pendingPromp
         if (!Number.isInteger(entry.atHour) || entry.atHour < 0 || entry.atHour > 23) {
           return { ok: false, reason: 'schedule_entry_hour_invalid' };
         }
-        if (!isValidScheduledPayload(entry.payload)) return { ok: false, reason: 'schedule_entry_payload_invalid' };
+        if (!validateSchedulablePayload(state, entry.payload).ok) return { ok: false, reason: 'schedule_entry_payload_invalid' };
       }
       return { ok: true };
     }
@@ -268,11 +269,21 @@ function validateTransferItem(state: WorldState, event: Extract<WorldEvent, { ty
   return { ok: true };
 }
 
-function isValidScheduledPayload(value: unknown): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+export function validateSchedulablePayload(state: WorldState, value: unknown): ValidationResult {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, reason: 'scheduled_payload_not_object' };
+  }
   const record = value as Record<string, unknown>;
-  return typeof record.type === 'string'
-    && record.type !== 'AdvanceTime'
-    && record.type !== 'ScheduleProcess'
-    && record.type !== 'SetNpcSchedule';
+  if (
+    typeof record.type !== 'string'
+    || record.type === 'AdvanceTime'
+    || record.type === 'ScheduleProcess'
+    || record.type === 'SetNpcSchedule'
+    || record.type === 'Explore'
+    || record.type === 'Inspect'
+    || record.type === 'RecordClue'
+  ) {
+    return { ok: false, reason: 'scheduled_payload_type_invalid' };
+  }
+  return validateEvent(state, value as SchedulableEvent);
 }

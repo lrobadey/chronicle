@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
 import { TurnEngine } from '../../engine/turnEngine';
 import { JsonlSessionStore } from '../../engine/session/jsonlStore';
-import { createChronicleServer } from '../../server';
+import { pathToFileURL } from 'node:url';
+import { createChronicleServer, resolveStaticDir } from '../../server';
 import { QueueLLM } from '../helpers/queueLLM';
 
 interface RunningServer {
@@ -51,6 +52,16 @@ function parseSSE(payload: string): Array<{ event: string; data: unknown }> {
 }
 
 describe('vNext API compatibility', () => {
+  it('resolves the static directory from the server module path instead of cwd', () => {
+    const fakeModulePath = path.join(os.tmpdir(), 'chronicle-static-path', 'src', 'server.ts');
+    const fakeModuleUrl = pathToFileURL(fakeModulePath).href;
+
+    assert.equal(
+      resolveStaticDir(fakeModuleUrl),
+      path.join(os.tmpdir(), 'chronicle-static-path', 'src', 'dist'),
+    );
+  });
+
   it('returns compatible shape for /api/init and /api/turn', async () => {
     const { baseUrl } = await createRunningServer();
 
