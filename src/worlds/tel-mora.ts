@@ -279,6 +279,7 @@ export function createTelMoraWorld(options: CreateWorldOptions = {}): WorldState
       timeConfig: { anchorIso: startedAt, startHour: 6 },
       tideConfig: { cycleMinutes: 720 },
       weatherConfig: { climate: 'desert', seed: 'tel-mora', cadenceMinutes: 60 },
+      scheduledProcesses: [],
       economyConfig: {
         goods: {
           copper: 'scarce',

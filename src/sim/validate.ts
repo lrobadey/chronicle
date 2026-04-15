@@ -105,6 +105,30 @@ export function validateEvent(state: WorldState, event: WorldEvent, pendingPromp
       return validateCreateEntity(state, event);
     case 'SetFlag':
       return { ok: true };
+    case 'ModifyReputation':
+      return state.actors[event.actorId] ? { ok: true } : { ok: false, reason: 'actor_not_found' };
+    case 'SpreadRumor':
+      return state.actors[event.toActorId] ? { ok: true } : { ok: false, reason: 'actor_not_found' };
+    case 'ScheduleProcess': {
+      if (!event.process.id.trim()) return { ok: false, reason: 'schedule_process_id_required' };
+      if (!event.process.label.trim()) return { ok: false, reason: 'schedule_process_label_required' };
+      if (!Number.isFinite(event.process.dueAtMinutes)) return { ok: false, reason: 'schedule_process_due_invalid' };
+      if (!isValidScheduledPayload(event.process.payload)) return { ok: false, reason: 'schedule_process_payload_invalid' };
+      return { ok: true };
+    }
+    case 'SetNpcSchedule': {
+      if (!state.actors[event.actorId]) return { ok: false, reason: 'actor_not_found' };
+      if (!event.entries.length) return { ok: false, reason: 'schedule_entries_required' };
+      for (const entry of event.entries) {
+        if (!entry.id.trim()) return { ok: false, reason: 'schedule_entry_id_required' };
+        if (!entry.label.trim()) return { ok: false, reason: 'schedule_entry_label_required' };
+        if (!Number.isInteger(entry.atHour) || entry.atHour < 0 || entry.atHour > 23) {
+          return { ok: false, reason: 'schedule_entry_hour_invalid' };
+        }
+        if (!isValidScheduledPayload(entry.payload)) return { ok: false, reason: 'schedule_entry_payload_invalid' };
+      }
+      return { ok: true };
+    }
     default:
       return { ok: false, reason: 'unknown_event' };
   }
@@ -242,4 +266,13 @@ function validateTransferItem(state: WorldState, event: Extract<WorldEvent, { ty
   }
 
   return { ok: true };
+}
+
+function isValidScheduledPayload(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.type === 'string'
+    && record.type !== 'AdvanceTime'
+    && record.type !== 'ScheduleProcess'
+    && record.type !== 'SetNpcSchedule';
 }

@@ -24,6 +24,11 @@ export interface Telemetry {
   tide: ReturnType<typeof deriveTide>;
   weather: ReturnType<typeof deriveWeather>;
   ledgerTail: string[];
+  scheduledProcesses: {
+    count: number;
+    next?: { label: string; dueAtMinutes: number; dueIn: string };
+    upcoming: Array<{ id: string; label: string; dueAtMinutes: number }>;
+  };
   knowledge: {
     seenLocations: string[];
     seenActors: string[];
@@ -51,6 +56,10 @@ export function buildTelemetry(state: WorldState, playerId: ActorId): Telemetry 
     .sort((a, b) => a.distance - b.distance);
 
   const knowledge = state.knowledge[playerId] || { seenActors: {}, seenItems: {}, seenLocations: {}, notes: [] };
+  const upcomingProcesses = [...state.systems.scheduledProcesses]
+    .sort((a, b) => a.dueAtMinutes - b.dueAtMinutes)
+    .slice(0, 3);
+  const nextProcess = upcomingProcesses[0];
 
   return {
     turn: state.meta.turn,
@@ -77,6 +86,23 @@ export function buildTelemetry(state: WorldState, playerId: ActorId): Telemetry 
     tide,
     weather,
     ledgerTail: state.ledger.slice(-5).map(l => l.text),
+    scheduledProcesses: {
+      count: state.systems.scheduledProcesses.length,
+      ...(nextProcess
+        ? {
+            next: {
+              label: nextProcess.label,
+              dueAtMinutes: nextProcess.dueAtMinutes,
+              dueIn: formatDueIn(nextProcess.dueAtMinutes - state.systems.time.elapsedMinutes),
+            },
+          }
+        : {}),
+      upcoming: upcomingProcesses.map(process => ({
+        id: process.id,
+        label: process.label,
+        dueAtMinutes: process.dueAtMinutes,
+      })),
+    },
     knowledge: {
       seenLocations: Object.keys(knowledge.seenLocations),
       seenActors: Object.keys(knowledge.seenActors),
@@ -84,4 +110,13 @@ export function buildTelemetry(state: WorldState, playerId: ActorId): Telemetry 
       notes: knowledge.notes,
     },
   };
+}
+
+function formatDueIn(deltaMinutes: number): string {
+  if (deltaMinutes <= 0) return 'now';
+  const hours = Math.floor(deltaMinutes / 60);
+  const minutes = deltaMinutes % 60;
+  if (hours && minutes) return `in ${hours}h ${minutes}m`;
+  if (hours) return `in ${hours}h`;
+  return `in ${minutes}m`;
 }

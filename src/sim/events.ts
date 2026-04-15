@@ -20,225 +20,303 @@ export interface EventMeta {
   actorId?: ActorId;
 }
 
-export type WorldEvent =
-  | {
-      meta?: EventMeta;
-      type: 'MoveActor';
-      actorId: ActorId;
-      to: GridPos;
-      toLocationId?: string;
-      mode?: 'walk' | 'run';
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      type: 'PickUpItem';
-      actorId: ActorId;
-      itemId: ItemId;
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      type: 'DropItem';
-      actorId: ActorId;
-      itemId: ItemId;
-      at?: GridPos;
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      type: 'AffectItem';
-      actorId: ActorId;
-      itemId: ItemId;
-      effect: AffectItemEffect;
-      at?: GridPos;
-      targetActorId?: ActorId;
-      targetContainerId?: string;
-      instrumentItemId?: ItemId;
-      nextLifecycle?: ItemLifecycleState;
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      type: 'TransferItem';
-      itemId?: ItemId;
-      item?: {
-        id: ItemId;
-        name: string;
-        description?: string;
-        tags?: string[];
-        archetype?: string;
-        components?: ItemComponents;
+export type MoveActorEvent = {
+  meta?: EventMeta;
+  type: 'MoveActor';
+  actorId: ActorId;
+  to: GridPos;
+  toLocationId?: string;
+  mode?: 'walk' | 'run';
+  note?: string;
+};
+
+export type TravelToLocationEvent = {
+  meta?: EventMeta;
+  type: 'TravelToLocation';
+  actorId: ActorId;
+  locationId: string;
+  pace?: 'walk' | 'run';
+  confirmId?: string;
+  note?: string;
+};
+
+export type PickUpItemEvent = {
+  meta?: EventMeta;
+  type: 'PickUpItem';
+  actorId: ActorId;
+  itemId: ItemId;
+  note?: string;
+};
+
+export type DropItemEvent = {
+  meta?: EventMeta;
+  type: 'DropItem';
+  actorId: ActorId;
+  itemId: ItemId;
+  at?: GridPos;
+  note?: string;
+};
+
+export type AffectItemEvent = {
+  meta?: EventMeta;
+  type: 'AffectItem';
+  actorId: ActorId;
+  itemId: ItemId;
+  effect: AffectItemEffect;
+  at?: GridPos;
+  targetActorId?: ActorId;
+  targetContainerId?: string;
+  instrumentItemId?: ItemId;
+  nextLifecycle?: ItemLifecycleState;
+  note?: string;
+};
+
+export type TransferItemEvent = {
+  meta?: EventMeta;
+  type: 'TransferItem';
+  itemId?: ItemId;
+  item?: {
+    id: ItemId;
+    name: string;
+    description?: string;
+    tags?: string[];
+    archetype?: string;
+    components?: ItemComponents;
+  };
+  fromActorId?: ActorId;
+  toActorId?: ActorId;
+  at?: GridPos;
+  note?: string;
+};
+
+export type SpeakEvent = {
+  meta?: EventMeta;
+  type: 'Speak';
+  actorId: ActorId;
+  text: string;
+  toActorId?: ActorId;
+  note?: string;
+};
+
+export type CreateEntityEvent = {
+  meta?: EventMeta;
+  type: 'CreateEntity';
+  entity:
+    | {
+        kind: 'item';
+        data: {
+          id: ItemId;
+          name: string;
+          description?: string;
+          location: ItemLocationInput;
+          tags?: string[];
+          archetype?: string;
+          components?: ItemComponents;
+        };
+      }
+    | {
+        kind: 'npc';
+        data: {
+          id: ActorId;
+          name: string;
+          pos: GridPos;
+          facing?: Actor['facing'];
+          inventory?: ItemId[];
+          stats?: Record<string, number>;
+          tags?: string[];
+          persona?: NonNullable<Actor['persona']>;
+          relationships?: NonNullable<Actor['relationships']>;
+        };
+      }
+    | {
+        kind: 'location';
+        data: {
+          id: string;
+          name: string;
+          description: string;
+          anchor: GridPos;
+          radiusCells?: LocationPOI['radiusCells'];
+          tideAccess?: LocationPOI['tideAccess'];
+          terrain?: LocationPOI['terrain'];
+          tags?: string[];
+        };
+      }
+    | {
+        kind: 'faction';
+        data: {
+          id: FactionId;
+          name: string;
+          description: string;
+          tags?: string[];
+          memberIds?: ActorId[];
+        };
       };
-      fromActorId?: ActorId;
-      toActorId?: ActorId;
-      at?: GridPos;
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      type: 'Speak';
-      actorId: ActorId;
-      text: string;
-      toActorId?: ActorId;
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      // Use explicit time advancement for "wait" style actions only.
-      // MoveActor, TravelToLocation, Explore, and Inspect already add their
-      // own elapsed minutes in the reducer.
-      type: 'AdvanceTime';
-      minutes: number;
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      type: 'CreateEntity';
-      entity:
-        | {
-            kind: 'item';
-            data: {
-              id: ItemId;
-              name: string;
-              description?: string;
-              location: ItemLocationInput;
-              tags?: string[];
-              archetype?: string;
-              components?: ItemComponents;
-            };
-          }
-        | {
-            kind: 'npc';
-            data: {
-              id: ActorId;
-              name: string;
-              pos: GridPos;
-              facing?: Actor['facing'];
-              inventory?: ItemId[];
-              stats?: Record<string, number>;
-              tags?: string[];
-              persona?: NonNullable<Actor['persona']>;
-              relationships?: NonNullable<Actor['relationships']>;
-            };
-          }
-        | {
-            kind: 'location';
-            data: {
-              id: string;
-              name: string;
-              description: string;
-              anchor: GridPos;
-              radiusCells?: LocationPOI['radiusCells'];
-              tideAccess?: LocationPOI['tideAccess'];
-              terrain?: LocationPOI['terrain'];
-              tags?: string[];
-            };
-          }
-        | {
-            kind: 'faction';
-            data: {
-              id: FactionId;
-              name: string;
-              description: string;
-              tags?: string[];
-              memberIds?: ActorId[];
-            };
-          };
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      type: 'TravelToLocation';
-      actorId: ActorId;
-      locationId: string;
-      pace?: 'walk' | 'run';
-      confirmId?: string;
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      type: 'Explore';
-      actorId: ActorId;
-      area: string;
-      direction?: 'east' | 'west' | 'north' | 'south';
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      type: 'Inspect';
-      actorId: ActorId;
-      subject: string;
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      type: 'RecordClue';
-      actorId: ActorId;
-      text: string;
-      subject?: string;
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      type: 'SetFlag';
-      key: string;
-      value: unknown;
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      /**
-       * Adjust an actor's standing with a faction.
-       * delta > 0 improves standing; delta < 0 worsens it.
-       * Standing is clamped to [−100, 100].
-       */
-      type: 'ModifyReputation';
-      actorId: ActorId;
-      factionId: FactionId;
-      delta: number;
-      reason?: string;
-      note?: string;
-    }
-  | {
-      meta?: EventMeta;
-      /**
-       * Propagate a rumor to an actor's knowledge.
-       * Rumor text is added to the recipient's knowledge.rumors array.
-       */
-      type: 'SpreadRumor';
-      fromActorId?: ActorId;
-      toActorId: ActorId;
-      rumor: string;
-      subject?: string;
-      note?: string;
-    };
+  note?: string;
+};
+
+export type SetFlagEvent = {
+  meta?: EventMeta;
+  type: 'SetFlag';
+  key: string;
+  value: unknown;
+  note?: string;
+};
+
+export type ModifyReputationEvent = {
+  meta?: EventMeta;
+  type: 'ModifyReputation';
+  actorId: ActorId;
+  factionId: FactionId;
+  delta: number;
+  reason?: string;
+  note?: string;
+};
+
+export type SpreadRumorEvent = {
+  meta?: EventMeta;
+  type: 'SpreadRumor';
+  fromActorId?: ActorId;
+  toActorId: ActorId;
+  rumor: string;
+  subject?: string;
+  note?: string;
+};
+
+export type SchedulableEvent =
+  | MoveActorEvent
+  | TravelToLocationEvent
+  | PickUpItemEvent
+  | DropItemEvent
+  | AffectItemEvent
+  | TransferItemEvent
+  | SpeakEvent
+  | CreateEntityEvent
+  | SetFlagEvent
+  | ModifyReputationEvent
+  | SpreadRumorEvent;
+
+export type AdvanceTimeEvent = {
+  meta?: EventMeta;
+  // Use explicit time advancement for "wait" style actions only.
+  // MoveActor, TravelToLocation, Explore, and Inspect already add their
+  // own elapsed minutes in the reducer.
+  type: 'AdvanceTime';
+  minutes: number;
+  note?: string;
+};
+
+export type ExploreEvent = {
+  meta?: EventMeta;
+  type: 'Explore';
+  actorId: ActorId;
+  area: string;
+  direction?: 'east' | 'west' | 'north' | 'south';
+  note?: string;
+};
+
+export type InspectEvent = {
+  meta?: EventMeta;
+  type: 'Inspect';
+  actorId: ActorId;
+  subject: string;
+  note?: string;
+};
+
+export type RecordClueEvent = {
+  meta?: EventMeta;
+  type: 'RecordClue';
+  actorId: ActorId;
+  text: string;
+  subject?: string;
+  note?: string;
+};
+
+export type ScheduleProcessEvent = {
+  meta?: EventMeta;
+  type: 'ScheduleProcess';
+  process: {
+    id: string;
+    label: string;
+    dueAtMinutes: number;
+    cadenceMinutes?: number;
+    payload: SchedulableEvent;
+  };
+  note?: string;
+};
+
+export type SetNpcScheduleEvent = {
+  meta?: EventMeta;
+  type: 'SetNpcSchedule';
+  actorId: ActorId;
+  entries: Array<{
+    id: string;
+    label: string;
+    atHour: number;
+    payload: SchedulableEvent;
+  }>;
+  note?: string;
+};
+
+export type WorldEvent =
+  | SchedulableEvent
+  | AdvanceTimeEvent
+  | ExploreEvent
+  | InspectEvent
+  | RecordClueEvent
+  | ScheduleProcessEvent
+  | SetNpcScheduleEvent;
 
 export function normalizeWorldEvent(event: WorldEvent): WorldEvent {
-  if (event.type !== 'CreateEntity') return event;
-
-  if (event.entity.kind === 'npc') {
-    const data = event.entity.data as typeof event.entity.data & {
-      stats?: { entries?: Array<{ key: string; value: number }> } | Record<string, number> | null;
-      relationships?:
-        | { entries?: Array<{ actorId: string; trust: number; fear: number; affinity: number }> }
-        | Record<string, { trust: number; fear: number; affinity: number }>
-        | null;
-    };
-    return {
-      ...event,
-      entity: {
-        ...event.entity,
-        data: {
-          ...event.entity.data,
-          stats: normalizeStats(data.stats),
-          relationships: normalizeRelationships(data.relationships),
+  switch (event.type) {
+    case 'CreateEntity':
+      return normalizeCreateEntityEvent(event);
+    case 'ScheduleProcess':
+      return {
+        ...event,
+        process: {
+          ...event.process,
+          payload: normalizeSchedulableEvent(event.process.payload),
         },
-      },
-    };
+      };
+    case 'SetNpcSchedule':
+      return {
+        ...event,
+        entries: event.entries.map(entry => ({
+          ...entry,
+          payload: normalizeSchedulableEvent(entry.payload),
+        })),
+      };
+    default:
+      return event;
   }
+}
 
+function normalizeSchedulableEvent(event: SchedulableEvent): SchedulableEvent {
+  if (event.type === 'CreateEntity') return normalizeCreateEntityEvent(event);
   return event;
+}
+
+function normalizeCreateEntityEvent(event: CreateEntityEvent): CreateEntityEvent {
+  if (event.entity.kind !== 'npc') return event;
+
+  const data = event.entity.data as typeof event.entity.data & {
+    stats?: { entries?: Array<{ key: string; value: number }> } | Record<string, number> | null;
+    relationships?:
+      | { entries?: Array<{ actorId: string; trust: number; fear: number; affinity: number }> }
+      | Record<string, { trust: number; fear: number; affinity: number }>
+      | null;
+  };
+  return {
+    ...event,
+    entity: {
+      ...event.entity,
+      data: {
+        ...event.entity.data,
+        stats: normalizeStats(data.stats),
+        relationships: normalizeRelationships(data.relationships),
+      },
+    },
+  };
 }
 
 function normalizeStats(

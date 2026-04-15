@@ -19,6 +19,14 @@ function createMechanicsStub() {
       warnings: [],
     }),
     review_mechanics_resolution: async () => ({ ok: true, status: 'rejected', resolutionId: 'res-1' }),
+    schedule_task: async () => ({
+      scheduleResolutionId: 'sched-1',
+      status: 'cannot_resolve' as const,
+      rationale: 'no schedule draft',
+      confidence: 0,
+      events: [],
+    }),
+    review_schedule_resolution: async () => ({ ok: true, status: 'rejected', scheduleResolutionId: 'sched-1' }),
   };
 }
 
@@ -249,6 +257,7 @@ describe('GM agent loop', () => {
       playerText: 'I go to the docks',
       llm,
       runtime: {
+        ...createMechanicsStub(),
         observe_world: async () => ({ ok: true }),
         consult_npc: async () => ({ ok: true }),
         consult_specialist: async () => ({ ok: true }),

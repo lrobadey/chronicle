@@ -41,9 +41,29 @@ interface TurnResponse {
 }
 
 const SESSION_STORAGE_KEY = 'chronicle.web.sessionId';
-const DEFAULT_API_BASE = typeof window === 'undefined'
-  ? 'http://127.0.0.1:3001'
-  : window.location.origin;
+const DEFAULT_API_BASE = resolveDefaultApiBase();
+
+function resolveDefaultApiBase() {
+  const viteEnv = readViteEnv();
+  const configured = typeof viteEnv?.VITE_API_BASE_URL === 'string'
+    ? viteEnv.VITE_API_BASE_URL.trim()
+    : '';
+  if (configured) return configured;
+  if (viteEnv?.DEV || typeof window === 'undefined') return 'http://127.0.0.1:3001';
+  return window.location.origin;
+}
+
+function readViteEnv(): { VITE_API_BASE_URL?: string; DEV?: boolean } | undefined {
+  try {
+    // eval defers the import.meta.env access to runtime so this file can be compiled
+    // as CommonJS (for tests) without a parse error. In Node/test contexts eval throws
+    // a SyntaxError which is caught here; in the Vite browser bundle it returns the env object.
+    // eslint-disable-next-line no-eval
+    return eval('import.meta.env') as { VITE_API_BASE_URL?: string; DEV?: boolean } | undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export default function App() {
   const [apiBase, setApiBase] = useState(DEFAULT_API_BASE);

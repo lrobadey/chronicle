@@ -48,6 +48,30 @@ export interface Actor {
   relationships?: Record<ActorId, { trust: number; fear: number; affinity: number }>;
   /** Standing with each faction. Range: −100 (hostile) to 100 (revered). 0 = neutral/unknown. */
   factionStandings?: Record<FactionId, number>;
+  schedule?: NpcSchedule;
+}
+
+export interface NpcScheduleEntry {
+  id: string;
+  label: string;
+  atHour: number;
+  // Stored loosely to avoid a circular import with events.ts.
+  // The reducer writes only schedulable event payloads here.
+  payload: { type: string; [key: string]: unknown };
+}
+
+export interface NpcSchedule {
+  entries: NpcScheduleEntry[];
+  lastHydratedDay?: number;
+}
+
+export interface ScheduledProcess {
+  id: string;
+  label: string;
+  dueAtMinutes: number;
+  cadenceMinutes?: number;
+  payload: { type: string; [key: string]: unknown };
+  createdTurn: number;
 }
 
 /**
@@ -124,6 +148,7 @@ export interface SystemsState {
   tideConfig: TideConfig;
   weatherConfig: WeatherConfig;
   economyConfig?: EconomyConfig;
+  scheduledProcesses: ScheduledProcess[];
 }
 
 export interface WorldMeta {

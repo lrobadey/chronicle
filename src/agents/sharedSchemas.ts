@@ -157,7 +157,7 @@ export const CREATE_ENTITY_DATA_SCHEMA = strictObjectSchema({
 });
 
 export const CREATE_ENTITY_SCHEMA = strictObjectSchema({
-  kind: { type: 'string', enum: ['item', 'npc', 'location'] },
+  kind: { type: 'string', enum: ['item', 'npc', 'location', 'faction'] },
   data: CREATE_ENTITY_DATA_SCHEMA,
 });
 
@@ -186,7 +186,7 @@ export const PENDING_PROMPT_DATA_SCHEMA = strictObjectSchema(
 
 const NON_EMPTY_STRING_SCHEMA = { type: 'string', minLength: 1 } as const;
 
-export const EVENT_ITEM_SCHEMA = {
+export const SCHEDULABLE_PAYLOAD_SCHEMA = {
   anyOf: [
     strictObjectSchema({
       type: { type: 'string', enum: ['MoveActor'] },
@@ -238,11 +238,6 @@ export const EVENT_ITEM_SCHEMA = {
       note: { type: ['string', 'null'] },
     }),
     strictObjectSchema({
-      type: { type: 'string', enum: ['AdvanceTime'] },
-      minutes: { type: 'number' },
-      note: { type: ['string', 'null'] },
-    }),
-    strictObjectSchema({
       type: { type: 'string', enum: ['CreateEntity'] },
       entity: CREATE_ENTITY_SCHEMA,
       note: { type: ['string', 'null'] },
@@ -259,6 +254,40 @@ export const EVENT_ITEM_SCHEMA = {
       locationId: NON_EMPTY_STRING_SCHEMA,
       pace: { type: ['string', 'null'], enum: ['walk', 'run', null] },
       confirmId: { type: ['string', 'null'] },
+      note: { type: ['string', 'null'] },
+    }),
+    strictObjectSchema({
+      type: { type: 'string', enum: ['ModifyReputation'] },
+      actorId: { type: 'string' },
+      factionId: { type: 'string' },
+      delta: { type: 'number' },
+      reason: { type: ['string', 'null'] },
+      note: { type: ['string', 'null'] },
+    }),
+    strictObjectSchema({
+      type: { type: 'string', enum: ['SpreadRumor'] },
+      fromActorId: { type: ['string', 'null'] },
+      toActorId: { type: 'string' },
+      rumor: NON_EMPTY_STRING_SCHEMA,
+      subject: { type: ['string', 'null'] },
+      note: { type: ['string', 'null'] },
+    }),
+  ],
+} as const;
+
+export const NPC_SCHEDULE_ENTRY_SCHEMA = strictObjectSchema({
+  id: { type: 'string' },
+  label: { type: 'string' },
+  atHour: { type: 'number' },
+  payload: SCHEDULABLE_PAYLOAD_SCHEMA,
+});
+
+export const EVENT_ITEM_SCHEMA = {
+  anyOf: [
+    ...SCHEDULABLE_PAYLOAD_SCHEMA.anyOf,
+    strictObjectSchema({
+      type: { type: 'string', enum: ['AdvanceTime'] },
+      minutes: { type: 'number' },
       note: { type: ['string', 'null'] },
     }),
     strictObjectSchema({
@@ -279,6 +308,23 @@ export const EVENT_ITEM_SCHEMA = {
       actorId: { type: 'string' },
       text: NON_EMPTY_STRING_SCHEMA,
       subject: { type: ['string', 'null'] },
+      note: { type: ['string', 'null'] },
+    }),
+    strictObjectSchema({
+      type: { type: 'string', enum: ['ScheduleProcess'] },
+      process: strictObjectSchema({
+        id: { type: 'string' },
+        label: { type: 'string' },
+        dueAtMinutes: { type: 'number' },
+        cadenceMinutes: { type: ['number', 'null'] },
+        payload: SCHEDULABLE_PAYLOAD_SCHEMA,
+      }),
+      note: { type: ['string', 'null'] },
+    }),
+    strictObjectSchema({
+      type: { type: 'string', enum: ['SetNpcSchedule'] },
+      actorId: { type: 'string' },
+      entries: { type: 'array', items: NPC_SCHEDULE_ENTRY_SCHEMA },
       note: { type: ['string', 'null'] },
     }),
   ],

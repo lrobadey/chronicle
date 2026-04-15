@@ -9,6 +9,7 @@ import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
 import type { SpecialistType } from '../specialists';
 import type { MechanicsResolution } from '../mechanics';
+import type { ScheduleResolution } from '../schedule';
 
 export type GMReasoningEffort = 'low' | 'medium' | 'high';
 
@@ -52,6 +53,16 @@ export interface GMToolRuntime {
     action: 'approve' | 'revise' | 'reject';
     feedback?: string | null;
   }): Promise<unknown>;
+  schedule_task(input: {
+    task: string;
+    actorId?: string | null;
+    timeHint?: string | null;
+  }): Promise<ScheduleResolution | unknown>;
+  review_schedule_resolution(input: {
+    scheduleResolutionId: string;
+    action: 'approve' | 'revise' | 'reject';
+    feedback?: string | null;
+  }): Promise<unknown>;
   finish_turn(input: GMFinishTurnInput): Promise<unknown>;
 }
 
@@ -68,7 +79,7 @@ export interface GMAgentParams {
   trace?: {
     toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
     llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
+      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -216,6 +227,9 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       resolve_mechanics:  (args) => runtime.resolve_mechanics(args as Parameters<GMToolRuntime['resolve_mechanics']>[0]),
       review_mechanics_resolution:
                           (args) => runtime.review_mechanics_resolution(args as Parameters<GMToolRuntime['review_mechanics_resolution']>[0]),
+      schedule_task:      (args) => runtime.schedule_task(args as Parameters<GMToolRuntime['schedule_task']>[0]),
+      review_schedule_resolution:
+                          (args) => runtime.review_schedule_resolution(args as Parameters<GMToolRuntime['review_schedule_resolution']>[0]),
       finish_turn:        (args) => runtime.finish_turn(args as unknown as GMFinishTurnInput),
     };
 
@@ -311,7 +325,7 @@ function isFunctionCallItem(item: ResponseOutputItem): item is {
 function pushLLMTrace(
   trace: GMAgentParams['trace'] | undefined,
   entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;

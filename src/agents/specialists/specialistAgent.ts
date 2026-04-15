@@ -45,7 +45,7 @@ export interface SpecialistAgentParams {
   debug?: DebugSink;
   trace?: {
     llmCalls?: Array<{
-      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
+      agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;
@@ -216,7 +216,7 @@ function isFunctionCallItem(item: ResponseOutputItem): item is {
 function pushLLMTrace(
   trace: SpecialistAgentParams['trace'] | undefined,
   entry: {
-    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics';
+    agent: 'gm' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;

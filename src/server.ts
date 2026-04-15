@@ -6,7 +6,7 @@ import 'dotenv/config';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { URL, fileURLToPath } from 'node:url';
+import { URL } from 'node:url';
 import { TurnEngine } from './engine/turnEngine';
 import { InputValidationError, isChronicleError } from './engine/errors';
 
@@ -103,8 +103,7 @@ function normalizeError(err: unknown): { status: number; code: string; error: st
   };
 }
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const STATIC_DIR = path.resolve(__dirname, 'dist');
+const STATIC_DIR = path.resolve(process.cwd(), 'dist');
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
