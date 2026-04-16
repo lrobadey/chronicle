@@ -147,7 +147,7 @@ async function runSystemsDesignerLoop(
     const response = await params.llm.responsesCreate({
       apiKey: params.apiKey,
       model: params.model || DEFAULT_MODEL,
-      reasoning: { effort: 'medium' },
+      reasoning: { effort: 'low' },
       instructions: SYSTEMS_DESIGNER_SYSTEM_PROMPT,
       input: pendingInput,
       previous_response_id: previousResponseId,

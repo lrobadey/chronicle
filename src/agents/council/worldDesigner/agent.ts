@@ -70,7 +70,7 @@ async function runWorldDesignerLoop(
     const response = await params.llm.responsesCreate({
       apiKey: params.apiKey,
       model: params.model || DEFAULT_MODEL,
-      reasoning: { effort: 'medium' },
+      reasoning: { effort: 'low' },
       instructions: WORLD_DESIGNER_SYSTEM_PROMPT,
       input: pendingInput,
       previous_response_id: previousResponseId,
@@ -241,7 +241,7 @@ async function draftWorldWorker(params: {
   const response = await params.llm.responsesCreate({
     apiKey: params.apiKey,
     model: params.model,
-    reasoning: { effort: 'low' },
+    reasoning: { effort: 'medium' },
     instructions: params.system,
     input: JSON.stringify(params.input),
     tools: [{

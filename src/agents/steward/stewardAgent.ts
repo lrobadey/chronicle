@@ -20,7 +20,7 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
   const {
     apiKey,
     model = DEFAULT_MODEL,
-    stewardReasoningEffort = 'medium',
+    stewardReasoningEffort = 'low',
     playerText,
     context,
     runtime,
