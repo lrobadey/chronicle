@@ -533,12 +533,25 @@ export class TurnEngine {
       }
       trace?.toolCalls.push({
         tool: 'dispatch_council_task',
-        input: { taskId: packet.task.taskId, domain: packet.task.domain, directive: packet.task.directive },
+        input: {
+          taskId: packet.task.taskId,
+          domain: packet.task.domain,
+          directive: packet.task.directive,
+          priority: packet.task.priority,
+          context: packet.task.context,
+        },
         output: {
+          taskId: result.taskId,
+          domain: result.domain,
           summary: result.summary,
-          proposedEvents: result.proposedEvents.length,
+          proposedEvents: result.proposedEvents,
+          proposedEventCount: result.proposedEvents.length,
+          detail: result.detail,
+          confidence: result.confidence,
           warnings: result.warnings,
         },
+        stage: 'council_dispatch',
+        executionMs: Date.now() - startedAt,
       });
       return {
         result,
@@ -1164,19 +1177,33 @@ export class TurnEngine {
       });
       const hasCouncilTasks = stewardOpenResult.councilTasks.length > 0;
 
+      trace?.toolCalls.push({
+        tool: 'open_steward_turn',
+        input: {
+          playerText,
+          pendingPromptId: currentPendingPrompt?.id ?? null,
+        },
+        output: {
+          classification: stewardOpenResult.turnPlan.classification,
+          deterministicOwner: stewardOpenResult.turnPlan.deterministicOwner,
+          requiredDomains: stewardOpenResult.turnPlan.requiredDomains,
+          optionalDomains: stewardOpenResult.turnPlan.optionalDomains,
+          heldBeatsToConsider: stewardOpenResult.turnPlan.heldBeatsToConsider,
+          pendingEventsToCheck: stewardOpenResult.turnPlan.pendingEventsToCheck,
+          rationale: stewardOpenResult.turnPlan.rationale,
+          councilTasks: stewardOpenResult.councilTasks.length,
+          tasks: stewardOpenResult.councilTasks.map(packet => ({
+            taskId: packet.task.taskId,
+            domain: packet.task.domain,
+            directive: packet.task.directive,
+            priority: packet.task.priority,
+          })),
+        },
+        agent: 'steward',
+        stage: 'open',
+      });
+
       if (hasCouncilTasks) {
-        trace?.toolCalls.push({
-          tool: 'open_steward_turn',
-          input: {
-            playerText,
-            pendingPromptId: currentPendingPrompt?.id ?? null,
-          },
-          output: {
-            classification: stewardOpenResult.turnPlan.classification,
-            domains: stewardOpenResult.turnPlan.requiredDomains,
-            councilTasks: stewardOpenResult.councilTasks.length,
-          },
-        });
 
         const councilResults = await Promise.all(
           stewardOpenResult.councilTasks.map(packet => dispatchCouncilTask(packet as { task: CouncilTask<CouncilDomain> })),
@@ -1198,8 +1225,17 @@ export class TurnEngine {
             handled: closeResult.handled,
             route: closeResult.trace.route,
             reason: closeResult.fallbackReason ?? closeResult.trace.reason,
-            proposedEvents: closeResult.proposedEvents.length,
+            summary: closeResult.summary,
+            councilDomains: closeResult.trace.councilDomains,
+            proposedEvents: closeResult.proposedEvents,
+            proposedEventCount: closeResult.proposedEvents.length,
+            agendaUpdates: closeResult.agendaUpdates,
+            directorUpdates: closeResult.directorUpdates,
+            councilArtifacts: closeResult.councilArtifacts,
+            narratorHandoff: closeResult.narratorHandoff,
           },
+          agent: 'steward',
+          stage: 'close',
         });
 
         const systemsPacket = councilResults.find(
@@ -1277,7 +1313,19 @@ export class TurnEngine {
         trace?.toolCalls.push({
           tool: 'legacy_council_fallback',
           input: { reason: councilFallbackReason },
-          output: { ok: result.ok, summary: proposal.summary, candidateEvents: proposal.candidateEvents.length },
+          output: {
+            ok: result.ok,
+            summary: proposal.summary,
+            candidateEvents: proposal.candidateEvents,
+            candidateEventCount: proposal.candidateEvents.length,
+            pendingPrompt: proposal.pendingPrompt,
+            clearPendingPrompt: proposal.clearPendingPrompt === true,
+            agendaUpdates: proposal.agendaUpdates,
+            directorUpdates: proposal.directorUpdates,
+            reasoningNotes: proposal.reasoningNotes,
+          },
+          agent: 'legacy_gm',
+          stage: 'fallback',
         });
       }
 
@@ -1414,6 +1462,20 @@ export class TurnEngine {
       telemetry: afterTelemetry,
       trace,
     };
+
+    trace?.toolCalls.push({
+      tool: 'persist_turn_record',
+      input: {
+        sessionId,
+        turn: nextTurn,
+      },
+      output: {
+        acceptedEventCount: acceptedEvents.length,
+        rejectedEventCount: rejectedEvents.length,
+        hasPendingPrompt: Boolean(draft.meta.pendingPrompt),
+      },
+      stage: 'persistence',
+    });
 
     await this.store.appendTurn(sessionId, record);
     await this.store.saveSnapshot(sessionId, draft);

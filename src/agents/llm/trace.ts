@@ -1,5 +1,6 @@
 import type { ResponseOutputItem } from './types';
 import type { SpecialistType } from '../specialists';
+import type { TurnTraceLLMCall } from '../../engine/session/types';
 
 export function isFunctionCallItem(item: ResponseOutputItem): item is {
   type: 'function_call';
@@ -11,34 +12,8 @@ export function isFunctionCallItem(item: ResponseOutputItem): item is {
 }
 
 export function pushLLMTrace(
-  trace: { llmCalls?: any[] } | undefined,
-  entry: {
-    agent:
-      | 'gm'
-      | 'steward'
-      | 'legacy_gm'
-      | 'observer'
-      | 'npc'
-      | 'narrator'
-      | 'specialist'
-      | 'mechanics'
-      | 'schedule'
-      | 'staff_interview'
-      | 'character_designer'
-      | 'world_designer'
-      | 'systems_designer'
-      | 'character_worker'
-      | 'world_worker';
-    responseId?: string;
-    previousResponseId?: string;
-    inputItems?: number;
-    outputItems?: number;
-    toolCalls?: number;
-    usage?: unknown;
-    status?: string;
-    error?: unknown;
-    specialistType?: SpecialistType;
-  },
+  trace: { llmCalls?: TurnTraceLLMCall[] } | undefined,
+  entry: TurnTraceLLMCall & { specialistType?: SpecialistType },
 ) {
   if (!trace) return;
   trace.llmCalls = trace.llmCalls || [];

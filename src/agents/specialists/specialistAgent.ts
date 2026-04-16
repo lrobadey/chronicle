@@ -12,6 +12,7 @@ import type {
   SpecialistType,
   SpecialistConsultation,
 } from './types';
+import type { TurnTraceLLMCall } from '../../engine/session/types';
 
 const SPECIALIST_OUTPUT_TOOL_NAME = 'emit_specialist_advice';
 
@@ -45,33 +46,7 @@ export interface SpecialistAgentParams {
   llm: LLMClient;
   debug?: DebugSink;
   trace?: {
-    llmCalls?: Array<{
-      agent:
-        | 'gm'
-        | 'steward'
-        | 'legacy_gm'
-        | 'observer'
-        | 'npc'
-        | 'narrator'
-        | 'specialist'
-        | 'mechanics'
-        | 'schedule'
-        | 'staff_interview'
-        | 'character_designer'
-        | 'world_designer'
-        | 'systems_designer'
-        | 'character_worker'
-        | 'world_worker';
-      responseId?: string;
-      previousResponseId?: string;
-      inputItems?: number;
-      outputItems?: number;
-      toolCalls?: number;
-      usage?: unknown;
-      status?: string;
-      error?: unknown;
-      specialistType?: SpecialistType;
-    }>;
+    llmCalls?: TurnTraceLLMCall[];
   };
 }
 

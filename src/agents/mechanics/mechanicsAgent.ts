@@ -13,6 +13,7 @@ import type { PendingPrompt } from '../../sim/state';
 import type { WorldEvent } from '../../sim/events';
 import { MECHANICS_SYSTEM_PROMPT } from './prompts';
 import { resolveDeterministicMechanics } from './deterministicResolver';
+import type { TurnTraceLLMCall } from '../../engine/session/types';
 import type {
   MechanicsAction,
   MechanicsDebugRecord,
@@ -110,33 +111,7 @@ export interface MechanicsAgentParams {
   llm: LLMClient;
   debug?: DebugSink;
   trace?: {
-    llmCalls?: Array<{
-      agent:
-        | 'gm'
-        | 'steward'
-        | 'legacy_gm'
-        | 'observer'
-        | 'npc'
-        | 'narrator'
-        | 'specialist'
-        | 'mechanics'
-        | 'schedule'
-        | 'staff_interview'
-        | 'character_designer'
-        | 'world_designer'
-        | 'systems_designer'
-        | 'character_worker'
-        | 'world_worker';
-      responseId?: string;
-      previousResponseId?: string;
-      inputItems?: number;
-      outputItems?: number;
-      toolCalls?: number;
-      usage?: unknown;
-      status?: string;
-      error?: unknown;
-      specialistType?: string;
-    }>;
+    llmCalls?: TurnTraceLLMCall[];
   };
 }
 

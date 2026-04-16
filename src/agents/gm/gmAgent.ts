@@ -11,6 +11,7 @@ import { emitDebugEvent } from '../../engine/debug';
 import type { SpecialistType } from '../specialists';
 import type { MechanicsResolution } from '../mechanics';
 import type { ScheduleResolution } from '../schedule';
+import type { TurnTraceLLMCall, TurnTraceToolCall } from '../../engine/session/types';
 
 export type GMReasoningEffort = 'low' | 'medium' | 'high';
 
@@ -79,34 +80,8 @@ export interface GMAgentParams {
   maxIterations?: number;
   debug?: DebugSink;
   trace?: {
-    toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
-    llmCalls?: Array<{
-      agent:
-        | 'gm'
-        | 'steward'
-        | 'legacy_gm'
-        | 'observer'
-        | 'npc'
-        | 'narrator'
-        | 'specialist'
-        | 'mechanics'
-        | 'schedule'
-        | 'staff_interview'
-        | 'character_designer'
-        | 'world_designer'
-        | 'systems_designer'
-        | 'character_worker'
-        | 'world_worker';
-      responseId?: string;
-      previousResponseId?: string;
-      inputItems?: number;
-      outputItems?: number;
-      toolCalls?: number;
-      usage?: unknown;
-      status?: string;
-      error?: unknown;
-      specialistType?: SpecialistType;
-    }>;
+    toolCalls: TurnTraceToolCall[];
+    llmCalls?: TurnTraceLLMCall[];
   };
 }
 
@@ -143,6 +118,16 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       input: { perspective: 'gm' },
     });
     const observeOutput = await runtime.observe_world({ perspective: 'gm' });
+    trace?.toolCalls.push({
+      tool: 'observe_world',
+      input: { perspective: 'gm' },
+      output: observeOutput,
+      agent: traceAgent,
+      iteration: 1,
+      callId: 'fallback-observe-world',
+      callIndex: 1,
+      callCount: 2,
+    });
     emitDebugEvent(debug, {
       type: 'tool.result',
       iteration: 1,
@@ -163,6 +148,16 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       input: { summary: 'No API key; fallback turn' },
     });
     const finishOutput = await runtime.finish_turn({ summary: 'No API key; fallback turn' });
+    trace?.toolCalls.push({
+      tool: 'finish_turn',
+      input: { summary: 'No API key; fallback turn' },
+      output: finishOutput,
+      agent: traceAgent,
+      iteration: 1,
+      callId: 'fallback-finish-turn',
+      callIndex: 2,
+      callCount: 2,
+    });
     emitDebugEvent(debug, {
       type: 'tool.result',
       iteration: 1,
@@ -269,7 +264,16 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
 
       if (parsed.ok === false) {
         const output = { error: 'invalid_tool_arguments', details: parsed.error };
-        trace?.toolCalls.push({ tool: call.name, input: call.arguments, output });
+        trace?.toolCalls.push({
+          tool: call.name,
+          input: call.arguments,
+          output,
+          agent: traceAgent,
+          iteration,
+          callId,
+          callIndex,
+          callCount,
+        });
         emitDebugEvent(debug, { type: 'tool.result', iteration, tool: call.name, callId, callIndex, callCount, output, ok: deriveToolResultOk(output) });
         nextInput.push({ type: 'function_call_output', call_id: callId, output: safeJSONStringify(output) });
         continue;
@@ -285,7 +289,16 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
         output = { error: 'tool_runtime_error', details: classifyLLMError(error) };
       }
 
-      trace?.toolCalls.push({ tool: call.name, input: args, output });
+      trace?.toolCalls.push({
+        tool: call.name,
+        input: args,
+        output,
+        agent: traceAgent,
+        iteration,
+        callId,
+        callIndex,
+        callCount,
+      });
       emitDebugEvent(debug, { type: 'tool.result', iteration, tool: call.name, callId, callIndex, callCount, output, ok: deriveToolResultOk(output) });
       nextInput.push({ type: 'function_call_output', call_id: callId, output: safeJSONStringify(output) });
 

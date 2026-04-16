@@ -5,8 +5,8 @@ import { isFunctionCallItem, pushLLMTrace } from '../llm/trace';
 import { NPC_SYSTEM_PROMPT } from './prompts';
 import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
-import type { SpecialistType } from '../specialists';
 import type { ConversationTranscriptEntry } from '../../engine/contextBuilders';
+import type { TurnTraceLLMCall } from '../../engine/session/types';
 
 const NPC_OUTPUT_TOOL_NAME = 'emit_npc_turn';
 const NPC_CONTEXT_CHAR_BUDGET = 14_000;
@@ -51,33 +51,7 @@ export interface NpcAgentParams {
   llm: LLMClient;
   debug?: DebugSink;
   trace?: {
-    llmCalls?: Array<{
-      agent:
-        | 'gm'
-        | 'steward'
-        | 'legacy_gm'
-        | 'observer'
-        | 'npc'
-        | 'narrator'
-        | 'specialist'
-        | 'mechanics'
-        | 'schedule'
-        | 'staff_interview'
-        | 'character_designer'
-        | 'world_designer'
-        | 'systems_designer'
-        | 'character_worker'
-        | 'world_worker';
-      responseId?: string;
-      previousResponseId?: string;
-      inputItems?: number;
-      outputItems?: number;
-      toolCalls?: number;
-      usage?: unknown;
-      status?: string;
-      error?: unknown;
-      specialistType?: SpecialistType;
-    }>;
+    llmCalls?: TurnTraceLLMCall[];
   };
 }
 

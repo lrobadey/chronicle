@@ -17,7 +17,7 @@ Short version: the steward is real in the active runtime, but only owns a narrow
 - `src/engine/*`: turn orchestration, persistence, replay, and debug plumbing.
 - `src/agents/*`: OpenAI-powered GM, NPC, and narrator agents plus the shared LLM client.
 - `src/server.ts`: HTTP API for session initialization and turns.
-- `src/cli.ts` and `src/cli/app.ts`: interactive command-line play loop.
+- `src/cli.ts` and `src/cli/*`: operator-first CLI, reporting layer, and interactive play mode.
 - `deprecated/*`: legacy source snapshots kept for reference only.
 
 ## Requirements
@@ -41,6 +41,14 @@ Run the CLI:
 
 ```bash
 npm run cli
+```
+
+Examples:
+
+```bash
+npm run cli -- turn explain "look around"
+npm run cli -- turn run "go north" --view full
+npm run cli -- inspect trace --session <session-id> --view raw
 ```
 
 Run the HTTP server:
@@ -81,26 +89,45 @@ By default the server listens on `http://localhost:3001` or the `PORT` environme
 
 ## CLI
 
-The CLI starts a session, prints the opening narration, and then accepts player actions or slash commands.
+The CLI is now operator-first. The main surface is a command tree for inspecting route decisions, council dispatch, trace timelines, steward state, artifacts, and history. `play` remains available as an interactive mode on top of the same reporting layer.
 
-Available commands:
+Top-level commands:
 
-- `/help`: show command help.
-- `/state`: print the current telemetry snapshot.
-- `/session`: show session and mode information.
-- `/style <lyric|cinematic|michener>`: change narrator style.
-- `/debug [on|off]`: toggle the live debug timeline.
-- `/trace [on|off]`: alias for `/debug`.
-- `/detail <summary|raw>`: change debug verbosity.
-- `/new [sessionId]`: start or resume a session.
-- `/exit`: leave the CLI.
+- `chronicle play`
+- `chronicle turn run "<text>"`
+- `chronicle turn explain "<text>"`
+- `chronicle inspect session|state|route|steward|council|trace|history|artifacts|prompts|world`
+- `chronicle staff ask "<question>"`
+- `chronicle staff interactive`
+- `chronicle session new [sessionId]`
+- `chronicle session resume <sessionId>`
+- `chronicle session list`
+- `chronicle worlds list`
+
+Useful flags:
+
+- `--json`: emit machine-readable output.
+- `--view <summary|operator|full|raw>`: control depth of backstage detail.
+- `--raw`: include raw payloads and exact trace/tool data.
+- `--verbose`: include extra bounded summaries.
+- `--diff`: include detailed before/after state data.
+- `--no-narration`: suppress narration blocks in one-shot reports.
+- `--session <id>`: target an existing session for inspect commands.
+- `--world <id>`: select the startup world for `play`, `turn run`, or `session new`.
+
+Interactive play mode:
+
+- Start with `npm run cli` or `npm run cli -- play`.
+- Enter actions normally.
+- Use `:inspect ...`, `:session ...`, and `:staff ask ...` inside the play loop.
+- Legacy slash commands still work temporarily inside `play`, but they print deprecation notices.
 
 CLI environment variables:
 
 - `CHRONICLE_API_MODE`: `auto`, `fallback`, or `live`.
 - `CHRONICLE_SESSION_ROOT`: override the session storage directory.
+- `CHRONICLE_STARTUP_WORLD_ID`: choose the default world for `play` and session creation.
 - `CHRONICLE_ALLOW_NON_TTY`: set to `1`, `true`, `yes`, or `on` to allow non-interactive runs.
-- `CHRONICLE_CLI_TRANSCRIPT`: write a JSONL transcript of prompts, inputs, and outputs to this path.
 
 ## HTTP API
 

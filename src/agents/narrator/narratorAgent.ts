@@ -9,9 +9,7 @@ import type { PendingPrompt } from '../../sim/state';
 import type { DebugSink } from '../../engine/debug';
 import { emitDebugEvent } from '../../engine/debug';
 import type { OpeningContext, OpeningRecap } from '../../engine/contextBuilders';
-import type { RecentTurnDigest } from '../../engine/session/types';
-import type { TurnSpeechRecord } from '../../engine/session/types';
-import type { SpecialistType } from '../specialists';
+import type { RecentTurnDigest, TurnSpeechRecord, TurnTraceLLMCall } from '../../engine/session/types';
 import type { SystemsNarratorPacket } from '../council';
 import type { RecentSpeechDigest } from '../../engine/contextBuilders';
 
@@ -35,33 +33,7 @@ export interface NarratorParams {
   onNarrationDelta?: (delta: string) => void;
   debug?: DebugSink;
   trace?: {
-    llmCalls?: Array<{
-      agent:
-        | 'gm'
-        | 'steward'
-        | 'legacy_gm'
-        | 'observer'
-        | 'npc'
-        | 'narrator'
-        | 'specialist'
-        | 'mechanics'
-        | 'schedule'
-        | 'staff_interview'
-        | 'character_designer'
-        | 'world_designer'
-        | 'systems_designer'
-        | 'character_worker'
-        | 'world_worker';
-      responseId?: string;
-      previousResponseId?: string;
-      inputItems?: number;
-      outputItems?: number;
-      toolCalls?: number;
-      usage?: unknown;
-      status?: string;
-      error?: unknown;
-      specialistType?: SpecialistType;
-    }>;
+    llmCalls?: TurnTraceLLMCall[];
   };
 }
 

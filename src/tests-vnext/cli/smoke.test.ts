@@ -19,12 +19,12 @@ async function makeTempDir(prefix: string): Promise<string> {
   return dir;
 }
 
-async function runCliSmoke(inputScript: string, extraEnv: Record<string, string>) {
+async function runCliSmoke(inputScript: string, extraEnv: Record<string, string>, args: string[] = []) {
   const stdoutChunks: string[] = [];
   const stderrChunks: string[] = [];
   const cliPath = path.resolve(process.cwd(), '.tmp-tests/cli.js');
 
-  const child = spawn(process.execPath, [cliPath], {
+  const child = spawn(process.execPath, [cliPath, ...args], {
     cwd: process.cwd(),
     env: {
       ...process.env,
@@ -54,11 +54,11 @@ async function runCliSmoke(inputScript: string, extraEnv: Record<string, string>
 }
 
 describe('CLI smoke', () => {
-  it('drives the compiled CLI entrypoint through a non-tty harness', async () => {
+  it('drives play mode through a non-tty harness with operator commands', async () => {
     const sessionRoot = await makeTempDir('chronicle-cli-smoke-');
     const transcriptPath = path.join(sessionRoot, 'transcript.jsonl');
 
-    const result = await runCliSmoke('/state\nlook around\n/exit\n', {
+    const result = await runCliSmoke(':inspect state\nlook around\n:exit\n', {
       CHRONICLE_ALLOW_NON_TTY: '1',
       CHRONICLE_API_MODE: 'fallback',
       CHRONICLE_SESSION_ROOT: sessionRoot,
@@ -67,15 +67,14 @@ describe('CLI smoke', () => {
     });
 
     assert.equal(result.exitCode, 0);
-    assert.ok(result.stdout.includes('=== Chronicle vNext - Isle of Marrow ==='));
-    assert.ok(result.stdout.includes('Opening:'));
-    assert.ok(result.stdout.includes('[Day 1, '));
-    assert.ok(result.stdout.includes('Type /help for commands, or enter your action.'));
-    assert.ok(result.stdout.includes('> '));
-    assert.ok(result.stdout.includes('Location: The Landing'));
-    assert.ok(result.stdout.includes('[turn] #1 "look around"'));
-    assert.ok(result.stdout.includes('Narration:'));
-    assert.ok(result.stdout.includes('Goodbye!'));
+    assert.ok(result.stdout.includes('## Chronicle Play'));
+    assert.ok(result.stdout.includes('world=Isle of Marrow'));
+    assert.ok(result.stdout.includes('Type `:help` for operator commands, or enter your action.'));
+    assert.ok(result.stdout.includes('## Session'));
+    assert.ok(result.stdout.includes('location: The Landing'));
+    assert.ok(result.stdout.includes('[route] simple_council'));
+    assert.ok(result.stdout.includes('[dispatch] systems, world'));
+    assert.ok(result.stdout.includes('Hint: :inspect trace --view full | :inspect council | :inspect route'));
 
     const sessionEntries = await fs.readdir(sessionRoot, { withFileTypes: true });
     const sessionDir = sessionEntries.find(entry => entry.isDirectory());
@@ -86,13 +85,15 @@ describe('CLI smoke', () => {
 
     const transcript = await fs.readFile(transcriptPath, 'utf8');
     assert.ok(transcript.includes('"type":"prompt"'));
+    assert.ok(transcript.includes('"type":"input","text":":inspect state"'));
     assert.ok(transcript.includes('"type":"input","text":"look around"'));
+    assert.ok(transcript.includes('"type":"output","text":"## Chronicle Play'));
   });
 
   it('boots the tel-mora startup world when requested by script env', async () => {
     const sessionRoot = await makeTempDir('chronicle-cli-smoke-tel-mora-');
 
-    const result = await runCliSmoke('/exit\n', {
+    const result = await runCliSmoke(':exit\n', {
       CHRONICLE_ALLOW_NON_TTY: '1',
       CHRONICLE_API_MODE: 'fallback',
       CHRONICLE_SESSION_ROOT: sessionRoot,
@@ -101,8 +102,24 @@ describe('CLI smoke', () => {
     });
 
     assert.equal(result.exitCode, 0);
-    assert.ok(result.stdout.includes('=== Chronicle vNext - Tel Mora — The Dead Junction ==='));
-    assert.ok(result.stdout.includes('The junction is quiet, but no one trusts it.'));
-    assert.ok(result.stdout.includes('A recommendation is coming, and everyone is listening for it.'));
+    assert.ok(result.stdout.includes('world=Tel Mora — The Dead Junction'));
+    assert.ok(result.stdout.includes("You come in at first light at The Assessor's Shade"));
+    assert.ok(result.stdout.includes('Type `:help` for operator commands, or enter your action.'));
+  });
+
+  it('runs one-shot explain commands without interactive play', async () => {
+    const sessionRoot = await makeTempDir('chronicle-cli-smoke-explain-');
+
+    const result = await runCliSmoke('', {
+      CHRONICLE_API_MODE: 'fallback',
+      CHRONICLE_SESSION_ROOT: sessionRoot,
+      NODE_NO_WARNINGS: '1',
+    }, ['turn', 'explain', 'look around', '--world', 'tel-mora']);
+
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.stdout.includes('## Explain'));
+    assert.ok(result.stdout.includes('world: Tel Mora — The Dead Junction (tel-mora)'));
+    assert.ok(result.stdout.includes('classification: simple_council'));
+    assert.ok(result.stdout.includes('required_domains: systems'));
   });
 });

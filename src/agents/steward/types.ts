@@ -11,7 +11,7 @@
 
 import type { DirectorState, PendingPrompt, StewardMemory } from '../../sim/state';
 import type { WorldEvent } from '../../sim/events';
-import type { CouncilArtifactRecord, RejectedEventRecord } from '../../engine/session/types';
+import type { CouncilArtifactRecord, RejectedEventRecord, TurnTraceLLMCall, TurnTraceToolCall } from '../../engine/session/types';
 import type { StewardRoutingSummary } from '../../engine/contextBuilders';
 import type { GMAgendaUpdates } from '../gm/gmAgent';
 import type { GMDirectorUpdates } from '../gm/gmAgent';
@@ -127,32 +127,7 @@ export interface StewardAgentParams {
   maxIterations?: number;
   debug?: DebugSink;
   trace?: {
-    toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
-    llmCalls?: Array<{
-      agent:
-        | 'gm'
-        | 'steward'
-        | 'legacy_gm'
-        | 'observer'
-        | 'npc'
-        | 'narrator'
-        | 'specialist'
-        | 'mechanics'
-        | 'schedule'
-        | 'staff_interview'
-        | 'character_designer'
-        | 'world_designer'
-        | 'systems_designer'
-        | 'character_worker'
-        | 'world_worker';
-      responseId?: string;
-      previousResponseId?: string;
-      inputItems?: number;
-      outputItems?: number;
-      toolCalls?: number;
-      usage?: unknown;
-      status?: string;
-      error?: unknown;
-    }>;
+    toolCalls: TurnTraceToolCall[];
+    llmCalls?: TurnTraceLLMCall[];
   };
 }

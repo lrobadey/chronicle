@@ -100,39 +100,54 @@ export interface TurnRecord {
   trace?: TurnTrace;
 }
 
+export interface TurnTraceToolCall {
+  tool: string;
+  input: unknown;
+  output: unknown;
+  agent?: string;
+  iteration?: number;
+  callId?: string;
+  callIndex?: number;
+  callCount?: number;
+  stage?: string;
+  executionMs?: number;
+}
+
+export interface TurnTraceLLMCall {
+  agent:
+    | 'gm'
+    | 'steward'
+    | 'legacy_gm'
+    | 'observer'
+    | 'npc'
+    | 'narrator'
+    | 'specialist'
+    | 'mechanics'
+    | 'schedule'
+    | 'staff_interview'
+    | 'character_designer'
+    | 'world_designer'
+    | 'systems_designer'
+    | 'character_worker'
+    | 'world_worker';
+  responseId?: string;
+  previousResponseId?: string;
+  inputItems?: number;
+  outputItems?: number;
+  toolCalls?: number;
+  usage?: unknown;
+  status?: string;
+  error?: unknown;
+  specialistType?: SpecialistType | string;
+}
+
 export interface TurnTrace {
-  toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
+  toolCalls: TurnTraceToolCall[];
   councilArtifacts?: CouncilArtifactRecord[];
   mechanicsResolutions?: MechanicsResolution[];
   mechanicsDebug?: MechanicsDebugRecord[];
   specialistOutputs?: SpecialistConsultation[];
-  llmCalls?: Array<{
-    agent:
-      | 'gm'
-      | 'steward'
-      | 'legacy_gm'
-      | 'observer'
-      | 'npc'
-      | 'narrator'
-      | 'specialist'
-      | 'mechanics'
-      | 'schedule'
-      | 'staff_interview'
-      | 'character_designer'
-      | 'world_designer'
-      | 'systems_designer'
-      | 'character_worker'
-      | 'world_worker';
-    responseId?: string;
-    previousResponseId?: string;
-    inputItems?: number;
-    outputItems?: number;
-    toolCalls?: number;
-    usage?: unknown;
-    status?: string;
-    error?: unknown;
-    specialistType?: SpecialistType;
-  }>;
+  llmCalls?: TurnTraceLLMCall[];
   llmMessages?: Array<{ role: string; content?: string }>;
 }
 
@@ -146,6 +161,7 @@ export interface SessionStore {
   ): Promise<{ sessionId: string; created: boolean; state: WorldState }>;
   loadSession(sessionId: string): Promise<WorldState | null>;
   loadTurnLog(sessionId: string): Promise<TurnRecord[]>;
+  listSessionIds(): Promise<string[]>;
   saveInitialState(sessionId: string, state: WorldState): Promise<void>;
   saveSnapshot(sessionId: string, state: WorldState): Promise<void>;
   appendTurn(sessionId: string, record: TurnRecord): Promise<void>;

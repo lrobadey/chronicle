@@ -34,6 +34,8 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
     tool: 'open_steward_turn',
     input: { playerText, hasApiKey: Boolean(apiKey) },
     output: { ok: true },
+    agent: 'steward',
+    stage: 'open',
   });
 
   let previousResponseId: string | undefined;
@@ -122,7 +124,16 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
         const dispatchResult = await dispatchTool(runtime, call.name, parsed.value);
         output = dispatchResult.output;
         if (dispatchResult.finished) {
-          trace?.toolCalls.push({ tool: call.name, input: toolInput, output });
+          trace?.toolCalls.push({
+            tool: call.name,
+            input: toolInput,
+            output,
+            agent: 'steward',
+            iteration,
+            callId,
+            callIndex: callIndex + 1,
+            callCount: toolCalls.length,
+          });
           emitDebugEvent(debug, {
             type: 'tool.result',
             iteration,
@@ -142,7 +153,16 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
         }
       }
 
-      trace?.toolCalls.push({ tool: call.name, input: toolInput, output });
+      trace?.toolCalls.push({
+        tool: call.name,
+        input: toolInput,
+        output,
+        agent: 'steward',
+        iteration,
+        callId,
+        callIndex: callIndex + 1,
+        callCount: toolCalls.length,
+      });
       emitDebugEvent(debug, {
         type: 'tool.result',
         iteration,

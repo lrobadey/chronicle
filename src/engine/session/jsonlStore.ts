@@ -55,6 +55,15 @@ export class JsonlSessionStore implements SessionStore {
     return state;
   }
 
+  async listSessionIds(): Promise<string[]> {
+    if (!(await this.exists(this.rootDir))) return [];
+    const entries = await fs.readdir(this.rootDir, { withFileTypes: true });
+    return entries
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name)
+      .sort();
+  }
+
   async saveSnapshot(sessionId: string, state: WorldState): Promise<void> {
     const dir = this.sessionDir(sessionId);
     await fs.mkdir(dir, { recursive: true });
