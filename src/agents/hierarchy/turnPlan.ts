@@ -9,6 +9,7 @@
 
 import type { DirectorState, PendingPrompt } from '../../sim/state';
 import type { ActionClassification, CouncilDomain } from './types';
+import { classifyPromptReply } from './promptReply';
 
 // ---------------------------------------------------------------------------
 // TurnPlan input
@@ -113,11 +114,23 @@ function findDuePendingEvents(
 // ---------------------------------------------------------------------------
 
 export function classifyTurn(input: TurnPlanInput): TurnPlan {
-  const { playerText, directorState, turnNumber } = input;
+  const { playerText, directorState, turnNumber, pendingPrompt } = input;
   const text = playerText.trim();
 
   const heldBeatsToConsider = findRelevantHeldBeats(directorState, text);
   const pendingEventsToCheck = findDuePendingEvents(directorState, turnNumber);
+
+  if (pendingPrompt && classifyPromptReply(text) !== null) {
+    return {
+      classification: 'deterministic',
+      deterministicOwner: 'mechanics',
+      requiredDomains: [],
+      optionalDomains: [],
+      heldBeatsToConsider,
+      pendingEventsToCheck,
+      rationale: 'Player answered an active pending prompt; route to deterministic systems handling.',
+    };
+  }
 
   if (OBSERVATION_PATTERN.test(text)) {
     return {
@@ -161,6 +174,17 @@ export function classifyTurn(input: TurnPlanInput): TurnPlan {
     DROP_PATTERN.test(text) ||
     TRAVEL_PATTERN.test(text)
   ) {
+    if (pendingPrompt && classifyPromptReply(text) === null) {
+      return {
+        classification: 'steward_judgment',
+        deterministicOwner: null,
+        requiredDomains: ['systems'],
+        optionalDomains: ['character', 'world'],
+        heldBeatsToConsider,
+        pendingEventsToCheck,
+        rationale: 'A pending prompt is active and the player did not answer it; defer to Steward judgment.',
+      };
+    }
     return {
       classification: 'deterministic',
       deterministicOwner: 'mechanics',

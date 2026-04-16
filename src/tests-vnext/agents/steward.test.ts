@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { DirectorState } from '../../sim/state';
 import { closeStewardTurn, openStewardTurn } from '../../agents/steward';
+import type {
+  SystemsDesignerTaskContext,
+} from '../../agents/council';
 
 function createDirectorState(): DirectorState {
   return {
@@ -43,12 +46,25 @@ describe('openStewardTurn', () => {
   });
 
   it('builds a systems council task for observation turns', () => {
+    const systemsContext: SystemsDesignerTaskContext = {
+      intent: 'general_systems',
+      executionMode: 'full_agent',
+      playerText: 'look around',
+      telemetry: { player: { id: 'player-1' } } as never,
+      observation: { player: { id: 'player-1' } } as never,
+      pendingPrompt: null,
+      nearby: { actors: [], itemsOnGround: [] },
+      travelCandidates: [],
+      landmarks: [],
+      localAffordances: { carriedItems: [], nearbyItems: [], nearbyActors: [], obviousOffers: [] },
+      mechanicsRequest: null,
+    };
     const result = openStewardTurn({
       playerText: 'look around',
       directorState: createDirectorState(),
       worldContext: {
-        telemetry: { player: { id: 'player-1' } },
-        observation: { player: { id: 'player-1' } },
+        routingSummary: {},
+        systemsContext,
       },
       pendingPrompt: null,
       telemetry: { player: { id: 'player-1' } },
@@ -62,15 +78,25 @@ describe('openStewardTurn', () => {
   });
 
   it('builds a systems council task for cardinal movement turns', () => {
+    const systemsContext: SystemsDesignerTaskContext = {
+      intent: 'general_systems',
+      executionMode: 'full_agent',
+      playerText: 'go north',
+      telemetry: { player: { id: 'player-1' } } as never,
+      observation: { player: { id: 'player-1' } } as never,
+      pendingPrompt: null,
+      nearby: { actors: [], itemsOnGround: [] },
+      travelCandidates: [],
+      landmarks: [],
+      localAffordances: { carriedItems: [], nearbyItems: [], nearbyActors: [], obviousOffers: [] },
+      mechanicsRequest: null,
+    };
     const result = openStewardTurn({
       playerText: 'go north',
       directorState: createDirectorState(),
       worldContext: {
-        telemetry: { player: { id: 'player-1' } },
-        observation: { player: { id: 'player-1' } },
-        travelCandidates: [],
-        nearby: { actors: [], itemsOnGround: [] },
-        landmarks: [],
+        routingSummary: {},
+        systemsContext,
       },
       pendingPrompt: null,
       telemetry: { player: { id: 'player-1' } },
@@ -124,6 +150,6 @@ describe('closeStewardTurn', () => {
 
     assert.equal(result.handled, true);
     assert.equal(result.narratorHandoff.kind, 'systems_v1');
-    assert.equal(result.trace.route, 'systems_council');
+    assert.equal(result.trace.route, 'council');
   });
 });

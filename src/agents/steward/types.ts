@@ -11,8 +11,8 @@
 
 import type { DirectorState, PendingPrompt, StewardMemory } from '../../sim/state';
 import type { WorldEvent } from '../../sim/events';
-import type { RejectedEventRecord } from '../../engine/session/types';
-import type { StewardContext } from '../../engine/contextBuilders';
+import type { CouncilArtifactRecord, RejectedEventRecord } from '../../engine/session/types';
+import type { StewardRoutingSummary } from '../../engine/contextBuilders';
 import type { GMAgendaUpdates } from '../gm/gmAgent';
 import type { GMDirectorUpdates } from '../gm/gmAgent';
 import type { CouncilDomain } from '../hierarchy/types';
@@ -64,11 +64,12 @@ export interface StewardCloseResult {
   rejectedEvents: RejectedEventRecord[];
   agendaUpdates: GMAgendaUpdates;
   directorUpdates: DirectorUpdates;
+  councilArtifacts: CouncilArtifactRecord[];
   narratorHandoff:
     | { kind: 'systems_v1'; packet: SystemsNarratorPacket }
     | { kind: 'legacy'; packet: null };
   trace: {
-    route: 'systems_council' | 'fallback_to_gm';
+    route: 'council' | 'fallback_to_steward';
     reason?: string;
     councilDomains: CouncilDomain[];
   };
@@ -108,33 +109,10 @@ export interface StewardFinishTurnInput {
 
 export interface StewardToolRuntime {
   inspect_world_summary(input: { question?: string | null }): Promise<unknown>;
-  inspect_scene_detail(input: { question?: string | null; focus?: string | null }): Promise<unknown>;
-  delegate_mechanics(input: {
-    playerText?: string | null;
-    objective?: string | null;
-    focus?: string | null;
-    deterministicOnly?: boolean | null;
-  }): Promise<unknown>;
-  consult_npc(input: { npcId: string; topic?: string | null }): Promise<unknown>;
-  consult_specialist(input: { specialistType: string; question: string; focus?: string | null }): Promise<unknown>;
-  propose_events(input: { events: WorldEvent[] }): Promise<unknown>;
-  resolve_mechanics(input: {
-    playerText?: string | null;
-    objective?: string | null;
-    focus?: string | null;
-    pendingPrompt?: unknown;
-  }): Promise<unknown>;
-  review_mechanics_resolution(input: {
-    resolutionId: string;
-    action: 'approve' | 'revise' | 'reject';
-    feedback?: string | null;
-  }): Promise<unknown>;
-  schedule_task(input: { task: string; actorId?: string | null; timeHint?: string | null }): Promise<unknown>;
-  review_schedule_resolution(input: {
-    scheduleResolutionId: string;
-    action: 'approve' | 'revise' | 'reject';
-    feedback?: string | null;
-  }): Promise<unknown>;
+  dispatch_character_task(input: { reason?: string | null; priority?: 'required' | 'optional' | null }): Promise<unknown>;
+  dispatch_world_task(input: { reason?: string | null; priority?: 'required' | 'optional' | null }): Promise<unknown>;
+  dispatch_systems_task(input: { reason?: string | null; priority?: 'required' | 'optional' | null }): Promise<unknown>;
+  inspect_council_results(input: { domains?: Array<'character' | 'world' | 'systems'> | null }): Promise<unknown>;
   finish_steward_turn(input: StewardFinishTurnInput): Promise<unknown>;
 }
 
@@ -143,7 +121,7 @@ export interface StewardAgentParams {
   model?: string;
   stewardReasoningEffort?: StewardReasoningEffort;
   playerText: string;
-  context: StewardContext;
+  context: StewardRoutingSummary;
   runtime: StewardToolRuntime;
   llm: LLMClient;
   maxIterations?: number;
@@ -151,7 +129,22 @@ export interface StewardAgentParams {
   trace?: {
     toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
     llmCalls?: Array<{
-      agent: 'gm' | 'steward' | 'legacy_gm' | 'observer' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule' | 'staff_interview';
+      agent:
+        | 'gm'
+        | 'steward'
+        | 'legacy_gm'
+        | 'observer'
+        | 'npc'
+        | 'narrator'
+        | 'specialist'
+        | 'mechanics'
+        | 'schedule'
+        | 'staff_interview'
+        | 'character_designer'
+        | 'world_designer'
+        | 'systems_designer'
+        | 'character_worker'
+        | 'world_worker';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;

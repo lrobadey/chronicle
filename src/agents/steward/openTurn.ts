@@ -1,7 +1,10 @@
 import { classifyTurn } from '../hierarchy';
-import type { MechanicsTravelCandidate } from '../mechanics';
 import type { StewardOpenInput, StewardOpenResult } from './types';
-import type { SystemsDesignerTaskContext } from '../council';
+import type {
+  CharacterDesignerTaskContext,
+  SystemsDesignerTaskContext,
+  WorldDesignerTaskContext,
+} from '../council';
 
 function inferSystemsIntent(playerText: string): SystemsDesignerTaskContext['intent'] | null {
   const text = playerText.trim().toLowerCase();
@@ -25,59 +28,83 @@ export function openStewardTurn(input: StewardOpenInput): StewardOpenResult {
     turnNumber: input.turnNumber,
   });
 
-  const systemsIntent = inferSystemsIntent(input.playerText);
   const worldContext = input.worldContext as {
-    telemetry: SystemsDesignerTaskContext['telemetry'];
-    observation: SystemsDesignerTaskContext['observation'];
-    travelCandidates?: MechanicsTravelCandidate[];
-    nearby?: { actors: unknown[]; itemsOnGround: unknown[] };
-    landmarks?: unknown[];
+    routingSummary?: unknown;
+    characterContext?: CharacterDesignerTaskContext;
+    worldDesignerContext?: WorldDesignerTaskContext;
+    systemsContext?: SystemsDesignerTaskContext;
   };
+  const councilTasks = [];
+  const systemsIntent = inferSystemsIntent(input.playerText);
 
-  return {
-    turnPlan,
-    councilTasks:
-      turnPlan.classification === 'simple_council' &&
-      turnPlan.requiredDomains.length === 1 &&
-      turnPlan.requiredDomains[0] === 'systems' &&
-      systemsIntent
-        ? [{
-            task: {
-              taskId: `systems-${input.turnNumber}`,
-              domain: 'systems',
-              directive:
-                systemsIntent === 'observation'
-                  ? 'Return a bounded read-only observation packet for narration.'
-                  : 'Resolve a safe cardinal movement through the mechanics path or request fallback.',
-              context: {
-                intent: systemsIntent,
-                playerText: input.playerText,
-                telemetry: worldContext.telemetry,
-                observation: worldContext.observation,
-                mechanicsRequest: systemsIntent === 'cardinal_movement'
-                  ? {
-                      playerText: input.playerText,
-                      pendingPrompt: input.pendingPrompt,
-                      telemetry: worldContext.telemetry,
-                      travelCandidates: worldContext.travelCandidates || [],
-                      nearby: worldContext.nearby || { actors: [], itemsOnGround: [] },
-                      landmarks: worldContext.landmarks || [],
-                      observation: worldContext.observation,
-                      localAffordances: {
-                        carriedItems: [],
-                        nearbyItems: [],
-                        nearbyActors: [],
-                        obviousOffers: [],
-                      },
-                    }
-                  : null,
-              } satisfies SystemsDesignerTaskContext,
-              priority: 'required',
-            },
-            directorState: input.directorState,
-            turnNumber: input.turnNumber,
-            playerText: input.playerText,
-          }]
-        : [],
-  };
+  if (turnPlan.classification !== 'steward_judgment') {
+    if (
+      (turnPlan.requiredDomains.includes('systems') || turnPlan.classification === 'deterministic') &&
+      worldContext.systemsContext
+    ) {
+      councilTasks.push({
+        task: {
+          taskId: `systems-${input.turnNumber}`,
+          domain: 'systems',
+          directive:
+            turnPlan.classification === 'deterministic'
+              ? 'Resolve the mechanically owned action through the systems domain.'
+              : systemsIntent === 'observation'
+                ? 'Return a bounded read-only observation packet for narration.'
+                : systemsIntent === 'cardinal_movement'
+                  ? 'Resolve a safe cardinal movement through the mechanics path or request fallback.'
+                  : 'Resolve the systems-owned portion of this turn.',
+          context: {
+            ...worldContext.systemsContext,
+            executionMode:
+              turnPlan.classification === 'deterministic' || systemsIntent === 'cardinal_movement'
+                ? 'direct_mechanics'
+                : worldContext.systemsContext.executionMode,
+            intent:
+              systemsIntent ||
+              (turnPlan.classification === 'deterministic' ? 'general_systems' : worldContext.systemsContext.intent),
+          } satisfies SystemsDesignerTaskContext,
+          priority: 'required',
+        },
+        directorState: input.directorState,
+        turnNumber: input.turnNumber,
+        playerText: input.playerText,
+      });
+    }
+
+    if (turnPlan.requiredDomains.includes('character') && worldContext.characterContext) {
+      councilTasks.push({
+        task: {
+          taskId: `character-${input.turnNumber}`,
+          domain: 'character',
+          directive: `Determine the relevant NPC response to: "${input.playerText}"`,
+          context: worldContext.characterContext,
+          priority: 'required',
+        },
+        directorState: input.directorState,
+        turnNumber: input.turnNumber,
+        playerText: input.playerText,
+      });
+    }
+
+    if (
+      (turnPlan.requiredDomains.includes('world') || turnPlan.optionalDomains.includes('world')) &&
+      worldContext.worldDesignerContext
+    ) {
+      councilTasks.push({
+        task: {
+          taskId: `world-${input.turnNumber}`,
+          domain: 'world',
+          directive: `Surface the most relevant scene and world motion for: "${input.playerText}"`,
+          context: worldContext.worldDesignerContext,
+          priority: turnPlan.requiredDomains.includes('world') ? 'required' : 'optional',
+        },
+        directorState: input.directorState,
+        turnNumber: input.turnNumber,
+        playerText: input.playerText,
+      });
+    }
+  }
+
+  return { turnPlan, councilTasks };
 }

@@ -1,5 +1,7 @@
 export type {
   CharacterDesignerTaskContext,
-  NpcCharacterOutput,
   CharacterDesignerResultDetail,
+  CharacterDesignerArtifact,
 } from './types';
+
+export { runCharacterDesignerTask } from './agent';

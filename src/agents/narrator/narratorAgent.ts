@@ -35,8 +35,23 @@ export interface NarratorParams {
   onNarrationDelta?: (delta: string) => void;
   debug?: DebugSink;
   trace?: {
-      llmCalls?: Array<{
-      agent: 'gm' | 'steward' | 'legacy_gm' | 'observer' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule' | 'staff_interview';
+    llmCalls?: Array<{
+      agent:
+        | 'gm'
+        | 'steward'
+        | 'legacy_gm'
+        | 'observer'
+        | 'npc'
+        | 'narrator'
+        | 'specialist'
+        | 'mechanics'
+        | 'schedule'
+        | 'staff_interview'
+        | 'character_designer'
+        | 'world_designer'
+        | 'systems_designer'
+        | 'character_worker'
+        | 'world_worker';
       responseId?: string;
       previousResponseId?: string;
       inputItems?: number;

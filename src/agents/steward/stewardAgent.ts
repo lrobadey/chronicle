@@ -9,15 +9,10 @@ import type { StewardAgentParams, StewardFinishTurnInput } from './types';
 
 const STEWARD_TOOL_NAMES = new Set([
   'inspect_world_summary',
-  'inspect_scene_detail',
-  'delegate_mechanics',
-  'consult_npc',
-  'consult_specialist',
-  'propose_events',
-  'resolve_mechanics',
-  'review_mechanics_resolution',
-  'schedule_task',
-  'review_schedule_resolution',
+  'dispatch_character_task',
+  'dispatch_world_task',
+  'dispatch_systems_task',
+  'inspect_council_results',
   'finish_steward_turn',
 ]);
 
@@ -40,60 +35,6 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
     input: { playerText, hasApiKey: Boolean(apiKey) },
     output: { ok: true },
   });
-
-  if (!apiKey) {
-    emitDebugEvent(debug, { type: 'steward.iteration.started', iteration: 1 });
-    const mechanicsOutput = await runtime.delegate_mechanics({ playerText, objective: 'Resolve a bounded local action if one is safe.' });
-    trace?.toolCalls.push({
-      tool: 'steward_preflight_mechanics',
-      input: { playerText, objective: 'Resolve a bounded local action if one is safe.' },
-      output: mechanicsOutput,
-    });
-    const mechanicsRecord = mechanicsOutput as Record<string, unknown>;
-    if (mechanicsRecord?.status === 'ok') {
-      const finish = await runtime.finish_steward_turn({
-        summary: typeof mechanicsRecord.summary === 'string' ? mechanicsRecord.summary : 'Steward resolved the turn through mechanics.',
-        candidateEvents: Array.isArray(mechanicsRecord.candidateEvents) ? mechanicsRecord.candidateEvents as StewardFinishTurnInput['candidateEvents'] : [],
-        playerPrompt: {
-          pending: mechanicsRecord.pendingPrompt as StewardFinishTurnInput['playerPrompt'] extends infer T
-            ? T extends { pending?: infer P } ? P : null
-            : null,
-          clear: mechanicsRecord.clearPendingPrompt === true,
-        },
-      });
-      trace?.toolCalls.push({ tool: 'finish_steward_turn', input: { summary: mechanicsRecord.summary }, output: finish });
-      return { finished: true };
-    }
-
-    const finish = await runtime.finish_steward_turn({ summary: 'No API key available; turn completed without world changes.' });
-    trace?.toolCalls.push({ tool: 'finish_steward_turn', input: { summary: 'no_api_key_fallback' }, output: finish });
-    return { finished: true };
-  }
-
-  const preflight = await runtime.delegate_mechanics({
-    playerText,
-    objective: 'Resolve a bounded local action if one is safe.',
-    deterministicOnly: true,
-  });
-  trace?.toolCalls.push({
-    tool: 'steward_preflight_mechanics',
-    input: { playerText, objective: 'Resolve a bounded local action if one is safe.' },
-    output: preflight,
-  });
-  const preflightRecord = preflight as Record<string, unknown>;
-  if (preflightRecord?.status === 'ok') {
-    await runtime.finish_steward_turn({
-      summary: typeof preflightRecord.summary === 'string' ? preflightRecord.summary : 'Steward resolved the turn through mechanics.',
-      candidateEvents: Array.isArray(preflightRecord.candidateEvents) ? preflightRecord.candidateEvents as StewardFinishTurnInput['candidateEvents'] : [],
-      playerPrompt: {
-        pending: preflightRecord.pendingPrompt as StewardFinishTurnInput['playerPrompt'] extends infer T
-          ? T extends { pending?: infer P } ? P : null
-          : null,
-        clear: preflightRecord.clearPendingPrompt === true,
-      },
-    });
-    return { finished: true };
-  }
 
   let previousResponseId: string | undefined;
   let pendingInput: ResponseInputItem[] = [
@@ -241,24 +182,14 @@ async function dispatchTool(
   switch (name) {
     case 'inspect_world_summary':
       return { output: await runtime.inspect_world_summary(args as Parameters<typeof runtime.inspect_world_summary>[0]), finished: false };
-    case 'inspect_scene_detail':
-      return { output: await runtime.inspect_scene_detail(args as Parameters<typeof runtime.inspect_scene_detail>[0]), finished: false };
-    case 'delegate_mechanics':
-      return { output: await runtime.delegate_mechanics(args as Parameters<typeof runtime.delegate_mechanics>[0]), finished: false };
-    case 'consult_npc':
-      return { output: await runtime.consult_npc(args as Parameters<typeof runtime.consult_npc>[0]), finished: false };
-    case 'consult_specialist':
-      return { output: await runtime.consult_specialist(args as Parameters<typeof runtime.consult_specialist>[0]), finished: false };
-    case 'propose_events':
-      return { output: await runtime.propose_events(args as Parameters<typeof runtime.propose_events>[0]), finished: false };
-    case 'resolve_mechanics':
-      return { output: await runtime.resolve_mechanics(args as Parameters<typeof runtime.resolve_mechanics>[0]), finished: false };
-    case 'review_mechanics_resolution':
-      return { output: await runtime.review_mechanics_resolution(args as Parameters<typeof runtime.review_mechanics_resolution>[0]), finished: false };
-    case 'schedule_task':
-      return { output: await runtime.schedule_task(args as Parameters<typeof runtime.schedule_task>[0]), finished: false };
-    case 'review_schedule_resolution':
-      return { output: await runtime.review_schedule_resolution(args as Parameters<typeof runtime.review_schedule_resolution>[0]), finished: false };
+    case 'dispatch_character_task':
+      return { output: await runtime.dispatch_character_task(args as Parameters<typeof runtime.dispatch_character_task>[0]), finished: false };
+    case 'dispatch_world_task':
+      return { output: await runtime.dispatch_world_task(args as Parameters<typeof runtime.dispatch_world_task>[0]), finished: false };
+    case 'dispatch_systems_task':
+      return { output: await runtime.dispatch_systems_task(args as Parameters<typeof runtime.dispatch_systems_task>[0]), finished: false };
+    case 'inspect_council_results':
+      return { output: await runtime.inspect_council_results(args as Parameters<typeof runtime.inspect_council_results>[0]), finished: false };
     case 'finish_steward_turn':
       return { output: await runtime.finish_steward_turn(args as unknown as StewardFinishTurnInput), finished: true };
   }

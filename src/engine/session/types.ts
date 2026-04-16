@@ -5,6 +5,29 @@ import type { NpcAgentOutput } from '../../agents/npc/npcAgent';
 import type { MechanicsDebugRecord, MechanicsResolution } from '../../agents/mechanics';
 import type { SpecialistConsultation, SpecialistType } from '../../agents/specialists';
 
+export type CouncilArtifactRecord =
+  | {
+      domain: 'character';
+      summary: string;
+      selectedNpcIds: string[];
+      privateIntentNotes: Array<{ npcId: string; note: string }>;
+      publicUtterances: Array<{ npcId: string; text: string; emotionalTone?: string }>;
+    }
+  | {
+      domain: 'world';
+      summary: string;
+      sceneMotionNotes: string[];
+      worldMotionNotes: string[];
+      surfacedThreadIds: string[];
+      surfacedPendingEventIds: string[];
+    }
+  | {
+      domain: 'systems';
+      summary: string;
+      narratorPacket?: unknown;
+      pendingPromptRecommendation?: PendingPrompt | null;
+    };
+
 export interface TurnSpeechRecord {
   speakerActorId: string;
   speakerName: string;
@@ -68,6 +91,7 @@ export interface TurnRecord {
   pendingPrompt?: PendingPrompt;
   acceptedEvents: WorldEvent[];
   rejectedEvents: RejectedEventRecord[];
+  councilArtifacts?: CouncilArtifactRecord[];
   npcOutputs?: NpcAgentOutput[];
   turnSpeech?: TurnSpeechRecord[];
   specialistOutputs?: SpecialistConsultation[];
@@ -78,11 +102,27 @@ export interface TurnRecord {
 
 export interface TurnTrace {
   toolCalls: Array<{ tool: string; input: unknown; output: unknown }>;
+  councilArtifacts?: CouncilArtifactRecord[];
   mechanicsResolutions?: MechanicsResolution[];
   mechanicsDebug?: MechanicsDebugRecord[];
   specialistOutputs?: SpecialistConsultation[];
   llmCalls?: Array<{
-    agent: 'gm' | 'steward' | 'legacy_gm' | 'observer' | 'npc' | 'narrator' | 'specialist' | 'mechanics' | 'schedule' | 'staff_interview';
+    agent:
+      | 'gm'
+      | 'steward'
+      | 'legacy_gm'
+      | 'observer'
+      | 'npc'
+      | 'narrator'
+      | 'specialist'
+      | 'mechanics'
+      | 'schedule'
+      | 'staff_interview'
+      | 'character_designer'
+      | 'world_designer'
+      | 'systems_designer'
+      | 'character_worker'
+      | 'world_worker';
     responseId?: string;
     previousResponseId?: string;
     inputItems?: number;

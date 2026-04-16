@@ -21,3 +21,4 @@ export type {
 
 export { CouncilRegistry } from './registry';
 export { classifyTurn } from './turnPlan';
+export { classifyPromptReply } from './promptReply';

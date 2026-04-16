@@ -17,6 +17,11 @@ import { estimateTravel, LONG_TRAVEL_MINUTES } from '../sim/systems/travel';
 import { getItemPlacement, summarizeItemComponents, type ItemComponentSummary } from '../sim/spine';
 import { distance } from '../sim/utils';
 import type { SpecialistType } from '../agents/specialists';
+import type {
+  CharacterDesignerTaskContext,
+  WorldDesignerTaskContext,
+  SystemsDesignerTaskContext,
+} from '../agents/council';
 
 export interface PlayerTranscriptEntry {
   turn: number;
@@ -150,6 +155,15 @@ export interface StewardContext {
   telemetry: StewardTelemetrySummary;
   directorState: WorldState['directorState'];
   stewardMemory: StewardMemory;
+  sceneSummary: StewardSceneSummary;
+  worldSummary: StewardWorldSummary;
+}
+
+export interface StewardRoutingSummary {
+  playerText: string;
+  turnNumber: number;
+  pendingPrompt: PendingPrompt | null;
+  telemetry: StewardTelemetrySummary;
   sceneSummary: StewardSceneSummary;
   worldSummary: StewardWorldSummary;
 }
@@ -355,6 +369,162 @@ export function buildStewardContext(params: {
       escalationHooks: state.directorState.world.escalationHooks,
       heldBeatNotes: state.directorState.heldBeats.map(beat => beat.note),
       pendingEventSummaries: state.directorState.pendingWorldEvents.map(event => event.summary),
+    },
+  };
+}
+
+export function buildStewardRoutingSummary(params: {
+  state: WorldState;
+  playerId: string;
+  playerText: string;
+  nextTurn: number;
+  turnHistory: TurnRecord[];
+  pendingPrompt: PendingPrompt | null;
+}): StewardRoutingSummary {
+  const context = buildStewardContext(params);
+  return {
+    playerText: context.playerText,
+    turnNumber: context.turnNumber,
+    pendingPrompt: context.pendingPrompt,
+    telemetry: context.telemetry,
+    sceneSummary: context.sceneSummary,
+    worldSummary: context.worldSummary,
+  };
+}
+
+export function buildCharacterDesignerContext(params: {
+  state: WorldState;
+  playerId: string;
+  playerText: string;
+  nextTurn: number;
+  turnHistory: TurnRecord[];
+  pendingPrompt: PendingPrompt | null;
+}): CharacterDesignerTaskContext {
+  const gmWorldContext = buildGMWorldContext(params);
+  const player = params.state.actors[params.playerId];
+  const nearbyNpcs = gmWorldContext.nearby.actors.flatMap(actor => {
+    const fullActor = params.state.actors[actor.id];
+    if (!fullActor || fullActor.kind !== 'npc') return [];
+    const factionMemberships = Object.values(params.state.factions)
+      .filter(faction => faction.memberIds.includes(fullActor.id))
+      .map(faction => ({
+        factionId: faction.id,
+        factionName: faction.name,
+        playerStanding: player.factionStandings?.[faction.id] ?? null,
+      }));
+    return [{
+      npcId: fullActor.id,
+      name: fullActor.name,
+      distanceMeters: actor.distanceMeters,
+      tags: fullActor.tags || [],
+      persona: fullActor.persona || null,
+      relationships: Object.entries(fullActor.relationships || {}).map(([actorId, relationship]) => ({
+        actorId,
+        actorName: params.state.actors[actorId]?.name || actorId,
+        trust: relationship.trust,
+        fear: relationship.fear,
+        affinity: relationship.affinity,
+      })),
+      factionMemberships,
+    }];
+  });
+
+  return {
+    playerText: params.playerText,
+    pendingPrompt: params.pendingPrompt,
+    sceneObservation: gmWorldContext.observation,
+    recentTurns: gmWorldContext.recentTurns,
+    nearbyNpcs,
+    conversationHistory: buildNPCConversationContext(params).conversationHistory,
+    factionContext: {
+      relevantFactionIds: [...new Set(nearbyNpcs.flatMap(npc => npc.factionMemberships.map(faction => faction.factionId)))],
+      playerStandings: player.factionStandings || {},
+    },
+  };
+}
+
+export function buildWorldDesignerContext(params: {
+  state: WorldState;
+  playerId: string;
+  playerText: string;
+  nextTurn: number;
+  turnHistory: TurnRecord[];
+  pendingPrompt: PendingPrompt | null;
+}): WorldDesignerTaskContext {
+  const specialistWorld = buildSpecialistContext({
+    ...params,
+    specialistType: 'world',
+  });
+  return {
+    playerText: params.playerText,
+    pendingPrompt: params.pendingPrompt,
+    sceneAgenda: params.state.directorState.scene,
+    worldAgenda: params.state.directorState.world,
+    activeThreads: params.state.directorState.activeThreads,
+    heldBeats: params.state.directorState.heldBeats,
+    pendingWorldEvents: params.state.directorState.pendingWorldEvents,
+    worldSnapshot: specialistWorld.worldSnapshot,
+    recentTurns: specialistWorld.recentTurns,
+  };
+}
+
+export function buildSystemsDesignerContext(params: {
+  state: WorldState;
+  playerId: string;
+  playerText: string;
+  nextTurn: number;
+  turnHistory: TurnRecord[];
+  pendingPrompt: PendingPrompt | null;
+}): SystemsDesignerTaskContext {
+  const gmWorldContext = buildGMWorldContext(params);
+  const player = params.state.actors[params.playerId];
+  const carriedItems = player.inventory.map(itemId => ({
+    id: itemId,
+    name: params.state.items[itemId]?.name || itemId,
+    components: params.state.items[itemId]?.components,
+  }));
+  const nearbyItems = gmWorldContext.nearby.itemsOnGround.map(item => ({
+    id: item.id,
+    name: item.name,
+    distanceMeters: item.distanceMeters,
+    portable: true,
+    components: item.components,
+  }));
+  const nearbyActors = gmWorldContext.nearby.actors.map(actor => ({
+    id: actor.id,
+    name: actor.name,
+    distanceMeters: actor.distanceMeters,
+    inventory: (params.state.actors[actor.id]?.inventory || []).map(itemId => ({
+      id: itemId,
+      name: params.state.items[itemId]?.name || itemId,
+    })),
+  }));
+  const localAffordances = {
+    carriedItems,
+    nearbyItems,
+    nearbyActors,
+    obviousOffers: [],
+  };
+  return {
+    intent: 'general_systems',
+    executionMode: 'full_agent',
+    playerText: params.playerText,
+    telemetry: gmWorldContext.telemetry,
+    observation: gmWorldContext.observation,
+    pendingPrompt: params.pendingPrompt,
+    nearby: gmWorldContext.nearby,
+    travelCandidates: gmWorldContext.travelCandidates,
+    landmarks: gmWorldContext.landmarks,
+    localAffordances,
+    mechanicsRequest: {
+      playerText: params.playerText,
+      pendingPrompt: params.pendingPrompt,
+      telemetry: gmWorldContext.telemetry,
+      travelCandidates: gmWorldContext.travelCandidates,
+      nearby: gmWorldContext.nearby,
+      landmarks: gmWorldContext.landmarks,
+      observation: gmWorldContext.observation,
+      localAffordances,
     },
   };
 }
@@ -625,21 +795,21 @@ export function buildNPCConversationContext(params: {
       source: 'playerText',
     });
 
-    const speechRecords = (turn.turnSpeech && turn.turnSpeech.length)
+    const speechRecords = turn.turnSpeech && turn.turnSpeech.length
       ? turn.turnSpeech
-      : (turn.npcOutputs || []).map<TurnSpeechRecord | null>(npcOutput => {
+      : (turn.npcOutputs || []).flatMap<TurnSpeechRecord>(npcOutput => {
           const text = npcOutput.publicUtterance.trim();
-          if (!text) return null;
+          if (!text) return [];
           const speakerName = state.actors[npcOutput.npcId]?.name || npcOutput.npcId;
-          return {
+          return [{
             speakerActorId: npcOutput.npcId,
             speakerName,
             text,
             recipientActorIds: [],
             recipientNames: [],
-            source: 'npc_consult',
-          };
-        }).filter((record): record is TurnSpeechRecord => Boolean(record));
+            source: 'npc_consult' as const,
+          }];
+        });
 
     for (const speech of speechRecords) {
       pushTranscriptEntry(conversationHistory, {

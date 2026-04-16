@@ -1,12 +1,13 @@
 export type {
   WorldDesignerTaskContext,
   WorldDesignerResultDetail,
+  WorldDesignerArtifact,
 } from './worldDesigner';
 
 export type {
   CharacterDesignerTaskContext,
-  NpcCharacterOutput,
   CharacterDesignerResultDetail,
+  CharacterDesignerArtifact,
 } from './characterDesigner';
 
 export type {
@@ -16,4 +17,6 @@ export type {
   SystemsTurnIntent,
 } from './systemsDesigner';
 
+export { runCharacterDesignerTask } from './characterDesigner';
+export { runWorldDesignerTask } from './worldDesigner';
 export { runSystemsDesignerTask } from './systemsDesigner';

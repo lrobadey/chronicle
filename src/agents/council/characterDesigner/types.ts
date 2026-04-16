@@ -1,79 +1,101 @@
-/**
- * Character Designer (Council) — domain-specific task and result types.
- *
- * Owns: NPC personas, relationships, private intentions, dialogue posture,
- * moods, social dynamics.
- *
- * Should produce per NPC per scene: a public utterance and a private intent.
- * The public utterance surfaces through narration or direct speech.
- * The private intent is retained for governance without leaking to the player.
- *
- * Evolves from the current NPC agent in src/agents/npc/.
- */
+import type { ConversationTranscriptEntry } from '../../../engine/contextBuilders';
+import type { RecentTurnDigest } from '../../../engine/session/types';
+import type { WorldEvent } from '../../../sim/events';
+import type { PendingPrompt } from '../../../sim/state';
 
-// ---------------------------------------------------------------------------
-// Task context — what the Steward sends
-// ---------------------------------------------------------------------------
-
-/** Domain-scoped context for a Character Designer task. */
-export interface CharacterDesignerTaskContext {
-  /** NPC IDs the Steward wants consulted for this turn. */
-  targetNpcIds: string[];
-  /** Relationship queries to resolve (e.g. faction dynamics, social tension). */
-  relationshipQueries: string[];
-  /** Dialogue direction from the Steward (topic, tone, urgency). */
-  dialogueDirection: {
-    topic?: string;
-    desiredTone?: string;
-    urgency?: 'low' | 'medium' | 'high';
+export interface CharacterSceneNpc {
+  npcId: string;
+  name: string;
+  distanceMeters: number;
+  tags: string[];
+  persona: {
+    tagline: string;
+    background: string;
+    voice: string;
+    goals: string[];
   } | null;
-  /** Scene-scoped observation for NPC awareness. */
+  relationships: Array<{
+    actorId: string;
+    actorName: string;
+    trust: number;
+    fear: number;
+    affinity: number;
+  }>;
+  factionMemberships: Array<{
+    factionId: string;
+    factionName: string;
+    playerStanding: number | null;
+  }>;
+}
+
+export interface CharacterDesignerTaskContext {
+  playerText: string;
+  pendingPrompt: PendingPrompt | null;
   sceneObservation: unknown;
-  /** Conversation history relevant to this turn. */
-  conversationHistory: unknown;
-  /**
-   * Faction context the Steward provides so the Character Designer can
-   * reason about inter-faction dynamics and the player's standing with
-   * each faction present in the scene.
-   */
-  factionContext?: {
-    /** Faction IDs relevant to this scene (members present or topic of conversation). */
+  recentTurns: RecentTurnDigest[];
+  nearbyNpcs: CharacterSceneNpc[];
+  conversationHistory: ConversationTranscriptEntry[];
+  factionContext: {
     relevantFactionIds: string[];
-    /** The player's current standing with each relevant faction. */
     playerStandings: Record<string, number>;
   };
 }
 
-// ---------------------------------------------------------------------------
-// Result detail — what the Character Designer returns
-// ---------------------------------------------------------------------------
-
-/** A single NPC's output from the Character Designer. */
-export interface NpcCharacterOutput {
-  npcId: string;
-  /** What can surface through narration or direct speech. */
-  publicUtterance: string;
-  /** What governance and future reasoning can retain (never shown to player). */
-  privateIntent: string;
-  emotionalTone: string;
+export interface CharacterSelectionResult {
+  npcIds: string[];
+  confidence: number;
+  rationale: string;
 }
 
-/** Domain-specific detail in the Character Designer's council result. */
+export interface CharacterReplyDraft {
+  publicUtterance: string;
+  emotionalTone: string | null;
+}
+
+export interface CharacterIntentDraft {
+  privateIntent: string;
+}
+
 export interface CharacterDesignerResultDetail {
-  npcOutputs: NpcCharacterOutput[];
-  /**
-   * Relationship changes observed or recommended.
-   * When factionId is present the change is to the actor's faction standing
-   * (proposed as a ModifyReputation event); otherwise it is a bilateral NPC
-   * relationship update (trust / fear / affinity).
-   */
-  relationshipUpdates: Array<{
-    fromActorId: string;
-    toActorId: string;
-    change: string;
-    /** Present when the change should be recorded as a ModifyReputation event. */
-    factionId?: string;
-    /** Numeric delta for faction standing changes. Positive = improve, negative = worsen. */
-    standingDelta?: number;
+  selectedNpcIds: string[];
+  privateIntentNotes: Array<{ npcId: string; note: string }>;
+  relationshipNotes: Array<{ npcId: string; note: string }>;
+  artifacts: Array<{
+    npcId: string;
+    publicUtterance: string;
+    emotionalTone?: string;
+    privateIntent: string;
   }>;
+}
+
+export interface CharacterDesignerArtifact {
+  domain: 'character';
+  summary: string;
+  selectedNpcIds: string[];
+  privateIntentNotes: Array<{ npcId: string; note: string }>;
+  publicUtterances: Array<{ npcId: string; text: string; emotionalTone?: string }>;
+}
+
+export interface CharacterCouncilToolRuntime {
+  inspect_character_scene(input: { question?: string | null; focusNpcId?: string | null }): Promise<unknown>;
+  inspect_conversation_history(input: { limit?: number | null }): Promise<unknown>;
+  inspect_relationship_state(input: { npcId?: string | null }): Promise<unknown>;
+  inspect_faction_context(input: { npcId?: string | null }): Promise<unknown>;
+  worker_select_npc(input: { playerText?: string | null; maxCandidates?: number | null }): Promise<CharacterSelectionResult>;
+  worker_draft_npc_reply(input: { npcId: string }): Promise<CharacterReplyDraft>;
+  worker_draft_private_intent(input: { npcId: string }): Promise<CharacterIntentDraft>;
+  emit_character_result(input: {
+    summary: string;
+    candidateEvents: WorldEvent[];
+    selectedNpcIds: string[];
+    privateIntentNotes: Array<{ npcId: string; note: string }>;
+    relationshipNotes?: Array<{ npcId: string; note: string }> | null;
+    artifacts: Array<{
+      npcId: string;
+      publicUtterance: string;
+      emotionalTone?: string | null;
+      privateIntent: string;
+    }>;
+    warnings?: string[] | null;
+  }): Promise<unknown>;
 }

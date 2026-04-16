@@ -2,6 +2,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { JsonlSessionStore } from './session/jsonlStore';
 import type {
+  CouncilArtifactRecord,
   RejectedEventRecord,
   SessionStore,
   TurnSpeechRecord,
@@ -53,7 +54,13 @@ import {
   type StaffInterviewMessage,
   type StaffInterviewResult,
 } from '../agents/staffInterview';
-import { runSystemsDesignerTask, type SystemsDesignerResultDetail, type SystemsNarratorPacket } from '../agents/council';
+import {
+  runCharacterDesignerTask,
+  runSystemsDesignerTask,
+  runWorldDesignerTask,
+  type SystemsDesignerResultDetail,
+  type SystemsNarratorPacket,
+} from '../agents/council';
 import {
   finalizeSpecialistConsultations,
   runSpecialistAgent,
@@ -83,7 +90,8 @@ import {
   type StewardReasoningEffort,
 } from '../agents/steward';
 import type { CouncilToStewardPacket } from '../agents/hierarchy/packets';
-import type { CouncilTask } from '../agents/hierarchy/types';
+import type { CouncilDomain, CouncilResult, CouncilTask } from '../agents/hierarchy/types';
+import { classifyPromptReply } from '../agents/hierarchy/promptReply';
 import { resolveWorldModule } from '../worlds/registry';
 import { describeWorldModule, type WorldModule, type WorldPresentation } from '../worlds/types';
 import type { DebugSink } from './debug';
@@ -91,8 +99,12 @@ import { emitDebugEvent } from './debug';
 import {
     buildOpeningContext,
     buildOpeningRecap,
+    buildCharacterDesignerContext,
     buildGMWorldContext,
     buildStewardContext,
+    buildStewardRoutingSummary,
+    buildSystemsDesignerContext,
+    buildWorldDesignerContext,
     buildNPCConversationContext,
   buildRecentSpeechDigests,
   buildRecentTurnDigests,
@@ -302,13 +314,10 @@ export class TurnEngine {
     const nextTurn = draft.meta.turn + 1;
     const acceptedEvents: WorldEvent[] = [];
     const rejectedEvents: RejectedEventRecord[] = [];
+    const councilArtifacts: CouncilArtifactRecord[] = [];
     const npcOutputs: NpcAgentOutput[] = [];
     const turnSpeech: TurnSpeechRecord[] = [];
     const specialistOutputs: Array<Omit<SpecialistConsultation, 'usedSuggestion' | 'usedCandidateEvents'>> = [];
-    const mechanicsResolutions = new Map<string, MechanicsResolutionRecord>();
-    let activeMechanicsResolutionId: string | null = null;
-    const scheduleResolutions = new Map<string, ScheduleResolutionRecord>();
-    let activeScheduleResolutionId: string | null = null;
     let systemsNarratorPacket: SystemsNarratorPacket | null = null;
     const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [], llmCalls: [] } : undefined;
     draft.meta.turn = nextTurn;
@@ -380,16 +389,6 @@ export class TurnEngine {
       }
       draft = stagedState;
       return { ok: true, accepted: acceptedEvents.length, rejected: rejectedEvents.length };
-    };
-
-    const requiresMechanicsReview = (events: WorldEvent[]) => {
-      if (!activeMechanicsResolutionId) return false;
-      return events.some(event => isSimpleMechanicsEvent(event));
-    };
-
-    const requiresScheduleReview = (events: WorldEvent[]) => {
-      if (!activeScheduleResolutionId) return false;
-      return events.some(event => event.type === 'ScheduleProcess' || event.type === 'SetNpcSchedule');
     };
 
     const buildActiveGMWorldContext = (
@@ -473,6 +472,80 @@ export class TurnEngine {
       };
     };
 
+    const buildCouncilContextBundle = (
+      pendingPrompt: PendingPrompt | null = currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
+    ) => {
+      const baseParams = {
+        state: draft,
+        playerId,
+        playerText,
+        nextTurn,
+        turnHistory,
+        pendingPrompt,
+      };
+      const systemsBase = buildSystemsDesignerContext(baseParams);
+      return {
+        routingSummary: buildStewardRoutingSummary(baseParams),
+        characterContext: buildCharacterDesignerContext(baseParams),
+        worldDesignerContext: buildWorldDesignerContext(baseParams),
+        systemsContext: {
+          ...systemsBase,
+          localAffordances: buildMechanicsLocalAffordances(draft, playerId),
+          mechanicsRequest: buildMechanicsRequest({
+            playerText,
+            pendingPrompt,
+          }),
+        },
+      };
+    };
+
+    const dispatchCouncilTask = async (
+      packet: { task: CouncilTask<CouncilDomain> },
+    ): Promise<CouncilToStewardPacket<CouncilDomain>> => {
+      const startedAt = Date.now();
+      let result: CouncilResult<CouncilDomain>;
+      switch (packet.task.domain) {
+        case 'character':
+          result = await runCharacterDesignerTask(packet.task as CouncilTask<'character'>, {
+            apiKey,
+            llm: this.llm,
+            turnNumber: nextTurn,
+            trace,
+          });
+          break;
+        case 'world':
+          result = await runWorldDesignerTask(packet.task as CouncilTask<'world'>, {
+            apiKey,
+            llm: this.llm,
+            turnNumber: nextTurn,
+            trace,
+          });
+          break;
+        case 'systems':
+        default:
+          result = await runSystemsDesignerTask(packet.task as CouncilTask<'systems'>, {
+            apiKey,
+            llm: this.llm,
+            turnNumber: nextTurn,
+            trace,
+          });
+          break;
+      }
+      trace?.toolCalls.push({
+        tool: 'dispatch_council_task',
+        input: { taskId: packet.task.taskId, domain: packet.task.domain, directive: packet.task.directive },
+        output: {
+          summary: result.summary,
+          proposedEvents: result.proposedEvents.length,
+          warnings: result.warnings,
+        },
+      });
+      return {
+        result,
+        executionMs: Date.now() - startedAt,
+      };
+    };
+
     const pushMechanicsTrace = (resolution: MechanicsResolution) => {
       if (!trace) return;
       trace.mechanicsResolutions = trace.mechanicsResolutions || [];
@@ -491,15 +564,6 @@ export class TurnEngine {
       events: resolution.events,
       clarificationNeeded: resolution.clarificationNeeded,
     });
-
-    const applyApprovedMechanicsResolution = (resolution: MechanicsResolution) => {
-      const result = applyProposedEvents(resolution.candidateEvents || []);
-      if (resolution.pendingPrompt) {
-        draft.meta.pendingPrompt = resolution.pendingPrompt;
-        currentPendingPrompt = resolution.pendingPrompt;
-      }
-      return result;
-    };
 
     const effectiveStewardReasoningEffort = stewardReasoningEffort ?? gmReasoningEffort ?? 'low';
     let pendingLegacyArtifacts: null | {
@@ -520,8 +584,68 @@ export class TurnEngine {
       directorUpdates: proposal.directorUpdates,
     });
 
+    const stewardCouncilResults: CouncilToStewardPacket<CouncilDomain>[] = [];
+    let stewardCouncilDispatches = 0;
+
+    const appendCouncilArtifacts = (artifacts: CouncilArtifactRecord[]) => {
+      for (const artifact of artifacts) {
+        const exists = councilArtifacts.some(existing => JSON.stringify(existing) === JSON.stringify(artifact));
+        if (!exists) councilArtifacts.push(artifact);
+      }
+    };
+
+    const createAdHocCouncilPacket = (
+      domain: CouncilDomain,
+      priority: 'required' | 'optional' = 'required',
+      reason?: string | null,
+    ) => {
+      const bundle = buildCouncilContextBundle();
+      switch (domain) {
+        case 'character':
+          return {
+            task: {
+              taskId: `character-${nextTurn}-${stewardCouncilDispatches}`,
+              domain,
+              directive: reason?.trim() || `Determine the relevant NPC response to: "${playerText}"`,
+              context: bundle.characterContext,
+              priority,
+            },
+            directorState: draft.directorState,
+            turnNumber: nextTurn,
+            playerText,
+          } as const;
+        case 'world':
+          return {
+            task: {
+              taskId: `world-${nextTurn}-${stewardCouncilDispatches}`,
+              domain,
+              directive: reason?.trim() || `Surface the most relevant world motion for: "${playerText}"`,
+              context: bundle.worldDesignerContext,
+              priority,
+            },
+            directorState: draft.directorState,
+            turnNumber: nextTurn,
+            playerText,
+          } as const;
+        case 'systems':
+        default:
+          return {
+            task: {
+              taskId: `systems-${nextTurn}-${stewardCouncilDispatches}`,
+              domain: 'systems' as const,
+              directive: reason?.trim() || `Resolve the systems-owned portion of: "${playerText}"`,
+              context: bundle.systemsContext,
+              priority,
+            },
+            directorState: draft.directorState,
+            turnNumber: nextTurn,
+            playerText,
+          };
+      }
+    };
+
     const buildWorldSummaryPacket = (question?: string | null) => {
-      const context = buildStewardContext({
+      const context = buildStewardRoutingSummary({
         state: draft,
         playerId,
         playerText,
@@ -540,104 +664,8 @@ export class TurnEngine {
         ].filter(Boolean).join(' '),
         sceneSummary: context.sceneSummary,
         worldSummary: context.worldSummary,
-        stewardMemory: context.stewardMemory,
         telemetry: context.telemetry,
         pendingPrompt: context.pendingPrompt,
-      };
-    };
-
-    const buildSceneDetailPacket = (question?: string | null, focus?: string | null) => {
-      const observation = buildObservation(draft, playerId);
-      const localAffordances = buildMechanicsLocalAffordances(draft, playerId);
-      return {
-        ok: true,
-        question: question || null,
-        focus: focus || null,
-        summary: [
-          `Local scene at ${draft.meta.turn === nextTurn ? 'the active turn state' : 'current state'} around ${buildTelemetry(draft, playerId).location.name}.`,
-          observation.nearbyActors.length ? `Nearby actors: ${observation.nearbyActors.slice(0, 4).map(actor => actor.name).join(', ')}.` : 'No nearby actors of note.',
-          observation.nearbyItems.length ? `Nearby items: ${observation.nearbyItems.slice(0, 4).map(item => item.name).join(', ')}.` : 'No nearby items of note.',
-        ].join(' '),
-        observation: {
-          time: observation.time,
-          weather: observation.weather,
-          tide: observation.tide,
-          constraints: observation.constraints,
-          player: observation.player,
-          nearbyLocations: observation.nearbyLocations.slice(0, 8),
-          nearbyActors: observation.nearbyActors.slice(0, 8),
-          nearbyItems: observation.nearbyItems.slice(0, 8),
-          ledgerTail: observation.ledgerTail,
-        },
-        localAffordances,
-      };
-    };
-
-    const buildMechanicsDelegation = async (input: {
-      playerText?: string | null;
-      objective?: string | null;
-      focus?: string | null;
-      deterministicOnly?: boolean | null;
-    }) => {
-      const resolvedPlayerText =
-        typeof input.playerText === 'string' && input.playerText.trim() ? input.playerText : playerText;
-      const pendingResolution = resolvePendingPromptReply(currentPendingPrompt, resolvedPlayerText, playerId);
-      if (pendingResolution) {
-        return {
-          ok: true,
-          status: 'ok',
-          summary: pendingResolution.handled === 'confirm_travel_yes'
-            ? 'Confirmed the pending travel choice.'
-            : 'Declined the pending travel choice.',
-          candidateEvents: pendingResolution.events,
-          pendingPrompt: null,
-          clearPendingPrompt: pendingResolution.clearPrompt,
-          confidence: 1,
-          warnings: [],
-        };
-      }
-      if (currentPendingPrompt) {
-        return {
-          ok: false,
-          status: 'pending_prompt_requires_resolution',
-          summary: 'A pending prompt must be answered before resolving a different action.',
-          candidateEvents: [],
-          pendingPrompt: currentPendingPrompt,
-          clearPendingPrompt: false,
-          confidence: 1,
-          warnings: ['pending_prompt_requires_resolution'],
-        };
-      }
-
-      const request = buildMechanicsRequest({
-        playerText: resolvedPlayerText,
-        objective: input.objective,
-        focus: input.focus,
-      });
-      const draftResolution = await runMechanicsAgent({
-        apiKey: input.deterministicOnly ? undefined : apiKey,
-        request,
-        llm: this.llm,
-        debug: emit,
-        trace,
-      });
-      const resolution = attachResolutionMetadata(
-        draftResolution,
-        createRuntimeId(),
-        request.pendingPrompt,
-        nextTurn,
-      );
-      pushMechanicsTrace(resolution);
-      return {
-        ok: resolution.status === 'ok',
-        status: resolution.status,
-        interpretation: resolution.interpretation,
-        summary: resolution.summary,
-        candidateEvents: resolution.candidateEvents,
-        pendingPrompt: resolution.pendingPrompt,
-        clearPendingPrompt: false,
-        confidence: resolution.confidence,
-        warnings: resolution.warnings,
       };
     };
 
@@ -788,24 +816,6 @@ export class TurnEngine {
           return output;
         },
         propose_events: async (input: { events: WorldEvent[] }) => {
-          if (localActiveMechanicsResolutionId && requiresMechanicsReview(input.events || [])) {
-            const active = localMechanicsResolutions.get(localActiveMechanicsResolutionId);
-            return {
-              ok: false,
-              error: 'mechanics_review_required',
-              resolutionId: localActiveMechanicsResolutionId,
-              summary: active?.resolution.summary,
-            };
-          }
-          if (localActiveScheduleResolutionId && requiresScheduleReview(input.events || [])) {
-            const active = localScheduleResolutions.get(localActiveScheduleResolutionId);
-            return {
-              ok: false,
-              error: 'schedule_review_required',
-              scheduleResolutionId: localActiveScheduleResolutionId,
-              summary: active?.resolution.rationale,
-            };
-          }
           return { ok: true, ...applyProposalEvents(input.events || []) };
         },
         resolve_mechanics: async (input: { playerText?: string | null; objective?: string | null; focus?: string | null; pendingPrompt?: PendingPrompt | null }) => {
@@ -1067,232 +1077,33 @@ export class TurnEngine {
 
     const stewardRuntime = {
       inspect_world_summary: async (input: { question?: string | null }) => buildWorldSummaryPacket(input.question),
-      inspect_scene_detail: async (input: { question?: string | null; focus?: string | null }) =>
-        buildSceneDetailPacket(input.question, input.focus),
-      delegate_mechanics: async (input: { playerText?: string | null; objective?: string | null; focus?: string | null; deterministicOnly?: boolean | null }) =>
-        buildMechanicsDelegation(input),
-      consult_npc: async (input: { npcId: string; topic?: string | null }) => {
-        const npc = draft.actors[input.npcId];
-        if (!npc || npc.kind !== 'npc' || !npc.persona) {
-          return { error: 'npc_not_found' };
-        }
-        const npcContext = buildNPCConversationContext({ state: draft, turnHistory, playerId, playerText, nextTurn });
-        const output = await runNpcAgent({
-          apiKey,
-          npcId: npc.id,
-          persona: {
-            name: npc.name,
-            tagline: npc.persona.tagline,
-            background: npc.persona.background,
-            voice: npc.persona.voice,
-            goals: npc.persona.goals,
-          },
-          observation: buildObservation(draft, playerId),
-          conversationHistory: npcContext.conversationHistory,
-          olderTurnsSummary: npcContext.olderTurnsSummary,
-          currentTurn: { turn: nextTurn, playerId },
-          llm: this.llm,
-          debug: undefined,
-          trace,
-        });
-        npcOutputs.push(output);
-        const speech = buildNpcConsultSpeechRecord(draft, output, playerId);
-        if (speech) turnSpeech.push(speech);
-        return output;
+      dispatch_character_task: async (input: { reason?: string | null; priority?: 'required' | 'optional' | null }) => {
+        stewardCouncilDispatches += 1;
+        const packet = createAdHocCouncilPacket('character', input.priority || 'required', input.reason);
+        const result = await dispatchCouncilTask(packet);
+        stewardCouncilResults.push(result);
+        return { ok: true, domain: 'character', result: result.result };
       },
-      consult_specialist: async (input: { specialistType: SpecialistType; question: string; focus?: string | null }) => {
-        const output = await runSpecialistAgent({
-          apiKey,
-          specialistType: input.specialistType,
-          question: input.question,
-          focus: input.focus || undefined,
-          context: buildSpecialistContext({
-            state: draft,
-            playerId,
-            playerText,
-            nextTurn,
-            turnHistory,
-            specialistType: input.specialistType,
-            pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
-          }),
-          llm: this.llm,
-          debug: undefined,
-          trace,
-        });
-        specialistOutputs.push({
-          specialistType: input.specialistType,
-          question: input.question,
-          focus: input.focus || undefined,
-          output,
-        });
-        return output;
+      dispatch_world_task: async (input: { reason?: string | null; priority?: 'required' | 'optional' | null }) => {
+        stewardCouncilDispatches += 1;
+        const packet = createAdHocCouncilPacket('world', input.priority || 'required', input.reason);
+        const result = await dispatchCouncilTask(packet);
+        stewardCouncilResults.push(result);
+        return { ok: true, domain: 'world', result: result.result };
       },
-      propose_events: async (input: { events: WorldEvent[] }) => {
-        if (activeMechanicsResolutionId && requiresMechanicsReview(input.events || [])) {
-          const active = mechanicsResolutions.get(activeMechanicsResolutionId);
-          return { ok: false, error: 'mechanics_review_required', resolutionId: activeMechanicsResolutionId, summary: active?.resolution.summary };
-        }
-        if (activeScheduleResolutionId && requiresScheduleReview(input.events || [])) {
-          const active = scheduleResolutions.get(activeScheduleResolutionId);
-          return { ok: false, error: 'schedule_review_required', scheduleResolutionId: activeScheduleResolutionId, summary: active?.resolution.rationale };
-        }
-        return { ok: true, ...applyProposedEvents(input.events || []) };
+      dispatch_systems_task: async (input: { reason?: string | null; priority?: 'required' | 'optional' | null }) => {
+        stewardCouncilDispatches += 1;
+        const packet = createAdHocCouncilPacket('systems', input.priority || 'required', input.reason);
+        const result = await dispatchCouncilTask(packet);
+        stewardCouncilResults.push(result);
+        return { ok: true, domain: 'systems', result: result.result };
       },
-      resolve_mechanics: async (input: { playerText?: string | null; objective?: string | null; focus?: string | null; pendingPrompt?: PendingPrompt | null }) => {
-        const request = {
-          ...buildMechanicsRequest({
-            playerText: input.playerText,
-            objective: input.objective,
-            focus: input.focus,
-            pendingPrompt: input.pendingPrompt,
-          }),
-          pendingPrompt: normalizePendingPrompt(input.pendingPrompt) || currentPendingPrompt || draft.meta.pendingPrompt || null,
-        };
-        const draftResolution = await runMechanicsAgent({ apiKey, request, llm: this.llm, debug: undefined, trace });
-        const resolutionId = createRuntimeId();
-        const resolution = attachResolutionMetadata(draftResolution, resolutionId, request.pendingPrompt, nextTurn);
-        mechanicsResolutions.set(resolutionId, { request, resolution, revisionCount: 0 });
-        activeMechanicsResolutionId = resolutionId;
-        pushMechanicsTrace(resolution);
-        const { debug: _debug, ...resolutionForSteward } = resolution;
-        return resolutionForSteward;
-      },
-      review_mechanics_resolution: async (input: { resolutionId: string; action: 'approve' | 'revise' | 'reject'; feedback?: string | null }) => {
-        const cached = mechanicsResolutions.get(input.resolutionId);
-        if (!cached) {
-          return { ok: false, error: 'mechanics_resolution_not_found', resolutionId: input.resolutionId };
-        }
-        if (input.action === 'approve') {
-          const result = applyApprovedMechanicsResolution(cached.resolution);
-          mechanicsResolutions.delete(input.resolutionId);
-          if (activeMechanicsResolutionId === input.resolutionId) activeMechanicsResolutionId = null;
-          return { ok: result.ok, status: 'approved', resolutionId: input.resolutionId, accepted: result.accepted, rejected: result.rejected };
-        }
-        if (input.action === 'reject') {
-          mechanicsResolutions.delete(input.resolutionId);
-          if (activeMechanicsResolutionId === input.resolutionId) activeMechanicsResolutionId = null;
-          return { ok: true, status: 'rejected', resolutionId: input.resolutionId };
-        }
-        const feedback = typeof input.feedback === 'string' ? input.feedback.trim() : '';
-        if (!feedback) {
-          return { ok: false, error: 'revision_feedback_required', resolutionId: input.resolutionId };
-        }
-        const revisedDraft = await runMechanicsAgent({
-          apiKey,
-          request: {
-            ...cached.request,
-            revisionFeedback: feedback,
-            previousDraft: {
-              interpretation: cached.resolution.interpretation,
-              summary: cached.resolution.summary,
-              candidateEvents: cached.resolution.candidateEvents,
-              confidence: cached.resolution.confidence,
-            },
-          },
-          llm: this.llm,
-          debug: undefined,
-          trace,
-        });
-        const nextResolutionId = createRuntimeId();
-        const resolution = attachResolutionMetadata(revisedDraft, nextResolutionId, cached.request.pendingPrompt, nextTurn);
-        pushMechanicsTrace(resolution);
-        mechanicsResolutions.delete(input.resolutionId);
-        mechanicsResolutions.set(nextResolutionId, {
-          request: {
-            ...cached.request,
-            revisionFeedback: feedback,
-            previousDraft: {
-              interpretation: cached.resolution.interpretation,
-              summary: cached.resolution.summary,
-              candidateEvents: cached.resolution.candidateEvents,
-              confidence: cached.resolution.confidence,
-            },
-          },
-          resolution,
-          revisionCount: cached.revisionCount + 1,
-        });
-        activeMechanicsResolutionId = nextResolutionId;
-        const { debug: _debug, ...resolutionForSteward } = resolution;
-        return { ok: true, status: 'revised', previousResolutionId: input.resolutionId, resolution: resolutionForSteward };
-      },
-      schedule_task: async (input: { task: string; actorId?: string | null; timeHint?: string | null }) => {
-        const request = buildScheduleTaskInput(input);
-        const resolution = await runScheduleAgent({ apiKey, input: request, llm: this.llm, trace });
-        scheduleResolutions.set(resolution.id, { request, resolution, revisionCount: 0 });
-        activeScheduleResolutionId = resolution.id;
-        return scheduleResolutionForGM(resolution);
-      },
-      review_schedule_resolution: async (input: { scheduleResolutionId: string; action: 'approve' | 'revise' | 'reject'; feedback?: string | null }) => {
-        const cached = scheduleResolutions.get(input.scheduleResolutionId);
-        if (!cached) {
-          return { ok: false, error: 'schedule_resolution_not_found', scheduleResolutionId: input.scheduleResolutionId };
-        }
-        if (input.action === 'approve') {
-          const result = applyProposedEvents(cached.resolution.events as WorldEvent[]);
-          scheduleResolutions.delete(input.scheduleResolutionId);
-          if (activeScheduleResolutionId === input.scheduleResolutionId) activeScheduleResolutionId = null;
-          return { ok: result.ok, status: 'approved', scheduleResolutionId: input.scheduleResolutionId, accepted: result.accepted, rejected: result.rejected };
-        }
-        if (input.action === 'reject') {
-          scheduleResolutions.delete(input.scheduleResolutionId);
-          if (activeScheduleResolutionId === input.scheduleResolutionId) activeScheduleResolutionId = null;
-          return { ok: true, status: 'rejected', scheduleResolutionId: input.scheduleResolutionId };
-        }
-        const feedback = typeof input.feedback === 'string' ? input.feedback.trim() : '';
-        if (!feedback) {
-          return { ok: false, error: 'revision_feedback_required', scheduleResolutionId: input.scheduleResolutionId };
-        }
-        const resolution = await runScheduleAgent({
-          apiKey,
-          input: buildScheduleTaskInput({
-            task: cached.request.task,
-            actorId: cached.request.actorId,
-            timeHint: cached.request.timeHint,
-            revisionFeedback: feedback,
-            previousDraft: {
-              status: cached.resolution.status,
-              rationale: cached.resolution.rationale,
-              confidence: cached.resolution.confidence,
-              events: cached.resolution.events,
-              clarificationNeeded: cached.resolution.clarificationNeeded,
-            },
-          }),
-          llm: this.llm,
-          trace,
-        });
-        scheduleResolutions.delete(input.scheduleResolutionId);
-        scheduleResolutions.set(resolution.id, {
-          request: {
-            ...cached.request,
-            revisionFeedback: feedback,
-            previousDraft: {
-              status: cached.resolution.status,
-              rationale: cached.resolution.rationale,
-              confidence: cached.resolution.confidence,
-              events: cached.resolution.events,
-              clarificationNeeded: cached.resolution.clarificationNeeded,
-            },
-          },
-          resolution,
-          revisionCount: cached.revisionCount + 1,
-        });
-        activeScheduleResolutionId = resolution.id;
-        return { ok: true, status: 'revised', previousScheduleResolutionId: input.scheduleResolutionId, resolution: scheduleResolutionForGM(resolution) };
-      },
-      // Internal-only: not in STEWARD_TOOL_DEFS, used by the council fallback path.
-      delegate_legacy_gm: async (input: {
-        reason: string;
-        focus?: string | null;
-        seedToolCall?: { name: string; arguments: Record<string, unknown> } | null;
-      }) => {
-        const proposal = await runLegacyGMProposal(input.reason, input.focus, input.seedToolCall);
-        trace?.toolCalls.push({
-          tool: 'steward_fallback_to_gm',
-          input,
-          output: { reason: input.reason, summary: proposal.summary },
-        });
-        return proposal;
-      },
+      inspect_council_results: async (input: { domains?: Array<'character' | 'world' | 'systems'> | null }) => ({
+        ok: true,
+        councilResults: input.domains?.length
+          ? stewardCouncilResults.filter(result => input.domains!.includes(result.result.domain as never)).map(result => result.result)
+          : stewardCouncilResults.map(result => result.result),
+      }),
       finish_steward_turn: async (input: StewardFinishTurnInput) => {
         const result = applyProposedEvents(input.candidateEvents || []);
         if (input.playerPrompt?.clear === true) {
@@ -1307,6 +1118,24 @@ export class TurnEngine {
         applyAgendaUpdates(draft, input.agendaUpdates);
         applyDirectorUpdates(draft, input.directorUpdates, nextTurn);
         applyStewardMemoryUpdate(draft, input.stewardMemoryUpdate, nextTurn);
+        const closeResult = closeStewardTurn({
+          turnPlan: {
+            classification: 'steward_judgment',
+            deterministicOwner: null,
+            requiredDomains: [],
+            optionalDomains: [],
+            heldBeatsToConsider: [],
+            pendingEventsToCheck: [],
+            rationale: 'Steward judgment synthesis',
+          },
+          councilResults: stewardCouncilResults,
+          directorState: draft.directorState,
+        });
+        appendCouncilArtifacts(closeResult.councilArtifacts);
+        const systemsArtifact = closeResult.councilArtifacts.find(artifact => artifact.domain === 'systems');
+        if (!systemsNarratorPacket && systemsArtifact?.domain === 'systems' && systemsArtifact.narratorPacket) {
+          systemsNarratorPacket = systemsArtifact.narratorPacket as SystemsNarratorPacket;
+        }
         if (pendingLegacyArtifacts && shouldAttachLegacyArtifacts(input, pendingLegacyArtifacts.proposal)) {
           npcOutputs.push(...pendingLegacyArtifacts.npcOutputs);
           turnSpeech.push(...pendingLegacyArtifacts.turnSpeech);
@@ -1323,20 +1152,19 @@ export class TurnEngine {
 
     try {
       let stewardHandledTurn = false;
-      const gmWorldContext = buildActiveGMWorldContext();
+      let councilFallbackReason: string | null = null;
+      const councilBundle = buildCouncilContextBundle();
       const stewardOpenResult = openStewardTurn({
         playerText,
         directorState: draft.directorState,
-        worldContext: gmWorldContext,
+        worldContext: councilBundle,
         pendingPrompt: currentPendingPrompt ?? draft.meta.pendingPrompt ?? null,
-        telemetry: gmWorldContext.telemetry,
+        telemetry: councilBundle.systemsContext.telemetry,
         turnNumber: nextTurn,
       });
-      const canRunSystemsCouncil =
-        stewardOpenResult.councilTasks.length > 0 &&
-        stewardOpenResult.councilTasks.every(packet => packet.task.domain === 'systems');
+      const hasCouncilTasks = stewardOpenResult.councilTasks.length > 0;
 
-      if (canRunSystemsCouncil) {
+      if (hasCouncilTasks) {
         trace?.toolCalls.push({
           tool: 'open_steward_turn',
           input: {
@@ -1350,38 +1178,10 @@ export class TurnEngine {
           },
         });
 
-        const councilResults: CouncilToStewardPacket<'systems'>[] = [];
-        for (const packet of stewardOpenResult.councilTasks) {
-          const systemsTask = packet.task as CouncilTask<'systems'>;
-          const startedAt = Date.now();
-          const result = await runSystemsDesignerTask(systemsTask, {
-            apiKey,
-            llm: this.llm,
-            turnNumber: nextTurn,
-          });
-          const councilResult: CouncilToStewardPacket<'systems'> = {
-            result,
-            executionMs: Date.now() - startedAt,
-          };
-          councilResults.push(councilResult);
-          trace?.toolCalls.push({
-            tool: 'dispatch_council_task',
-            input: {
-              taskId: packet.task.taskId,
-              domain: packet.task.domain,
-              directive: packet.task.directive,
-            },
-            output: {
-              summary: result.summary,
-              handled:
-                Boolean(result.detail) &&
-                typeof result.detail === 'object' &&
-                'handled' in result.detail &&
-                result.detail.handled === true,
-              proposedEvents: result.proposedEvents.length,
-            },
-          });
-        }
+        const councilResults = await Promise.all(
+          stewardOpenResult.councilTasks.map(packet => dispatchCouncilTask(packet as { task: CouncilTask<CouncilDomain> })),
+        );
+        stewardCouncilResults.push(...councilResults);
 
         const closeResult = closeStewardTurn({
           turnPlan: stewardOpenResult.turnPlan,
@@ -1410,13 +1210,29 @@ export class TurnEngine {
           pushMechanicsTrace(systemsDetail.mechanicsResolution);
         }
 
-        let councilFallbackReason: string | null = null;
         if (closeResult.handled) {
           const acceptedBefore = acceptedEvents.length;
           const rejectedBefore = rejectedEvents.length;
           applyProposedEvents(closeResult.proposedEvents);
           applyAgendaUpdates(draft, closeResult.agendaUpdates);
           applyDirectorUpdates(draft, closeResult.directorUpdates, nextTurn);
+          appendCouncilArtifacts(closeResult.councilArtifacts);
+
+          const clearsPendingPromptViaEvent = Boolean(
+            systemsDetail?.pendingPromptRecommendation &&
+            closeResult.proposedEvents.some(event =>
+              event.type === 'TravelToLocation' &&
+              event.confirmId === systemsDetail.pendingPromptRecommendation?.id,
+            ),
+          );
+
+          if (systemsDetail?.pendingPromptRecommendation === null || clearsPendingPromptViaEvent) {
+            delete draft.meta.pendingPrompt;
+            currentPendingPrompt = undefined;
+          } else if (systemsDetail?.pendingPromptRecommendation) {
+            draft.meta.pendingPrompt = systemsDetail.pendingPromptRecommendation;
+            currentPendingPrompt = systemsDetail.pendingPromptRecommendation;
+          }
 
           const acceptedDelta = acceptedEvents.length - acceptedBefore;
           const rejectedDelta = rejectedEvents.length - rejectedBefore;
@@ -1424,29 +1240,49 @@ export class TurnEngine {
             closeResult.proposedEvents.length === 0 ||
             (acceptedDelta === closeResult.proposedEvents.length && rejectedDelta === 0);
 
-          if (fullyApplied && closeResult.narratorHandoff.kind === 'systems_v1') {
-            systemsNarratorPacket = closeResult.narratorHandoff.packet;
+          if (fullyApplied) {
             stewardHandledTurn = true;
+            if (closeResult.narratorHandoff.kind === 'systems_v1') {
+              systemsNarratorPacket = closeResult.narratorHandoff.packet;
+            }
           } else {
             councilFallbackReason = 'systems_events_rejected_or_unapplied';
           }
         } else {
-          councilFallbackReason = closeResult.fallbackReason ?? closeResult.trace.reason ?? 'systems_result_unhandled';
-        }
-
-        if (councilFallbackReason) {
-          emitDebugEvent(emit, { type: 'steward.iteration.started', iteration: 1 });
-          const proposal = await stewardRuntime.delegate_legacy_gm({
-            reason: councilFallbackReason,
-            focus: null,
-          });
-          await stewardRuntime.finish_steward_turn(buildStewardFinishInputFromLegacyProposal(proposal));
-          stewardHandledTurn = true;
+          councilFallbackReason = closeResult.fallbackReason ?? closeResult.trace.reason ?? 'council_result_unhandled';
         }
       }
 
-      if (!stewardHandledTurn) {
-        const stewardContext = buildStewardContext({
+      if (councilFallbackReason && stewardOpenResult.turnPlan.classification !== 'steward_judgment') {
+        const proposal = await runLegacyGMProposal(councilFallbackReason);
+        const finishInput = buildStewardFinishInputFromLegacyProposal(proposal);
+        const result = applyProposedEvents(finishInput.candidateEvents || []);
+        if (finishInput.playerPrompt?.clear === true) {
+          delete draft.meta.pendingPrompt;
+          currentPendingPrompt = undefined;
+        }
+        const pending = normalizePendingPrompt(finishInput.playerPrompt?.pending);
+        if (pending) {
+          draft.meta.pendingPrompt = pending;
+          currentPendingPrompt = pending;
+        }
+        applyAgendaUpdates(draft, finishInput.agendaUpdates);
+        applyDirectorUpdates(draft, finishInput.directorUpdates, nextTurn);
+        if (pendingLegacyArtifacts) {
+          npcOutputs.push(...pendingLegacyArtifacts.npcOutputs);
+          turnSpeech.push(...pendingLegacyArtifacts.turnSpeech);
+          specialistOutputs.push(...pendingLegacyArtifacts.specialistOutputs);
+          pendingLegacyArtifacts = null;
+        }
+        trace?.toolCalls.push({
+          tool: 'legacy_council_fallback',
+          input: { reason: councilFallbackReason },
+          output: { ok: result.ok, summary: proposal.summary, candidateEvents: proposal.candidateEvents.length },
+        });
+      }
+
+      if (!stewardHandledTurn && stewardOpenResult.turnPlan.classification === 'steward_judgment') {
+        const stewardContext = buildStewardRoutingSummary({
           state: draft,
           playerId,
           playerText,
@@ -1505,7 +1341,19 @@ export class TurnEngine {
     const recentTurns = buildRecentTurnDigests(draft, turnHistory);
     const recentSpeech = buildRecentSpeechDigests(turnHistory);
     stream?.onNarrationStart?.(afterTelemetry);
-    const narration = await narrateTurn(
+    // Skip the narrator LLM call for pure prompt-creation turns: no events, no speech,
+    // and the pending prompt was just created this turn. The prompt's question field is
+    // already a user-facing string authored at output quality; there is nothing else to
+    // narrate around it, so returning it directly avoids an unnecessary LLM round-trip.
+    const promptOnlyNarration =
+      !systemsNarratorPacket &&
+      acceptedEvents.length === 0 &&
+      rejectedEvents.length === 0 &&
+      turnSpeech.length === 0 &&
+      draft.meta.pendingPrompt?.createdTurn === nextTurn
+        ? draft.meta.pendingPrompt.question
+        : null;
+    const narration = promptOnlyNarration ?? await narrateTurn(
       systemsNarratorPacket
         ? buildNarratorParamsFromSystemsPacket({
             packet: systemsNarratorPacket,
@@ -1545,6 +1393,7 @@ export class TurnEngine {
 
     const finalizedSpecialistOutputs = finalizeSpecialistConsultations(specialistOutputs, acceptedEvents);
     if (trace) {
+      trace.councilArtifacts = councilArtifacts;
       trace.specialistOutputs = finalizedSpecialistOutputs;
     }
 
@@ -1557,6 +1406,7 @@ export class TurnEngine {
       pendingPrompt: draft.meta.pendingPrompt || undefined,
       acceptedEvents,
       rejectedEvents,
+      councilArtifacts,
       npcOutputs,
       turnSpeech,
       specialistOutputs: finalizedSpecialistOutputs,
@@ -1643,20 +1493,6 @@ function formatClockDisplay(minutesOfDay: number): string {
   const suffix = hour24 >= 12 ? 'PM' : 'AM';
   const hour12 = hour24 % 12 || 12;
   return `${hour12}:${String(minute).padStart(2, '0')} ${suffix}`;
-}
-
-function isSimpleMechanicsEvent(event: WorldEvent): boolean {
-  return (
-    event.type === 'MoveActor' ||
-    event.type === 'PickUpItem' ||
-    event.type === 'DropItem' ||
-    event.type === 'AffectItem' ||
-    event.type === 'TravelToLocation' ||
-    event.type === 'Explore' ||
-    event.type === 'Inspect' ||
-    event.type === 'AdvanceTime' ||
-    event.type === 'TransferItem'
-  );
 }
 
 function deepClone<T>(value: T): T {
@@ -1821,55 +1657,6 @@ function deriveToolResultOk(output: unknown): boolean | undefined {
   if (typeof record.ok === 'boolean') return record.ok;
   if (typeof record.error === 'string') return false;
   return undefined;
-}
-
-function resolvePendingPromptReply(
-  pendingPrompt: PendingPrompt | undefined,
-  playerText: string,
-  playerId: string,
-): { handled: 'confirm_travel_yes' | 'confirm_travel_no'; clearPrompt: boolean; events: WorldEvent[] } | null {
-  if (!pendingPrompt || pendingPrompt.kind !== 'confirm_travel') return null;
-  const reply = classifyPromptReply(playerText);
-  if (!reply) return null;
-
-  if (reply === 'no') {
-    return {
-      handled: 'confirm_travel_no',
-      clearPrompt: true,
-      events: [],
-    };
-  }
-
-  const locationId = typeof pendingPrompt.data?.locationId === 'string' ? pendingPrompt.data.locationId : null;
-  if (!locationId) return null;
-  return {
-    handled: 'confirm_travel_yes',
-    clearPrompt: false,
-    events: [{
-      type: 'TravelToLocation',
-      actorId: playerId,
-      locationId,
-      pace: 'walk',
-      confirmId: pendingPrompt.id,
-      note: `Travel confirmed to ${locationId}.`,
-    }],
-  };
-}
-
-function classifyPromptReply(playerText: string): 'yes' | 'no' | null {
-  const normalized = playerText
-    .toLowerCase()
-    .replace(/[^a-z0-9\s']/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!normalized) return null;
-
-  const affirmative = new Set(['yes', 'y', 'yeah', 'yep', 'sure', 'ok', 'okay', 'do it', 'go ahead', 'confirm']);
-  const negative = new Set(['no', 'n', 'nope', 'nah', 'cancel', 'stop', 'never mind', 'dont', "don't"]);
-
-  if (affirmative.has(normalized)) return 'yes';
-  if (negative.has(normalized)) return 'no';
-  return null;
 }
 
 function applyAgendaUpdates(state: WorldState, updates: GMFinishTurnInput['agendaUpdates']) {

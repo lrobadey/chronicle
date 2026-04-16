@@ -70,33 +70,37 @@ describe('staff interview engine path', () => {
     try {
       const longPlayerText = 'y'.repeat(260);
       const clippedPlayerText = `${'y'.repeat(239)}…`;
-      const llm = new QueueLLM([
-        {
-          id: 'gm-1',
-          output: [
-            {
-              type: 'function_call',
-              name: 'finish_turn',
-              arguments:
-                '{"summary":"need clarification","playerPrompt":{"pending":{"id":"clarify-docks","kind":"clarify_target","question":"Which part of the docks do you mean?","options":[{"key":"warehouses","label":"The warehouses"},{"key":"moorings","label":"The moorings"}],"data":{"subject":"docks"},"createdTurn":1},"clear":false}}',
-              call_id: 'g1',
-            },
-          ],
-          output_text: '',
-        },
-      ]);
-      const engine = new TurnEngine({ store, llm });
-      const init = await engine.initSession({});
+      const engine = new TurnEngine({ store, llm: new QueueLLM([]) });
+      const ensured = await engine.ensureStaffSession({ playerId: 'player-1' });
+      const state = await store.loadSession(ensured.sessionId);
 
-      await engine.runTurn({
-        sessionId: init.sessionId,
+      assert.ok(state);
+      state.meta.turn = 1;
+      state.meta.pendingPrompt = {
+        id: 'clarify-docks',
+        kind: 'clarify_target',
+        question: 'Which part of the docks do you mean?',
+        options: [
+          { key: 'warehouses', label: 'The warehouses' },
+          { key: 'moorings', label: 'The moorings' },
+        ],
+        data: { subject: 'docks' },
+        createdTurn: 1,
+      };
+      await store.saveSnapshot(ensured.sessionId, state);
+      await store.appendTurn(ensured.sessionId, {
+        sessionId: ensured.sessionId,
+        turn: 1,
+        atIso: new Date().toISOString(),
         playerId: 'player-1',
         playerText: longPlayerText,
-        apiKey: 'test-key',
+        acceptedEvents: [],
+        rejectedEvents: [],
+        pendingPrompt: state.meta.pendingPrompt,
       });
 
-      const turnLog = await store.loadTurnLog(init.sessionId);
-      const context = await engine.getStaffInterviewContext(init.sessionId, 'player-1');
+      const turnLog = await store.loadTurnLog(ensured.sessionId);
+      const context = await engine.getStaffInterviewContext(ensured.sessionId, 'player-1');
 
       assert.equal(turnLog[0]?.pendingPrompt?.kind, 'clarify_target');
       assert.equal(turnLog[0]?.trace, undefined);

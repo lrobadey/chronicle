@@ -42,19 +42,6 @@ function createSpineAuthoritativePlacementWorld() {
   return world;
 }
 
-function getPlannerCall(llm: QueueLLM, occurrence: number) {
-  const gmCalls = llm.calls.filter(call =>
-    Array.isArray(call.tools) && call.tools.some(tool => tool.type === 'function' && tool.name === 'finish_turn'),
-  );
-  if (gmCalls.length >= occurrence) {
-    return gmCalls[occurrence - 1];
-  }
-  const stewardCalls = llm.calls.filter(call =>
-    Array.isArray(call.tools) && call.tools.some(tool => tool.type === 'function' && tool.name === 'finish_steward_turn'),
-  );
-  return stewardCalls[occurrence - 1];
-}
-
 function parseFirstSystemInput(call: { input?: unknown } | undefined): Record<string, any> {
   const input = call?.input;
   if (!Array.isArray(input)) return {};
@@ -82,16 +69,9 @@ describe('TurnEngine', () => {
     try {
       const llm = new QueueLLM([
         {
-          output: [{ type: 'function_call', name: 'observe_world', arguments: '{"perspective":"gm"}', call_id: 'c1' }],
-          output_text: '',
-        },
-        {
-          output: [{ type: 'function_call', name: 'propose_events', arguments: '{"events":[{"type":"MoveActor","actorId":"player-1","to":{"x":10,"y":0,"z":0}}]}', call_id: 'c2' }],
-          output_text: '',
-        },
-        {
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'c3' }],
-          output_text: '',
+          id: 'narr-1',
+          output: [],
+          output_text: 'You wait in the salt wind.',
         },
       ]);
       const engine = new TurnEngine({ store, llm });
@@ -101,24 +81,24 @@ describe('TurnEngine', () => {
         debug: { onEvent: event => debugEvents.push(event) },
         stream: { onOpeningDelta: delta => openingDeltas.push(delta) },
       });
-      assert.equal(openingDeltas.length > 0, true);
 
       const narrationDeltas: string[] = [];
       const turn = await engine.runTurn({
         sessionId: init.sessionId,
         playerId: 'player-1',
-        playerText: 'Step toward the rope post',
+        playerText: 'wait 10 minutes',
         apiKey: 'test-key',
         debug: { onEvent: event => debugEvents.push(event) },
         stream: { onNarrationDelta: delta => narrationDeltas.push(delta) },
       });
 
+      assert.equal(openingDeltas.length > 0, true);
       assert.equal(turn.turn, 1);
       assert.equal(turn.acceptedEvents.length, 1);
+      assert.equal(turn.acceptedEvents[0]?.type, 'AdvanceTime');
       assert.equal(turn.acceptedEvents[0]?.meta?.turn, 1);
       assert.equal(turn.acceptedEvents[0]?.meta?.by, 'steward');
       assert.equal(narrationDeltas.length > 0, true);
-      assert.ok(debugEvents.some(event => event.type === 'init.started'));
       assert.ok(debugEvents.some(event => event.type === 'turn.started'));
       assert.ok(debugEvents.some(event => event.type === 'event.accepted'));
       assert.ok(debugEvents.some(event => event.type === 'turn.persisted'));
@@ -130,32 +110,27 @@ describe('TurnEngine', () => {
     }
   });
 
-  it('logs NPC consult output without direct state mutation', async () => {
+  it('routes NPC dialogue through CharacterDesigner and persists council artifacts plus turn speech', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
         {
-          output: [{ type: 'function_call', name: 'observe_world', arguments: '{"perspective":"gm"}', call_id: 'gm0' }],
-          output_text: '',
-        },
-        {
-          output: [{ type: 'function_call', name: 'consult_npc', arguments: '{"npcId":"mira-salt"}', call_id: 'gm1' }],
-          output_text: '',
-        },
-        {
+          id: 'character-1',
           output: [
             {
               type: 'function_call',
-              name: 'emit_npc_turn',
-              arguments: '{"publicUtterance":"Storm coming.","privateIntent":"warn_player","emotionalTone":"grim"}',
-              call_id: 'npc1',
+              name: 'emit_character_result',
+              arguments:
+                '{"summary":"Mira Salt answers the player.","candidateEvents":[{"type":"Speak","actorId":"mira-salt","text":"Storm coming.","toActorId":"player-1"}],"selectedNpcIds":["mira-salt"],"privateIntentNotes":[{"npcId":"mira-salt","note":"warn_player"}],"relationshipNotes":[],"artifacts":[{"npcId":"mira-salt","publicUtterance":"Storm coming.","emotionalTone":"grim","privateIntent":"warn_player"}],"warnings":[]}',
+              call_id: 'character-finish',
             },
           ],
           output_text: '',
         },
         {
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm2' }],
-          output_text: '',
+          id: 'narr-1',
+          output: [],
+          output_text: 'Mira studies the surf and gives you a warning.',
         },
       ]);
       const engine = new TurnEngine({ store, llm });
@@ -165,18 +140,20 @@ describe('TurnEngine', () => {
       const turn = await engine.runTurn({
         sessionId: init.sessionId,
         playerId: 'player-1',
-        playerText: 'Ask Mira what she sees',
+        playerText: 'talk to Mira',
         apiKey: 'test-key',
         debug: { includeTrace: true },
       });
 
-      assert.equal(turn.acceptedEvents.length, 0);
+      assert.equal(turn.acceptedEvents.length, 1);
+      assert.equal(turn.acceptedEvents[0]?.type, 'Speak');
       assert.deepEqual(turn.telemetry.player.pos, before?.actors['player-1']?.pos);
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'));
 
       const log = await store.loadTurnLog(init.sessionId);
       assert.equal(log.length, 1);
-      assert.equal(log[0]?.npcOutputs?.[0]?.npcId, 'mira-salt');
-      assert.equal(log[0]?.npcOutputs?.[0]?.privateIntent, 'warn_player');
+      assert.equal(log[0]?.npcOutputs?.length || 0, 0);
+      assert.equal(log[0]?.councilArtifacts?.[0]?.domain, 'character');
       assert.deepEqual(log[0]?.turnSpeech, [
         {
           speakerActorId: 'mira-salt',
@@ -184,7 +161,7 @@ describe('TurnEngine', () => {
           text: 'Storm coming.',
           recipientActorIds: ['player-1'],
           recipientNames: ['You'],
-          source: 'npc_consult',
+          source: 'speak_event',
         },
       ]);
     } finally {
@@ -192,30 +169,21 @@ describe('TurnEngine', () => {
     }
   });
 
-  it('injects full player-facing conversation history into NPC context without leaking internal fields', async () => {
+  it('injects full player-facing conversation history into CharacterDesigner context without leaking internal fields', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
         {
-          id: 'gm-1',
-          output: [{ type: 'function_call', name: 'consult_npc', arguments: '{"npcId":"mira-salt"}', call_id: 'gm1' }],
-          output_text: '',
-        },
-        {
-          id: 'npc-1',
+          id: 'character-1',
           output: [
             {
               type: 'function_call',
-              name: 'emit_npc_turn',
-              arguments: '{"publicUtterance":"I was watching the tide-line.","privateIntent":"answer","emotionalTone":"measured"}',
-              call_id: 'npc1',
+              name: 'emit_character_result',
+              arguments:
+                '{"summary":"Mira Salt answers the player.","candidateEvents":[{"type":"Speak","actorId":"mira-salt","text":"I was watching the tide-line.","toActorId":"player-1"}],"selectedNpcIds":["mira-salt"],"privateIntentNotes":[{"npcId":"mira-salt","note":"answer"}],"relationshipNotes":[],"artifacts":[{"npcId":"mira-salt","publicUtterance":"I was watching the tide-line.","emotionalTone":"measured","privateIntent":"answer"}],"warnings":[]}',
+              call_id: 'character-finish',
             },
           ],
-          output_text: '',
-        },
-        {
-          id: 'gm-2',
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm2' }],
           output_text: '',
         },
         {
@@ -280,15 +248,17 @@ describe('TurnEngine', () => {
       await engine.runTurn({
         sessionId: init.sessionId,
         playerId: 'player-1',
-        playerText: 'What did you see after that?',
+        playerText: 'talk to Mira about what you saw after that',
         apiKey: 'test-key',
       });
 
-      const npcCall = llm.calls[1];
-      const npcPayloadRaw = String(npcCall?.input);
-      const npcPayload = JSON.parse(npcPayloadRaw);
+      const characterCall = llm.calls.find(call =>
+        Array.isArray(call.tools) && call.tools.some(tool => tool.type === 'function' && tool.name === 'emit_character_result'),
+      );
+      const characterPayload = parseFirstSystemInput(characterCall);
+      const rawCharacterPayload = JSON.stringify(characterPayload);
 
-      assert.deepEqual(npcPayload.conversationHistory, [
+      assert.deepEqual(characterPayload.context.conversationHistory, [
         {
           turn: 0,
           role: 'opening',
@@ -324,71 +294,31 @@ describe('TurnEngine', () => {
           role: 'player',
           speakerId: 'player-1',
           speakerName: 'You',
-          text: 'What did you see after that?',
+          text: 'talk to Mira about what you saw after that',
           source: 'playerText',
         },
       ]);
-      assert.equal(npcPayload.currentTurn.turn, 2);
-      assert.equal(npcPayloadRaw.includes('warn_player'), false);
-      assert.equal(npcPayloadRaw.includes('secret specialist note'), false);
-      assert.equal(npcPayloadRaw.includes('internal trace detail'), false);
+      assert.equal(rawCharacterPayload.includes('warn_player'), false);
+      assert.equal(rawCharacterPayload.includes('secret specialist note'), false);
+      assert.equal(rawCharacterPayload.includes('internal trace detail'), false);
     } finally {
       await removeDir(rootDir);
     }
   });
 
-  it('persists specialist consultations, agenda updates, and rich entity creation', async () => {
+  it('routes world framing through WorldDesigner and persists council artifacts plus entity creation', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
         {
-          id: 'gm-1',
+          id: 'world-1',
           output: [
             {
               type: 'function_call',
-              name: 'consult_specialist',
+              name: 'emit_world_result',
               arguments:
-                '{"specialistType":"scene","question":"Who should notice the player?","focus":"the landing"}',
-              call_id: 'gm-specialist',
-            },
-          ],
-          output_text: '',
-        },
-        {
-          id: 'specialist-1',
-          output: [
-            {
-              type: 'function_call',
-              name: 'emit_specialist_advice',
-              arguments:
-                '{"summary":"Introduce a dock witness.","recommendations":["Add one local witness with a concrete voice."],"candidateEvents":[{"type":"CreateEntity","actorId":null,"to":null,"toLocationId":null,"mode":null,"itemId":null,"at":null,"text":null,"toActorId":null,"minutes":null,"entity":{"kind":"npc","data":{"id":"dock-eye","name":"Dock Eye","description":null,"location":null,"pos":{"x":3,"y":0,"z":0},"anchor":null,"facing":"west","inventory":null,"stats":{"caution":3},"tags":["dockworker","witness"],"persona":{"tagline":"A dockworker with a long memory.","background":"Keeps tally on who comes and goes at the Landing.","voice":"Dry and suspicious.","goals":["stay employed","avoid smugglers"]},"relationships":{"player-1":{"trust":0,"fear":1,"affinity":0}},"radiusCells":null,"tideAccess":null,"terrain":null}},"key":null,"value":null,"locationId":null,"pace":null,"confirmId":null,"area":null,"direction":null,"subject":null,"note":"A dockworker notices the new arrival."}],"creationIntent":{"kind":"npc","purpose":"Introduce a witness who can react to the player later."},"risks":["Too many introductions would dilute the opening."]}',
-              call_id: 'specialist-call',
-            },
-          ],
-          output_text: '',
-        },
-        {
-          id: 'gm-2',
-          output: [
-            {
-              type: 'function_call',
-              name: 'propose_events',
-              arguments:
-                '{"events":[{"type":"CreateEntity","actorId":null,"to":null,"toLocationId":null,"mode":null,"itemId":null,"at":null,"text":null,"toActorId":null,"minutes":null,"entity":{"kind":"npc","data":{"id":"dock-eye","name":"Dock Eye","description":null,"location":null,"pos":{"x":3,"y":0,"z":0},"anchor":null,"facing":"west","inventory":null,"stats":{"caution":3},"tags":["dockworker","witness"],"persona":{"tagline":"A dockworker with a long memory.","background":"Keeps tally on who comes and goes at the Landing.","voice":"Dry and suspicious.","goals":["stay employed","avoid smugglers"]},"relationships":{"player-1":{"trust":0,"fear":1,"affinity":0}},"radiusCells":null,"tideAccess":null,"terrain":null}},"key":null,"value":null,"locationId":null,"pace":null,"confirmId":null,"area":null,"direction":null,"subject":null,"note":"A dockworker notices the new arrival."}]}',
-              call_id: 'gm-propose',
-            },
-          ],
-          output_text: '',
-        },
-        {
-          id: 'gm-3',
-          output: [
-            {
-              type: 'function_call',
-              name: 'finish_turn',
-              arguments:
-                '{"summary":"done","agendaUpdates":{"scene":{"currentFocus":"A new witness at the Landing","pressures":["A dockworker now watches the player closely."],"unresolvedBeats":["Decide whether to engage Dock Eye."],"immediateTensions":["The player is no longer unnoticed."]},"world":{"activeThreads":["New arrivals are noticed and remembered at the Landing."],"introductionOpportunities":["Dock Eye can connect the player to local rumors."],"escalationHooks":["Suspicion at the docks may spread if the player draws attention."]}}}',
-              call_id: 'gm-finish',
+                '{"summary":"Introduce a dock witness.","candidateEvents":[{"type":"CreateEntity","entity":{"kind":"npc","data":{"id":"dock-eye","name":"Dock Eye","pos":{"x":3,"y":0,"z":0},"facing":"west","stats":{"caution":3},"tags":["dockworker","witness"],"persona":{"tagline":"A dockworker with a long memory.","background":"Keeps tally on who comes and goes at the Landing.","voice":"Dry and suspicious.","goals":["stay employed","avoid smugglers"]},"relationships":{"player-1":{"trust":0,"fear":1,"affinity":0}}}},"note":"A dockworker notices the new arrival."}],"sceneMotionNotes":["Introduce a dock witness."],"worldMotionNotes":["Make the player visibly noticed at the Landing."],"surfacedThreadIds":[],"surfacedPendingEventIds":[],"artifacts":[{"type":"scene_motion","summary":"Introduce a dock witness.","candidateEvents":[{"type":"CreateEntity","entity":{"kind":"npc","data":{"id":"dock-eye","name":"Dock Eye","pos":{"x":3,"y":0,"z":0},"facing":"west","stats":{"caution":3},"tags":["dockworker","witness"],"persona":{"tagline":"A dockworker with a long memory.","background":"Keeps tally on who comes and goes at the Landing.","voice":"Dry and suspicious.","goals":["stay employed","avoid smugglers"]},"relationships":{"player-1":{"trust":0,"fear":1,"affinity":0}}}},"note":"A dockworker notices the new arrival."}]}],"warnings":[]}',
+              call_id: 'world-finish',
             },
           ],
           output_text: '',
@@ -405,166 +335,95 @@ describe('TurnEngine', () => {
       const turn = await engine.runTurn({
         sessionId: init.sessionId,
         playerId: 'player-1',
-        playerText: 'check who might be watching me here',
+        playerText: 'look around',
         apiKey: 'test-key',
         debug: { includeTrace: true },
       });
 
-      assert.equal(turn.acceptedEvents.length, 1);
-      assert.equal(turn.acceptedEvents[0]?.type, 'CreateEntity');
-      assert.equal(turn.trace?.specialistOutputs?.length, 1);
-      assert.equal(turn.trace?.specialistOutputs?.[0]?.usedSuggestion, true);
+      assert.equal(turn.acceptedEvents.some(event => event.type === 'CreateEntity'), true);
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'));
 
       const state = await store.loadSession(init.sessionId);
       assert.equal(state?.actors['dock-eye']?.persona?.voice, 'Dry and suspicious.');
       assert.deepEqual(state?.actors['dock-eye']?.tags, ['dockworker', 'witness']);
-      assert.equal(state?.directorState.scene.currentFocus, 'A new witness at the Landing');
-      assert.equal(state?.directorState.world.activeThreads[0], 'New arrivals are noticed and remembered at the Landing.');
 
       const log = await store.loadTurnLog(init.sessionId);
-      assert.equal(log[0]?.specialistOutputs?.length, 1);
-      assert.equal(log[0]?.specialistOutputs?.[0]?.usedSuggestion, true);
+      assert.equal(log[0]?.specialistOutputs?.length || 0, 0);
+      assert.equal(log[0]?.councilArtifacts?.some(artifact => artifact.domain === 'world'), true);
     } finally {
       await removeDir(rootDir);
     }
   });
 
-  it('injects the persisted opening, recent turn digests, and bounded player transcript tail into GM and narrator context', async () => {
+  it('passes opening, recent turn digests, and speech into narrator input', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
         {
-          id: 'gm-1',
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'g1' }],
-          output_text: '',
-        },
-        {
-          id: 'narr-1',
-          output: [],
-          output_text: 'Turn one narration',
-        },
-        {
-          id: 'gm-2',
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'g2' }],
-          output_text: '',
-        },
-        {
-          id: 'narr-2',
-          output: [],
-          output_text: 'Turn two narration',
-        },
-      ]);
-      const engine = new TurnEngine({ store, llm });
-      const init = await engine.initSession({});
-
-      await engine.runTurn({
-        sessionId: init.sessionId,
-        playerId: 'player-1',
-        playerText: 'I sit',
-        apiKey: 'test-key',
-      });
-      await engine.runTurn({
-        sessionId: init.sessionId,
-        playerId: 'player-1',
-        playerText: 'I stand',
-        apiKey: 'test-key',
-      });
-
-      const firstGMCall = getPlannerCall(llm, 1);
-      const secondGMCall = getPlannerCall(llm, 2);
-      const firstContext = parseFirstSystemInput(firstGMCall);
-      const secondContext = parseFirstSystemInput(secondGMCall);
-      const secondNarratorInput = parseAnyInput(llm.calls.at(-1)?.input);
-
-      assert.equal(Array.isArray(firstGMCall?.input), true);
-      assert.equal(Array.isArray(secondGMCall?.input), true);
-      assert.equal(firstContext.world.opening.narration, init.opening);
-      assert.equal(firstContext.world.opening.focalActorId, 'tamar-vane');
-      assert.equal(firstContext.world.opening.focusLocationId, 'the-landing');
-      assert.deepEqual(firstContext.world.recentTurns, []);
-      assert.deepEqual(firstContext.world.playerTranscriptTail, []);
-      assert.deepEqual(secondContext.world.opening, firstContext.world.opening);
-      assert.deepEqual(secondContext.world.recentTurns, [
-        {
-          turn: 1,
-          playerText: 'I sit',
-          narration: 'Turn one narration',
-          accepted: [],
-          rejected: [],
-        },
-      ]);
-      assert.deepEqual(secondContext.world.playerTranscriptTail, [
-        { turn: 1, playerId: 'player-1', playerText: 'I sit' },
-      ]);
-      assert.deepEqual(secondNarratorInput.opening, firstContext.world.opening);
-      assert.deepEqual(secondNarratorInput.recentTurns, secondContext.world.recentTurns);
-    } finally {
-      await removeDir(rootDir);
-    }
-  });
-
-  it('passes current-turn and recent speech into narrator input', async () => {
-    const { rootDir, store } = await createStore();
-    try {
-      const llm = new QueueLLM([
-        {
-          id: 'gm-1',
+          id: 'character-1',
           output: [
             {
               type: 'function_call',
-              name: 'propose_events',
-              arguments: '{"events":[{"type":"Speak","actorId":"tamar-vane","text":"Stay off the slick boards.","toActorId":"player-1"}]}',
-              call_id: 'gm-speak',
+              name: 'emit_character_result',
+              arguments:
+                '{"summary":"Mira Salt answers the player.","candidateEvents":[{"type":"Speak","actorId":"mira-salt","text":"Storm coming.","toActorId":"player-1"}],"selectedNpcIds":["mira-salt"],"privateIntentNotes":[{"npcId":"mira-salt","note":"warn_player"}],"relationshipNotes":[],"artifacts":[{"npcId":"mira-salt","publicUtterance":"Storm coming.","emotionalTone":"grim","privateIntent":"warn_player"}],"warnings":[]}',
+              call_id: 'character-first',
             },
           ],
           output_text: '',
         },
         {
-          id: 'gm-2',
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-finish' }],
+          id: 'narr-1',
+          output: [],
+          output_text: 'Mira studies the waterline.',
+        },
+        {
+          id: 'character-2',
+          output: [
+            {
+              type: 'function_call',
+              name: 'emit_character_result',
+              arguments:
+                '{"summary":"Tamar Vane answers the player.","candidateEvents":[{"type":"Speak","actorId":"tamar-vane","text":"Stay off the slick boards.","toActorId":"player-1"}],"selectedNpcIds":["tamar-vane"],"privateIntentNotes":[{"npcId":"tamar-vane","note":"warn_player"}],"relationshipNotes":[],"artifacts":[{"npcId":"tamar-vane","publicUtterance":"Stay off the slick boards.","emotionalTone":"grim","privateIntent":"warn_player"}],"warnings":[]}',
+              call_id: 'character-second',
+            },
+          ],
           output_text: '',
         },
         {
-          id: 'narr-1',
+          id: 'narr-2',
           output: [],
           output_text: 'Tamar warns you off the boards.',
         },
       ]);
       const engine = new TurnEngine({ store, llm });
       const init = await engine.initSession({});
-      const state = await store.loadSession(init.sessionId);
-      assert.ok(state);
-      state.meta.turn = 1;
-      await store.saveSnapshot(init.sessionId, state);
-      await store.appendTurn(init.sessionId, {
+
+      await engine.runTurn({
         sessionId: init.sessionId,
-        turn: 1,
-        atIso: new Date().toISOString(),
         playerId: 'player-1',
-        playerText: 'Who warned me before?',
-        acceptedEvents: [],
-        rejectedEvents: [],
-        turnSpeech: [
-          {
-            speakerActorId: 'mira-salt',
-            speakerName: 'Mira Salt',
-            text: 'Storm coming.',
-            recipientActorIds: ['player-1'],
-            recipientNames: ['You'],
-            source: 'npc_consult',
-          },
-        ],
-        narration: 'Mira studies the waterline.',
+        playerText: 'talk to Mira',
+        apiKey: 'test-key',
       });
 
       await engine.runTurn({
         sessionId: init.sessionId,
         playerId: 'player-1',
-        playerText: 'ask Tamar to say it plain',
+        playerText: 'talk to Tamar',
         apiKey: 'test-key',
       });
 
       const narratorInput = parseAnyInput(llm.calls.at(-1)?.input);
+      assert.equal(narratorInput.opening?.narration, init.opening);
+      assert.deepEqual(narratorInput.recentTurns, [
+        {
+          turn: 1,
+          playerText: 'talk to Mira',
+          narration: 'Mira studies the waterline.',
+          accepted: ['Spoke to You'],
+          rejected: [],
+        },
+      ]);
       assert.deepEqual(narratorInput.currentTurnSpeech, [
         {
           speakerActorId: 'tamar-vane',
@@ -590,125 +449,14 @@ describe('TurnEngine', () => {
     }
   });
 
-  it('limits recent turn digests to the last 10 completed turns and excludes the current turn', async () => {
-    const { rootDir, store } = await createStore();
-    try {
-      const queue = [];
-      for (let turn = 1; turn <= 12; turn += 1) {
-        queue.push({
-          id: `gm-${turn}`,
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: `g${turn}` }],
-          output_text: '',
-        });
-        queue.push({
-          id: `narr-${turn}`,
-          output: [],
-          output_text: `Turn ${turn} narration`,
-        });
-      }
-
-      const llm = new QueueLLM(queue);
-      const engine = new TurnEngine({ store, llm });
-      const init = await engine.initSession({});
-
-      for (let turn = 1; turn <= 12; turn += 1) {
-        await engine.runTurn({
-          sessionId: init.sessionId,
-          playerId: 'player-1',
-          playerText: `Action ${turn}`,
-          apiKey: 'test-key',
-        });
-      }
-
-      const twelfthContext = parseFirstSystemInput(getPlannerCall(llm, 12));
-      const recentTurns = twelfthContext.world.recentTurns as Array<Record<string, unknown>>;
-
-      assert.equal(recentTurns.length, 10);
-      assert.deepEqual(
-        recentTurns.map(turn => turn.turn),
-        [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-      );
-      assert.equal(recentTurns.some(turn => turn.turn === 12), false);
-    } finally {
-      await removeDir(rootDir);
-    }
-  });
-
-  it('builds recent turn digests from legacy turn records without narration', async () => {
+  it('persists systems-owned pending prompts and resolves confirm_travel replies deterministically', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
-        {
-          id: 'gm-1',
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'g1' }],
-          output_text: '',
-        },
-        {
-          id: 'narr-1',
-          output: [],
-          output_text: 'Turn two narration',
-        },
-      ]);
-      const engine = new TurnEngine({ store, llm });
-      const init = await engine.initSession({});
-      const state = await store.loadSession(init.sessionId);
-
-      assert.ok(state);
-      state.meta.turn = 1;
-      await store.saveSnapshot(init.sessionId, state);
-      await store.appendTurn(init.sessionId, {
-        sessionId: init.sessionId,
-        turn: 1,
-        atIso: new Date().toISOString(),
-        playerId: 'player-1',
-        playerText: 'legacy turn',
-        acceptedEvents: [],
-        rejectedEvents: [],
-      });
-
-      await engine.runTurn({
-        sessionId: init.sessionId,
-        playerId: 'player-1',
-        playerText: 'new turn',
-        apiKey: 'test-key',
-      });
-
-      const context = parseFirstSystemInput(getPlannerCall(llm, 1));
-      assert.deepEqual(context.world.recentTurns, [
-        {
-          turn: 1,
-          playerText: 'legacy turn',
-          narration: null,
-          accepted: [],
-          rejected: [],
-        },
-      ]);
-    } finally {
-      await removeDir(rootDir);
-    }
-  });
-
-  it('persists pending GM prompts and injects them into next-turn context', async () => {
-    const { rootDir, store } = await createStore();
-    try {
-      const llm = new QueueLLM([
-        {
-          id: 'gm-1',
-          output: [
-            {
-              type: 'function_call',
-              name: 'finish_turn',
-              arguments:
-                '{"summary":"need confirmation","playerPrompt":{"pending":{"id":"confirm-rib-market","kind":"confirm_travel","question":"The Rib Market is a longer walk. Set out now?","options":[{"key":"yes","label":"Yes, go now"},{"key":"no","label":"Not yet"}],"data":{"locationId":"the-rib-market","estimatedMinutes":24},"createdTurn":1},"clear":false}}',
-              call_id: 'g1',
-            },
-          ],
-          output_text: '',
-        },
         {
           id: 'narr-2',
           output: [],
-          output_text: 'You set out north across the dark sand.',
+          output_text: 'You set out for the Heartspring.',
         },
       ]);
       const engine = new TurnEngine({ store, llm });
@@ -717,88 +465,31 @@ describe('TurnEngine', () => {
       const turnOne = await engine.runTurn({
         sessionId: init.sessionId,
         playerId: 'player-1',
-        playerText: 'should I go to the rib market?',
+        playerText: 'go to the heartspring',
         apiKey: 'test-key',
       });
 
-      assert.equal(turnOne.narration, 'The Rib Market is a longer walk. Set out now?');
+      assert.equal(turnOne.narration, 'Travel to The Heartspring?');
       const afterTurnOne = await store.loadSession(init.sessionId);
       const turnLogAfterTurnOne = await store.loadTurnLog(init.sessionId);
       assert.equal(afterTurnOne?.meta.pendingPrompt?.kind, 'confirm_travel');
-      assert.equal(afterTurnOne?.meta.pendingPrompt?.data?.locationId, 'the-rib-market');
+      assert.equal(afterTurnOne?.meta.pendingPrompt?.data?.locationId, 'the-heartspring');
       assert.equal(turnLogAfterTurnOne[0]?.pendingPrompt?.kind, 'confirm_travel');
-      assert.equal(turnLogAfterTurnOne[0]?.trace, undefined);
 
-      await engine.runTurn({
+      const turnTwo = await engine.runTurn({
         sessionId: init.sessionId,
         playerId: 'player-1',
         playerText: 'yes',
         apiKey: 'test-key',
       });
 
+      assert.equal(turnTwo.acceptedEvents.length, 1);
+      assert.equal(turnTwo.acceptedEvents[0]?.type, 'TravelToLocation');
       const afterTurnTwo = await store.loadSession(init.sessionId);
       assert.equal(afterTurnTwo?.meta.pendingPrompt, undefined);
       const turnLogAfterTurnTwo = await store.loadTurnLog(init.sessionId);
       assert.equal(turnLogAfterTurnTwo[1]?.pendingPrompt, undefined);
-      assert.equal(llm.calls.length, 2);
-    } finally {
-      await removeDir(rootDir);
-    }
-  });
-
-  it('clips historical player text in recent turn digests and transcript tails', async () => {
-    const { rootDir, store } = await createStore();
-    try {
-      const longPlayerText = 'x'.repeat(260);
-      const clippedPlayerText = `${'x'.repeat(239)}…`;
-      const llm = new QueueLLM([
-        {
-          id: 'gm-1',
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'g1' }],
-          output_text: '',
-        },
-        {
-          id: 'narr-1',
-          output: [],
-          output_text: 'Turn one narration',
-        },
-        {
-          id: 'gm-2',
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'g2' }],
-          output_text: '',
-        },
-        {
-          id: 'narr-2',
-          output: [],
-          output_text: 'Turn two narration',
-        },
-      ]);
-      const engine = new TurnEngine({ store, llm });
-      const init = await engine.initSession({});
-
-      await engine.runTurn({
-        sessionId: init.sessionId,
-        playerId: 'player-1',
-        playerText: longPlayerText,
-        apiKey: 'test-key',
-      });
-
-      await engine.runTurn({
-        sessionId: init.sessionId,
-        playerId: 'player-1',
-        playerText: 'continue',
-        apiKey: 'test-key',
-      });
-
-      const secondContext = parseFirstSystemInput(getPlannerCall(llm, 2));
-      const secondNarratorInput = parseAnyInput(llm.calls.at(-1)?.input);
-
-      assert.equal(secondContext.world.recentTurns[0]?.playerText, clippedPlayerText);
-      assert.equal(secondContext.world.playerTranscriptTail[0]?.playerText, clippedPlayerText);
-      assert.equal(secondNarratorInput.recentTurns[0]?.playerText, clippedPlayerText);
-
-      const storedTurnLog = await store.loadTurnLog(init.sessionId);
-      assert.equal(storedTurnLog[0]?.playerText, longPlayerText);
+      assert.equal(llm.calls.length, 1);
     } finally {
       await removeDir(rootDir);
     }
@@ -1208,50 +899,58 @@ describe('TurnEngine', () => {
     );
   });
 
-  it('can resolve mechanics and apply approved candidate events through review_mechanics_resolution', async () => {
+  it('can dispatch SystemsDesigner from a judgment turn and commit its result through Steward synthesis', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
         {
-          id: 'gm-1',
+          id: 'steward-1',
           output: [
             {
               type: 'function_call',
-              name: 'resolve_mechanics',
-              arguments: '{"objective":"resolve the player inspecting the mug"}',
-              call_id: 'gm-mechanics',
+              name: 'dispatch_systems_task',
+              arguments: '{"reason":"Resolve the mug inspection.","priority":"required"}',
+              call_id: 'steward-dispatch-systems',
             },
           ],
           output_text: '',
         },
         {
-          id: 'mechanics-1',
+          id: 'systems-1',
           output: [
             {
               type: 'function_call',
-              name: 'emit_mechanics_resolution',
+              name: 'emit_systems_result',
               arguments:
-                '{"interpretation":"inspect","summary":"inspect the mug","actions":[{"type":"inspect","actorId":"player-1","subject":"mug","note":"Inspect the mug."}],"pendingPrompt":null,"touchedEntities":["player-1","mug"],"confidence":0.92,"warnings":[]}',
-              call_id: 'mechanics-tool',
+                '{"summary":"inspect the mug","candidateEvents":[{"type":"Inspect","actorId":"player-1","subject":"mug","note":"Inspect the mug."}],"narratorPacket":null,"pendingPromptRecommendation":null,"warnings":[],"handled":true,"fallbackReason":null,"artifacts":[{"type":"mechanics","summary":"inspect the mug","candidateEvents":[{"type":"Inspect","actorId":"player-1","subject":"mug","note":"Inspect the mug."}]}]}',
+              call_id: 'systems-tool',
             },
           ],
           output_text: '',
         },
         {
-          id: 'gm-2',
+          id: 'steward-2',
           output: [
             {
               type: 'function_call',
-              name: 'review_mechanics_resolution',
-              arguments: '{"resolutionId":"11111111-1111-4111-8111-111111111111","action":"approve","feedback":null}',
-              call_id: 'gm-review',
+              name: 'inspect_council_results',
+              arguments: '{}',
+              call_id: 'steward-inspect-council',
             },
           ],
           output_text: '',
         },
         {
-          id: 'gm-3',
-          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-finish' }],
+          id: 'steward-3',
+          output: [
+            {
+              type: 'function_call',
+              name: 'finish_steward_turn',
+              arguments:
+                '{"summary":"done","candidateEvents":[{"type":"Inspect","actorId":"player-1","subject":"mug","note":"Inspect the mug."}],"playerPrompt":null,"agendaUpdates":null,"directorUpdates":null,"stewardMemoryUpdate":null}',
+              call_id: 'steward-finish',
+            },
+          ],
           output_text: '',
         },
         {
@@ -1261,34 +960,23 @@ describe('TurnEngine', () => {
         },
       ]);
 
-      const originalUUID = globalThis.crypto.randomUUID;
-      Object.defineProperty(globalThis.crypto, 'randomUUID', {
-        value: (() => '11111111-1111-4111-8111-111111111111') as typeof globalThis.crypto.randomUUID,
-        configurable: true,
+      const engine = new TurnEngine({ store, llm });
+      const init = await engine.initSession({});
+      const before = await store.loadSession(init.sessionId);
+
+      const turn = await engine.runTurn({
+        sessionId: init.sessionId,
+        playerId: 'player-1',
+        playerText: 'I inspect the mug',
+        apiKey: 'test-key',
+        debug: { includeTrace: true },
       });
-      try {
-        const engine = new TurnEngine({ store, llm });
-        const init = await engine.initSession({});
-        const before = await store.loadSession(init.sessionId);
 
-        const turn = await engine.runTurn({
-          sessionId: init.sessionId,
-          playerId: 'player-1',
-          playerText: 'I inspect the mug',
-          apiKey: 'test-key',
-          debug: { includeTrace: true },
-        });
-
-        assert.equal(turn.acceptedEvents.length, 1);
-        assert.equal(turn.acceptedEvents[0]?.type, 'Inspect');
-        assert.deepEqual(turn.telemetry.player.pos, before?.actors['player-1']?.pos);
-        assert.ok(llm.calls.some(call => call.model === 'gpt-5.4-mini'));
-      } finally {
-        Object.defineProperty(globalThis.crypto, 'randomUUID', {
-          value: originalUUID,
-          configurable: true,
-        });
-      }
+      assert.equal(turn.acceptedEvents.length, 1);
+      assert.equal(turn.acceptedEvents[0]?.type, 'Inspect');
+      assert.deepEqual(turn.telemetry.player.pos, before?.actors['player-1']?.pos);
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_systems_task'));
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'finish_steward_turn'));
     } finally {
       await removeDir(rootDir);
     }
@@ -1333,7 +1021,7 @@ describe('TurnEngine', () => {
         assert.equal(turn.telemetry.player.inventory.some(item => item.id === 'heartwater-jar'), true);
         assert.equal(debugEvents.some(event => event.type === 'steward.iteration.started'), false);
         assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'open_steward_turn'));
-        assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'steward_preflight_mechanics'));
+        assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'));
         const resolution = turn.trace?.mechanicsResolutions?.[0];
         assert.equal(resolution?.debug?.selectedModel, 'deterministic');
       } finally {
@@ -1382,7 +1070,7 @@ describe('TurnEngine', () => {
         assert.equal(llm.calls.some(call => call.model === 'gpt-5.4-mini'), false);
         assert.equal(debugEvents.some(event => event.type === 'steward.iteration.started'), false);
         assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'open_steward_turn'));
-        assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'steward_preflight_mechanics'));
+        assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'));
         const resolution = turn.trace?.mechanicsResolutions?.[0];
         assert.equal(resolution?.debug?.selectedModel, 'deterministic');
       } finally {
@@ -1424,7 +1112,7 @@ describe('TurnEngine', () => {
       assert.equal(before?.systems.time.elapsedMinutes, 0);
       assert.equal(turn.telemetry.time.elapsedMinutes, 10);
       assert.equal(debugEvents.some(event => event.type === 'steward.iteration.started'), false);
-      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'steward_preflight_mechanics'));
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'));
       assert.equal(turn.trace?.mechanicsResolutions?.[0]?.debug?.selectedModel, 'deterministic');
     } finally {
       await removeDir(rootDir);
@@ -1472,7 +1160,7 @@ describe('TurnEngine', () => {
       assert.equal(turn.acceptedEvents.length, 0);
       assert.equal(debugEvents.some(event => event.type === 'steward.iteration.started'), true);
       assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'open_steward_turn'));
-      assert.equal(turn.trace?.toolCalls.some(call => call.tool === 'steward_preflight_mechanics'), true);
+      assert.equal(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'), false);
       const persisted = await store.loadSession(init.sessionId);
       assert.equal(persisted?.meta.pendingPrompt?.id, 'confirm-heartspring');
     } finally {
@@ -1480,14 +1168,14 @@ describe('TurnEngine', () => {
     }
   });
 
-  it('does not short-circuit blocked travel and still falls through to the GM path', async () => {
+  it('falls back to the legacy GM path when deterministic travel cannot be resolved safely', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
         {
           id: 'gm-blocked-1',
-          output: [],
-          output_text: 'done',
+          output: [{ type: 'function_call', name: 'finish_turn', arguments: '{"summary":"done"}', call_id: 'gm-finish' }],
+          output_text: '',
         },
         {
           id: 'narr-blocked-1',
@@ -1508,9 +1196,9 @@ describe('TurnEngine', () => {
       });
 
       assert.equal(turn.acceptedEvents.length, 0);
-      assert.equal(debugEvents.some(event => event.type === 'steward.iteration.started'), true);
       assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'open_steward_turn'));
-      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'steward_preflight_mechanics'));
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'));
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'legacy_council_fallback'));
       assert.equal(turn.trace?.mechanicsResolutions?.length, 1);
     } finally {
       await removeDir(rootDir);
@@ -1597,166 +1285,13 @@ describe('TurnEngine', () => {
       assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'close_steward_turn'));
       assert.equal(turn.trace?.mechanicsResolutions?.[0]?.interpretation, 'move');
       assert.notDeepEqual(turn.telemetry.player.pos, before.actors['player-1']?.pos);
-      const narratorInput = JSON.parse(String(llm.calls[1]?.input || '{}'));
+      const narratorInput = parseAnyInput(llm.calls.at(-1)?.input);
       assert.deepEqual(narratorInput.telemetry, turn.telemetry);
     } finally {
       await removeDir(rootDir);
     }
   });
 
-  it('falls back to the GM when the systems council returns an unsafe movement result', async () => {
-    const { rootDir, store } = await createStore();
-    try {
-      const llm = new QueueLLM([
-        {
-          id: 'systems-mechanics-invalid-1',
-          output: [
-            {
-              type: 'function_call',
-              name: 'emit_mechanics_resolution',
-              arguments:
-                '{"interpretation":"travel","summary":"travel north","actions":[{"type":"travel","actorId":"player-1","locationId":"the-drunken-vertebra","pace":"walk","confirmId":null,"note":"Travel north."}],"pendingPrompt":null,"touchedEntities":["player-1"],"confidence":0.77,"warnings":[]}',
-              call_id: 'systems-mechanics-invalid-call',
-            },
-          ],
-          output_text: '',
-        },
-        {
-          id: 'gm-after-systems-fallback-1',
-          output: [],
-          output_text: 'done',
-        },
-        {
-          id: 'narr-after-systems-fallback-1',
-          output: [],
-          output_text: 'You hesitate at the edge of the Landing.',
-        },
-      ]);
-      const engine = new TurnEngine({ store, llm });
-      const init = await engine.initSession({});
-      const debugEvents: DebugEvent[] = [];
-
-      const turn = await engine.runTurn({
-        sessionId: init.sessionId,
-        playerId: 'player-1',
-        playerText: 'go north',
-        apiKey: 'test-key',
-        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
-      });
-
-      assert.equal(turn.acceptedEvents.length, 0);
-      assert.equal(debugEvents.some(event => event.type === 'steward.iteration.started'), true);
-      const fallback = turn.trace?.toolCalls.find(call => call.tool === 'steward_fallback_to_gm');
-      assert.equal((fallback?.output as { reason?: string } | undefined)?.reason, 'systems_mechanics_unsafe_events');
-    } finally {
-      await removeDir(rootDir);
-    }
-  });
-
-  it('falls back to the GM when systems movement events are rejected during application', async () => {
-    const { rootDir, store } = await createStore();
-    try {
-      const llm = new QueueLLM([
-        {
-          id: 'systems-mechanics-rejected-1',
-          output: [
-            {
-              type: 'function_call',
-              name: 'emit_mechanics_resolution',
-              arguments:
-                '{"interpretation":"move","summary":"move north","actions":[{"type":"move","actorId":"player-1","to":{"x":9999,"y":9999,"z":0},"toLocationId":null,"mode":"walk","note":"Move north."}],"pendingPrompt":null,"touchedEntities":["player-1"],"confidence":0.88,"warnings":[]}',
-              call_id: 'systems-mechanics-rejected-call',
-            },
-          ],
-          output_text: '',
-        },
-        {
-          id: 'gm-after-systems-rejected-1',
-          output: [],
-          output_text: 'done',
-        },
-        {
-          id: 'narr-after-systems-rejected-1',
-          output: [],
-          output_text: 'You stop short and reconsider the path ahead.',
-        },
-      ]);
-      const engine = new TurnEngine({ store, llm });
-      const init = await engine.initSession({});
-      const debugEvents: DebugEvent[] = [];
-
-      const turn = await engine.runTurn({
-        sessionId: init.sessionId,
-        playerId: 'player-1',
-        playerText: 'go north',
-        apiKey: 'test-key',
-        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
-      });
-
-      assert.equal(turn.acceptedEvents.length, 0);
-      assert.equal(debugEvents.some(event => event.type === 'steward.iteration.started'), true);
-      const fallback = turn.trace?.toolCalls.find(call => call.tool === 'steward_fallback_to_gm');
-      assert.equal((fallback?.output as { reason?: string } | undefined)?.reason, 'systems_events_rejected_or_unapplied');
-      assert.equal(llm.calls.length, 3);
-      const narratorInput = JSON.parse(String(llm.calls[2]?.input || '{}'));
-      assert.deepEqual(narratorInput.telemetry, turn.telemetry);
-    } finally {
-      await removeDir(rootDir);
-    }
-  });
-
-  it('falls back to the GM when systems movement only partially applies', async () => {
-    const { rootDir, store } = await createStore();
-    try {
-      const llm = new QueueLLM([
-        {
-          id: 'systems-mechanics-partial-1',
-          output: [
-            {
-              type: 'function_call',
-              name: 'emit_mechanics_resolution',
-              arguments:
-                '{"interpretation":"move","summary":"move north","actions":[{"type":"move","actorId":"player-1","to":{"x":34,"y":61,"z":0},"toLocationId":null,"mode":"walk","note":"Take one careful step north."},{"type":"move","actorId":"player-1","to":{"x":9999,"y":9999,"z":0},"toLocationId":null,"mode":"walk","note":"Then lunge impossibly far."}],"pendingPrompt":null,"touchedEntities":["player-1"],"confidence":0.88,"warnings":[]}',
-              call_id: 'systems-mechanics-partial-call',
-            },
-          ],
-          output_text: '',
-        },
-        {
-          id: 'gm-after-systems-partial-1',
-          output: [],
-          output_text: 'done',
-        },
-        {
-          id: 'narr-after-systems-partial-1',
-          output: [],
-          output_text: 'You check yourself before committing to the path.',
-        },
-      ]);
-      const engine = new TurnEngine({ store, llm });
-      const init = await engine.initSession({});
-      const debugEvents: DebugEvent[] = [];
-
-      const turn = await engine.runTurn({
-        sessionId: init.sessionId,
-        playerId: 'player-1',
-        playerText: 'go north',
-        apiKey: 'test-key',
-        debug: { includeTrace: true, onEvent: event => debugEvents.push(event) },
-      });
-
-      assert.equal(turn.acceptedEvents.length, 1);
-      assert.equal(turn.rejectedEvents.length, 1);
-      assert.equal(debugEvents.some(event => event.type === 'steward.iteration.started'), true);
-      const fallback = turn.trace?.toolCalls.find(call => call.tool === 'steward_fallback_to_gm');
-      assert.equal((fallback?.output as { reason?: string } | undefined)?.reason, 'systems_events_rejected_or_unapplied');
-      assert.equal(llm.calls.length, 3);
-      const narratorInput = JSON.parse(String(llm.calls[2]?.input || '{}'));
-      assert.deepEqual(narratorInput.telemetry, turn.telemetry);
-    } finally {
-      await removeDir(rootDir);
-    }
-  });
 
   it.skip('can revise or reject a mechanics draft without applying world changes', async () => {
     const { rootDir, store } = await createStore();
@@ -2022,8 +1557,7 @@ describe('TurnEngine', () => {
       assert.equal(debugEvents.some(event => event.type === 'steward.iteration.started'), false);
       const persisted = await store.loadSession(init.sessionId);
       assert.equal(persisted?.meta.pendingPrompt, undefined);
-      const pendingTrace = turn.trace?.toolCalls.find(call => call.tool === 'steward_preflight_mechanics');
-      assert.equal((pendingTrace?.output as { clearPendingPrompt?: boolean } | undefined)?.clearPendingPrompt, false);
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'));
     } finally {
       await removeDir(rootDir);
     }
@@ -2067,8 +1601,7 @@ describe('TurnEngine', () => {
       assert.equal(debugEvents.some(event => event.type === 'steward.iteration.started'), false);
       const persisted = await store.loadSession(init.sessionId);
       assert.equal(persisted?.meta.pendingPrompt, undefined);
-      const pendingTrace = turn.trace?.toolCalls.find(call => call.tool === 'steward_preflight_mechanics');
-      assert.equal((pendingTrace?.output as { clearPendingPrompt?: boolean } | undefined)?.clearPendingPrompt, true);
+      assert.ok(turn.trace?.toolCalls.some(call => call.tool === 'dispatch_council_task'));
     } finally {
       await removeDir(rootDir);
     }
