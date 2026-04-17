@@ -296,8 +296,6 @@ describe('narrator streaming', () => {
         intent: 'observation',
         playerText: 'look around',
         summary: 'Read-only observation of the player surroundings.',
-        telemetry: telemetry as any,
-        observation: { player: { id: 'player-1' } } as any,
         warnings: [],
       },
       telemetry: finalTelemetry as any,

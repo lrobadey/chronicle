@@ -35,6 +35,7 @@ import { getItemPlacement, isItemInteractable, isItemVisible, summarizeItemCompo
 import { distance } from '../sim/utils';
 import { OpenAIClient } from '../agents/llm/openaiClient';
 import type { LLMClient } from '../agents/llm/types';
+import { pushToolTrace } from '../agents/llm/trace';
 import {
   runGMAgent,
   type GMFinishTurnInput,
@@ -537,7 +538,7 @@ export class TurnEngine {
           });
           break;
       }
-      trace?.toolCalls.push({
+      pushToolTrace(trace, {
         tool: 'dispatch_council_task',
         input: {
           taskId: packet.task.taskId,
@@ -557,8 +558,7 @@ export class TurnEngine {
           warnings: result.warnings,
         },
         stage: 'council_dispatch',
-        executionMs: Date.now() - startedAt,
-      });
+      }, startedAt);
       return {
         result,
         executionMs: Date.now() - startedAt,
@@ -1043,8 +1043,9 @@ export class TurnEngine {
       if (seedToolCall && typeof seedToolCall.name === 'string' && seedToolCall.name in legacyRuntime) {
         const toolName = seedToolCall.name as keyof typeof legacyRuntime;
         const toolArgs = seedToolCall.arguments || {};
+        const seedStartedAt = Date.now();
         const seedOutput = await legacyRuntime[toolName](toolArgs as never);
-        trace?.toolCalls.push({ tool: String(toolName), input: toolArgs, output: seedOutput });
+        pushToolTrace(trace, { tool: String(toolName), input: toolArgs, output: seedOutput }, seedStartedAt);
         if (toolName === 'finish_turn' && deriveToolResultOk(seedOutput) !== false) {
           shouldRunLegacyLoop = false;
         }
@@ -1173,6 +1174,7 @@ export class TurnEngine {
       let stewardHandledTurn = false;
       let councilFallbackReason: string | null = null;
       const councilBundle = buildCouncilContextBundle();
+      const openStewardStartedAt = Date.now();
       const stewardOpenResult = openStewardTurn({
         playerText,
         directorState: draft.directorState,
@@ -1183,7 +1185,7 @@ export class TurnEngine {
       });
       const hasCouncilTasks = stewardOpenResult.councilTasks.length > 0;
 
-      trace?.toolCalls.push({
+      pushToolTrace(trace, {
         tool: 'open_steward_turn',
         input: {
           playerText,
@@ -1207,7 +1209,7 @@ export class TurnEngine {
         },
         agent: 'steward',
         stage: 'open',
-      });
+      }, openStewardStartedAt);
 
       if (hasCouncilTasks) {
 
@@ -1216,12 +1218,13 @@ export class TurnEngine {
         );
         stewardCouncilResults.push(...councilResults);
 
+        const closeStewardStartedAt = Date.now();
         const closeResult = closeStewardTurn({
           turnPlan: stewardOpenResult.turnPlan,
           councilResults,
           directorState: draft.directorState,
         });
-        trace?.toolCalls.push({
+        pushToolTrace(trace, {
           tool: 'close_steward_turn',
           input: {
             turnClassification: stewardOpenResult.turnPlan.classification,
@@ -1242,7 +1245,7 @@ export class TurnEngine {
           },
           agent: 'steward',
           stage: 'close',
-        });
+        }, closeStewardStartedAt);
 
         const systemsPacket = councilResults.find(
           (packet): packet is CouncilToStewardPacket<'systems'> => packet.result.domain === 'systems',
@@ -1296,6 +1299,7 @@ export class TurnEngine {
       }
 
       if (councilFallbackReason && stewardOpenResult.turnPlan.classification !== 'steward_judgment') {
+        const legacyFallbackStartedAt = Date.now();
         const proposal = await runLegacyGMProposal(councilFallbackReason);
         const finishInput = buildStewardFinishInputFromLegacyProposal(proposal);
         const result = applyProposedEvents(finishInput.candidateEvents || []);
@@ -1316,7 +1320,7 @@ export class TurnEngine {
           specialistOutputs.push(...pendingLegacyArtifacts.specialistOutputs);
           pendingLegacyArtifacts = null;
         }
-        trace?.toolCalls.push({
+        pushToolTrace(trace, {
           tool: 'legacy_council_fallback',
           input: { reason: councilFallbackReason },
           output: {
@@ -1332,7 +1336,7 @@ export class TurnEngine {
           },
           agent: 'legacy_gm',
           stage: 'fallback',
-        });
+        }, legacyFallbackStartedAt);
       }
 
       if (!stewardHandledTurn && stewardOpenResult.turnPlan.classification === 'steward_judgment') {
@@ -1358,10 +1362,11 @@ export class TurnEngine {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown';
       emitDebugEvent(emit, { type: 'error', stage: 'steward', message });
-      trace?.toolCalls.push({
+      pushToolTrace(trace, {
         tool: 'steward_agent_error',
         input: { playerText },
         output: { error: 'steward_agent_failed', message },
+        executionMs: 0,
       });
 
       const rolledBackAccepted = acceptedEvents.splice(0, acceptedEvents.length);
@@ -1458,6 +1463,7 @@ export class TurnEngine {
       trace.specialistOutputs = finalizedSpecialistOutputs;
     }
 
+    const persistStartedAt = Date.now();
     const record: TurnRecord = {
       sessionId,
       turn: nextTurn,
@@ -1476,7 +1482,7 @@ export class TurnEngine {
       trace,
     };
 
-    trace?.toolCalls.push({
+    pushToolTrace(trace, {
       tool: 'persist_turn_record',
       input: {
         sessionId,
@@ -1488,7 +1494,7 @@ export class TurnEngine {
         hasPendingPrompt: Boolean(draft.meta.pendingPrompt),
       },
       stage: 'persistence',
-    });
+    }, persistStartedAt);
 
     await this.store.appendTurn(sessionId, record);
     await this.store.saveSnapshot(sessionId, draft);

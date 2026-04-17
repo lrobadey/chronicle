@@ -1,6 +1,6 @@
 import type { ResponseOutputItem } from './types';
 import type { SpecialistType } from '../specialists';
-import type { TurnTraceLLMCall } from '../../engine/session/types';
+import type { TurnTraceLLMCall, TurnTraceToolCall } from '../../engine/session/types';
 
 export function isFunctionCallItem(item: ResponseOutputItem): item is {
   type: 'function_call';
@@ -18,4 +18,17 @@ export function pushLLMTrace(
   if (!trace) return;
   trace.llmCalls = trace.llmCalls || [];
   trace.llmCalls.push(entry);
+}
+
+export function pushToolTrace(
+  trace: { toolCalls?: TurnTraceToolCall[] } | undefined,
+  entry: Omit<TurnTraceToolCall, 'executionMs'> & { executionMs?: number },
+  startedAtMs?: number,
+) {
+  if (!trace) return;
+  trace.toolCalls = trace.toolCalls || [];
+  const executionMs = typeof startedAtMs === 'number'
+    ? Math.max(0, Date.now() - startedAtMs)
+    : entry.executionMs;
+  trace.toolCalls.push(executionMs === undefined ? entry : { ...entry, executionMs });
 }

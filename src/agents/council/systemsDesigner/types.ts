@@ -12,8 +12,6 @@ export interface SystemsNarratorPacket {
   intent: SystemsTurnIntent;
   playerText: string;
   summary: string;
-  telemetry: Telemetry;
-  observation: Observation;
   warnings: string[];
 }
 

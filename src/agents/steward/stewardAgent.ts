@@ -1,7 +1,7 @@
 import type { ResponseInputItem } from '../llm/types';
 import { DEFAULT_MODEL } from '../llm/defaults';
 import { classifyLLMError } from '../llm/errorUtils';
-import { isFunctionCallItem, pushLLMTrace } from '../llm/trace';
+import { isFunctionCallItem, pushLLMTrace, pushToolTrace } from '../llm/trace';
 import { emitDebugEvent } from '../../engine/debug';
 import { STEWARD_SYSTEM_PROMPT } from './prompts';
 import { STEWARD_TOOL_DEFS } from './tools';
@@ -30,12 +30,13 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
     trace,
   } = params;
 
-  trace?.toolCalls.push({
+  pushToolTrace(trace, {
     tool: 'open_steward_turn',
     input: { playerText, hasApiKey: Boolean(apiKey) },
     output: { ok: true },
     agent: 'steward',
     stage: 'open',
+    executionMs: 0,
   });
 
   let previousResponseId: string | undefined;
@@ -117,6 +118,7 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
         input: toolInput,
       });
 
+      const callStartedAt = Date.now();
       let output: unknown;
       if ('error' in parsed) {
         output = { error: 'invalid_tool_arguments', details: parsed.error };
@@ -124,7 +126,7 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
         const dispatchResult = await dispatchTool(runtime, call.name, parsed.value);
         output = dispatchResult.output;
         if (dispatchResult.finished) {
-          trace?.toolCalls.push({
+          pushToolTrace(trace, {
             tool: call.name,
             input: toolInput,
             output,
@@ -133,7 +135,7 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
             callId,
             callIndex: callIndex + 1,
             callCount: toolCalls.length,
-          });
+          }, callStartedAt);
           emitDebugEvent(debug, {
             type: 'tool.result',
             iteration,
@@ -153,7 +155,7 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
         }
       }
 
-      trace?.toolCalls.push({
+      pushToolTrace(trace, {
         tool: call.name,
         input: toolInput,
         output,
@@ -162,7 +164,7 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
         callId,
         callIndex: callIndex + 1,
         callCount: toolCalls.length,
-      });
+      }, callStartedAt);
       emitDebugEvent(debug, {
         type: 'tool.result',
         iteration,

@@ -104,8 +104,6 @@ export const SYSTEMS_TOOL_DEFS: ResponseToolDefinition[] = [
           intent: { type: 'string', enum: ['observation', 'cardinal_movement', 'general_systems'] },
           playerText: { type: 'string' },
           summary: { type: 'string' },
-          telemetry: { type: 'object' },
-          observation: { type: 'object' },
           warnings: { type: 'array', items: { type: 'string' } },
         },
         { nullable: true },

@@ -1,6 +1,6 @@
 import { DEFAULT_MODEL, MECHANICS_MODEL } from '../../llm/defaults';
 import type { LLMClient, ResponseInputItem } from '../../llm/types';
-import { isFunctionCallItem, pushLLMTrace } from '../../llm/trace';
+import { isFunctionCallItem, pushLLMTrace, pushToolTrace } from '../../llm/trace';
 import type { CouncilResult, CouncilTask } from '../../hierarchy/types';
 import { EVENT_ITEM_SCHEMA } from '../../sharedSchemas';
 import type { WorldEvent } from '../../../sim/events';
@@ -63,7 +63,7 @@ async function runWorldDesignerLoop(
 
   let previousResponseId: string | undefined;
   let pendingInput: ResponseInputItem[] = [
-    { role: 'system', content: JSON.stringify({ task, context }) },
+    { role: 'system', content: JSON.stringify(task) },
     { role: 'user', content: context.playerText },
   ];
   for (let index = 0; index < 4; index += 1) {
@@ -98,6 +98,7 @@ async function runWorldDesignerLoop(
     for (const call of toolCalls) {
       const parsed = parseObjectArgs(call.arguments);
       const callId = call.call_id || `world-call-${index}`;
+      const callStartedAt = Date.now();
       let output: unknown;
       if (!parsed.ok) {
         output = { ok: false, error: 'arguments_parse_failed' };
@@ -106,7 +107,7 @@ async function runWorldDesignerLoop(
       } else {
         output = await dispatchWorldTool(runtime, call.name, parsed.value);
       }
-      params.trace?.toolCalls?.push({ tool: call.name, input: parsed.ok ? parsed.value : call.arguments, output });
+      pushToolTrace(params.trace, { tool: call.name, input: parsed.ok ? parsed.value : call.arguments, output }, callStartedAt);
       nextInput.push({
         type: 'function_call_output',
         call_id: callId,

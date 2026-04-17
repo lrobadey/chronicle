@@ -1,6 +1,6 @@
 import { DEFAULT_MODEL, MECHANICS_MODEL } from '../../llm/defaults';
 import type { LLMClient, ResponseInputItem } from '../../llm/types';
-import { isFunctionCallItem, pushLLMTrace } from '../../llm/trace';
+import { isFunctionCallItem, pushLLMTrace, pushToolTrace } from '../../llm/trace';
 import type { CouncilResult, CouncilTask } from '../../hierarchy/types';
 import type { WorldEvent } from '../../../sim/events';
 import { CHARACTER_DESIGNER_SYSTEM_PROMPT } from './prompts';
@@ -67,7 +67,7 @@ async function runCharacterDesignerLoop(
 
   let previousResponseId: string | undefined;
   let pendingInput: ResponseInputItem[] = [
-    { role: 'system', content: JSON.stringify({ task, context }) },
+    { role: 'system', content: JSON.stringify(task) },
     { role: 'user', content: context.playerText },
   ];
 
@@ -106,6 +106,7 @@ async function runCharacterDesignerLoop(
       const parsed = parseObjectArgs(call.arguments);
       const callId = call.call_id || `character-call-${index}`;
       const toolInput = parsed.ok ? parsed.value : { raw: call.arguments };
+      const callStartedAt = Date.now();
       let output: unknown;
       if (!parsed.ok) {
         output = { ok: false, error: 'arguments_parse_failed' };
@@ -114,7 +115,7 @@ async function runCharacterDesignerLoop(
       } else {
         output = await dispatchCharacterTool(runtime, call.name, parsed.value);
       }
-      params.trace?.toolCalls?.push({ tool: call.name, input: toolInput, output });
+      pushToolTrace(params.trace, { tool: call.name, input: toolInput, output }, callStartedAt);
       nextInput.push({
         type: 'function_call_output',
         call_id: callId,

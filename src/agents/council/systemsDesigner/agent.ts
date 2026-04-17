@@ -3,7 +3,7 @@ import { attachResolutionMetadata, runMechanicsAgent } from '../../mechanics';
 import { runScheduleAgent } from '../../schedule';
 import type { ScheduleResolution } from '../../schedule/types';
 import type { LLMClient, ResponseInputItem } from '../../llm/types';
-import { isFunctionCallItem, pushLLMTrace } from '../../llm/trace';
+import { isFunctionCallItem, pushLLMTrace, pushToolTrace } from '../../llm/trace';
 import { DEFAULT_MODEL } from '../../llm/defaults';
 import type { CouncilResult, CouncilTask } from '../../hierarchy/types';
 import { classifyPromptReply } from '../../hierarchy/promptReply';
@@ -58,8 +58,6 @@ async function runSystemsDesignerLoop(
               intent: context.intent,
               playerText: context.playerText,
               summary: pendingPromptReply.summary,
-              telemetry: context.telemetry,
-              observation: context.observation,
               warnings: [],
             }
           : null,
@@ -82,8 +80,6 @@ async function runSystemsDesignerLoop(
         intent: context.intent,
         playerText: context.playerText,
         summary: 'Read-only observation of the player surroundings.',
-        telemetry: context.telemetry,
-        observation: context.observation,
         warnings: [],
       },
       handled: true,
@@ -119,8 +115,6 @@ async function runSystemsDesignerLoop(
               intent: context.intent,
               playerText: context.playerText,
               summary: resolution.summary,
-              telemetry: context.telemetry,
-              observation: context.observation,
               warnings: resolution.warnings,
             }
           : null,
@@ -140,7 +134,7 @@ async function runSystemsDesignerLoop(
 
   let previousResponseId: string | undefined;
   let pendingInput: ResponseInputItem[] = [
-    { role: 'system', content: JSON.stringify({ task, context }) },
+    { role: 'system', content: JSON.stringify(task) },
     { role: 'user', content: context.playerText },
   ];
   for (let index = 0; index < 4; index += 1) {
@@ -175,6 +169,7 @@ async function runSystemsDesignerLoop(
     for (const call of toolCalls) {
       const parsed = parseObjectArgs(call.arguments);
       const callId = call.call_id || `systems-call-${index}`;
+      const callStartedAt = Date.now();
       let output: unknown;
       if (!parsed.ok) {
         output = { ok: false, error: 'arguments_parse_failed' };
@@ -183,7 +178,7 @@ async function runSystemsDesignerLoop(
       } else {
         output = await dispatchSystemsTool(runtime, call.name, parsed.value);
       }
-      params.trace?.toolCalls?.push({ tool: call.name, input: parsed.ok ? parsed.value : call.arguments, output });
+      pushToolTrace(params.trace, { tool: call.name, input: parsed.ok ? parsed.value : call.arguments, output }, callStartedAt);
       nextInput.push({
         type: 'function_call_output',
         call_id: callId,

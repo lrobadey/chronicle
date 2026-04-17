@@ -1,7 +1,7 @@
 import type { LLMClient, ResponseInputItem, ResponseOutputItem } from '../llm/types';
 import { DEFAULT_MODEL } from '../llm/defaults';
 import { classifyLLMError } from '../llm/errorUtils';
-import { isFunctionCallItem, pushLLMTrace } from '../llm/trace';
+import { isFunctionCallItem, pushLLMTrace, pushToolTrace } from '../llm/trace';
 import { GM_SYSTEM_PROMPT } from './prompts';
 import { GM_TOOL_DEFS } from './tools';
 import type { WorldEvent } from '../../sim/events';
@@ -117,8 +117,9 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       callCount: 2,
       input: { perspective: 'gm' },
     });
+    const observeStartedAt = Date.now();
     const observeOutput = await runtime.observe_world({ perspective: 'gm' });
-    trace?.toolCalls.push({
+    pushToolTrace(trace, {
       tool: 'observe_world',
       input: { perspective: 'gm' },
       output: observeOutput,
@@ -127,7 +128,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       callId: 'fallback-observe-world',
       callIndex: 1,
       callCount: 2,
-    });
+    }, observeStartedAt);
     emitDebugEvent(debug, {
       type: 'tool.result',
       iteration: 1,
@@ -147,8 +148,9 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       callCount: 2,
       input: { summary: 'No API key; fallback turn' },
     });
+    const finishStartedAt = Date.now();
     const finishOutput = await runtime.finish_turn({ summary: 'No API key; fallback turn' });
-    trace?.toolCalls.push({
+    pushToolTrace(trace, {
       tool: 'finish_turn',
       input: { summary: 'No API key; fallback turn' },
       output: finishOutput,
@@ -157,7 +159,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       callId: 'fallback-finish-turn',
       callIndex: 2,
       callCount: 2,
-    });
+    }, finishStartedAt);
     emitDebugEvent(debug, {
       type: 'tool.result',
       iteration: 1,
@@ -262,9 +264,10 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
         input: parsed.ok ? parsed.value : { raw: call.arguments },
       });
 
+      const callStartedAt = Date.now();
       if (parsed.ok === false) {
         const output = { error: 'invalid_tool_arguments', details: parsed.error };
-        trace?.toolCalls.push({
+        pushToolTrace(trace, {
           tool: call.name,
           input: call.arguments,
           output,
@@ -273,7 +276,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
           callId,
           callIndex,
           callCount,
-        });
+        }, callStartedAt);
         emitDebugEvent(debug, { type: 'tool.result', iteration, tool: call.name, callId, callIndex, callCount, output, ok: deriveToolResultOk(output) });
         nextInput.push({ type: 'function_call_output', call_id: callId, output: safeJSONStringify(output) });
         continue;
@@ -289,7 +292,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
         output = { error: 'tool_runtime_error', details: classifyLLMError(error) };
       }
 
-      trace?.toolCalls.push({
+      pushToolTrace(trace, {
         tool: call.name,
         input: args,
         output,
@@ -298,7 +301,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
         callId,
         callIndex,
         callCount,
-      });
+      }, callStartedAt);
       emitDebugEvent(debug, { type: 'tool.result', iteration, tool: call.name, callId, callIndex, callCount, output, ok: deriveToolResultOk(output) });
       nextInput.push({ type: 'function_call_output', call_id: callId, output: safeJSONStringify(output) });
 
