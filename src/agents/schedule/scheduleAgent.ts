@@ -74,6 +74,7 @@ export async function runScheduleAgent(params: ScheduleAgentParams): Promise<Sch
   }
 
   let response;
+  const llmStartedAt = Date.now();
   try {
     response = await llm.responsesCreate({
       apiKey,
@@ -93,7 +94,7 @@ export async function runScheduleAgent(params: ScheduleAgentParams): Promise<Sch
       inputItems: 1,
       status: 'failed',
       error: failure,
-    });
+    }, llmStartedAt);
     return fallbackResolution('cannot_resolve', failure);
   }
 
@@ -108,7 +109,7 @@ export async function runScheduleAgent(params: ScheduleAgentParams): Promise<Sch
     usage: response.usage,
     status: response.status,
     error: response.error ?? response.incomplete_details,
-  });
+  }, llmStartedAt);
 
   if (!resultCall) {
     return fallbackResolution('cannot_resolve', String(response.error ?? response.incomplete_details ?? 'missing_function_output'));

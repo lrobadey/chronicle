@@ -14,10 +14,21 @@ export function isFunctionCallItem(item: ResponseOutputItem): item is {
 export function pushLLMTrace(
   trace: { llmCalls?: TurnTraceLLMCall[] } | undefined,
   entry: TurnTraceLLMCall & { specialistType?: SpecialistType },
+  startedAtMs?: number,
 ) {
   if (!trace) return;
   trace.llmCalls = trace.llmCalls || [];
-  trace.llmCalls.push(entry);
+  let enriched: TurnTraceLLMCall & { specialistType?: SpecialistType } = entry;
+  if (typeof startedAtMs === 'number' && typeof enriched.durationMs !== 'number') {
+    const endedAtMs = typeof enriched.endedAtMs === 'number' ? enriched.endedAtMs : Date.now();
+    enriched = {
+      ...enriched,
+      startedAtMs: enriched.startedAtMs ?? startedAtMs,
+      endedAtMs,
+      durationMs: Math.max(0, endedAtMs - startedAtMs),
+    };
+  }
+  trace.llmCalls.push(enriched);
 }
 
 export function pushToolTrace(

@@ -131,3 +131,83 @@ export interface StewardAgentParams {
     llmCalls?: TurnTraceLLMCall[];
   };
 }
+
+/**
+ * Lean seed for the Steward prompt.
+ *
+ * Design rule: top-line routing facts only. Nearby actor names, location id/name,
+ * pending prompt one-liner, short scene/world summaries. The Steward pulls full
+ * detail via inspect_world_summary / inspect_council_results on demand.
+ */
+export interface StewardBrief {
+  turnNumber: number;
+  playerText: string;
+  pendingPrompt: { id: string; kind: string; question: string } | null;
+  location: { id: string | null; name: string };
+  player: { id: string; name: string; inventoryCount: number };
+  nearby: {
+    actorNames: string[];
+    locationNames: string[];
+  };
+  time: { day: number; hour: number; absoluteIso: string };
+  sceneSummary: {
+    focus: string | null;
+    topPressures: string[];
+    unresolvedBeatCount: number;
+  };
+  worldSummary: {
+    activeThreadHints: string[];
+    introductionOpportunities: string[];
+    heldBeatCount: number;
+    pendingEventCount: number;
+  };
+}
+
+export function buildStewardBrief(context: StewardRoutingSummary): StewardBrief {
+  const clip = (v: string | undefined | null, max = 140): string => {
+    if (!v) return '';
+    const t = v.trim();
+    return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
+  };
+  const t = context.telemetry;
+  return {
+    turnNumber: context.turnNumber,
+    playerText: clip(context.playerText, 400),
+    pendingPrompt: context.pendingPrompt
+      ? {
+          id: context.pendingPrompt.id,
+          kind: context.pendingPrompt.kind,
+          question: clip(context.pendingPrompt.question),
+        }
+      : null,
+    location: {
+      id: t.location.id,
+      name: clip(t.location.name, 80),
+    },
+    player: {
+      id: t.player.id,
+      name: t.player.name,
+      inventoryCount: t.player.inventory.length,
+    },
+    nearby: {
+      actorNames: t.nearbyActors.slice(0, 6),
+      locationNames: t.nearbyLocations.slice(0, 6),
+    },
+    time: {
+      day: t.time.currentDay,
+      hour: t.time.currentHour,
+      absoluteIso: t.time.absoluteIso,
+    },
+    sceneSummary: {
+      focus: context.sceneSummary.currentFocus ? clip(context.sceneSummary.currentFocus) : null,
+      topPressures: context.sceneSummary.pressures.slice(0, 3).map(p => clip(p)),
+      unresolvedBeatCount: context.sceneSummary.unresolvedBeats.length,
+    },
+    worldSummary: {
+      activeThreadHints: context.worldSummary.activeThreads.slice(0, 4).map(x => clip(x)),
+      introductionOpportunities: context.worldSummary.introductionOpportunities.slice(0, 3).map(x => clip(x)),
+      heldBeatCount: context.worldSummary.heldBeatNotes.length,
+      pendingEventCount: context.worldSummary.pendingEventSummaries.length,
+    },
+  };
+}

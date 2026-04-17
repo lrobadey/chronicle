@@ -177,6 +177,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
     const iteration = i + 1;
     emitDebugEvent(debug, { type: 'gm.iteration.started', iteration });
     let response;
+    const llmStartedAt = Date.now();
     try {
       response = await llm.responsesCreate({
         apiKey,
@@ -197,7 +198,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
         inputItems: pendingInput.length,
         status: 'failed',
         error: classified,
-      });
+      }, llmStartedAt);
       throw error;
     }
 
@@ -223,7 +224,7 @@ export async function runGMAgent(params: GMAgentParams): Promise<{ finished: boo
       usage: response.usage,
       status: response.status,
       error: response.error ?? response.incomplete_details,
-    });
+    }, llmStartedAt);
 
     previousResponseId = response.id || previousResponseId;
 

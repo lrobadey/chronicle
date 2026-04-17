@@ -14,6 +14,7 @@ import type {
   CharacterReplyDraft,
   CharacterSelectionResult,
 } from './types';
+import { buildCharacterDesignerBrief } from './types';
 
 export interface CharacterDesignerAgentParams {
   apiKey?: string;
@@ -65,13 +66,15 @@ async function runCharacterDesignerLoop(
     });
   }
 
+  const brief = buildCharacterDesignerBrief(task.taskId, context);
   let previousResponseId: string | undefined;
   let pendingInput: ResponseInputItem[] = [
-    { role: 'system', content: JSON.stringify(task) },
+    { role: 'system', content: JSON.stringify({ brief }) },
     { role: 'user', content: context.playerText },
   ];
 
   for (let index = 0; index < 4; index += 1) {
+    const llmStartedAt = Date.now();
     const response = await params.llm.responsesCreate({
       apiKey: params.apiKey,
       model: params.model || DEFAULT_MODEL,
@@ -95,7 +98,7 @@ async function runCharacterDesignerLoop(
       usage: response.usage,
       status: response.status,
       error: response.error ?? response.incomplete_details,
-    });
+    }, llmStartedAt);
     previousResponseId = response.id || previousResponseId;
     if (!toolCalls.length) {
       return emptyCharacterResult(task.taskId, response.output_text || 'Character Designer ended without a result.');
@@ -135,38 +138,95 @@ function createCharacterRuntime(
   return {
     inspect_character_scene: async (input) => {
       if (input.focusNpcId) {
+        const npc = context.nearbyNpcs.find(n => n.npcId === input.focusNpcId) || null;
         return {
           ok: true,
-          npc: context.nearbyNpcs.find(npc => npc.npcId === input.focusNpcId) || null,
           question: input.question || null,
+          npc,
+          unknownId: npc ? false : true,
         };
       }
       return {
         ok: true,
         question: input.question || null,
-        nearbyNpcs: context.nearbyNpcs,
-        recentTurns: context.recentTurns,
-        pendingPrompt: context.pendingPrompt,
+        nearbyNpcs: context.nearbyNpcs.slice(0, 6).map(npc => ({
+          npcId: npc.npcId,
+          name: npc.name,
+          distanceMeters: npc.distanceMeters,
+          tags: (npc.tags || []).slice(0, 4),
+          tagline: npc.persona?.tagline ?? null,
+        })),
+        pendingPrompt: context.pendingPrompt
+          ? {
+              id: context.pendingPrompt.id,
+              kind: context.pendingPrompt.kind,
+              question: context.pendingPrompt.question,
+            }
+          : null,
+        totals: { nearbyNpcs: context.nearbyNpcs.length },
       };
     },
-    inspect_conversation_history: async (input) => ({
-      ok: true,
-      conversationHistory: typeof input.limit === 'number' && input.limit > 0
-        ? context.conversationHistory.slice(-Math.max(1, Math.floor(input.limit)))
-        : context.conversationHistory,
-    }),
-    inspect_relationship_state: async (input) => ({
-      ok: true,
-      relationships: input.npcId
-        ? (context.nearbyNpcs.find(npc => npc.npcId === input.npcId)?.relationships || [])
-        : context.nearbyNpcs.map(npc => ({ npcId: npc.npcId, name: npc.name, relationships: npc.relationships })),
-    }),
-    inspect_faction_context: async (input) => ({
-      ok: true,
-      factionContext: input.npcId
-        ? (context.nearbyNpcs.find(npc => npc.npcId === input.npcId)?.factionMemberships || [])
-        : context.factionContext,
-    }),
+    inspect_conversation_history: async (input) => {
+      const requested = typeof input.limit === 'number' && input.limit > 0
+        ? Math.floor(input.limit)
+        : 6;
+      const limit = Math.min(requested, 20);
+      const conversationHistory = context.conversationHistory
+        .slice(-limit)
+        .map(entry => ({
+          turn: entry.turn,
+          role: entry.role,
+          speakerId: entry.speakerId ?? null,
+          speakerName: entry.speakerName ?? null,
+          text: entry.text.slice(0, 240),
+        }));
+      return {
+        ok: true,
+        conversationHistory,
+        totals: { conversationHistory: context.conversationHistory.length },
+      };
+    },
+    inspect_relationship_state: async (input) => {
+      if (input.npcId) {
+        const npc = context.nearbyNpcs.find(n => n.npcId === input.npcId);
+        return {
+          ok: true,
+          npcId: input.npcId,
+          relationships: npc?.relationships ?? [],
+          unknownId: Boolean(!npc),
+        };
+      }
+      return {
+        ok: true,
+        npcs: context.nearbyNpcs.slice(0, 6).map(npc => ({
+          npcId: npc.npcId,
+          name: npc.name,
+          relationshipCount: npc.relationships.length,
+          topRelationships: [...npc.relationships]
+            .sort((a, b) =>
+              Math.abs((b.trust ?? 0) + (b.affinity ?? 0) - (b.fear ?? 0))
+              - Math.abs((a.trust ?? 0) + (a.affinity ?? 0) - (a.fear ?? 0)),
+            )
+            .slice(0, 3),
+        })),
+        totals: { nearbyNpcs: context.nearbyNpcs.length },
+      };
+    },
+    inspect_faction_context: async (input) => {
+      if (input.npcId) {
+        const npc = context.nearbyNpcs.find(n => n.npcId === input.npcId);
+        return {
+          ok: true,
+          npcId: input.npcId,
+          factionMemberships: npc?.factionMemberships ?? [],
+          unknownId: Boolean(!npc),
+        };
+      }
+      return {
+        ok: true,
+        factionContext: context.factionContext,
+      };
+    },
     worker_select_npc: async (input) => selectNpcWorker(context, input.playerText || context.playerText),
     worker_draft_npc_reply: async (input) => draftNpcReplyWorker(context, input.npcId, params),
     worker_draft_private_intent: async (input) => draftNpcIntentWorker(context, input.npcId, params),
@@ -352,6 +412,7 @@ async function runCharacterWorkerTool(params: {
   trace?: { llmCalls?: any[] };
   agent: 'character_worker';
 }) {
+  const llmStartedAt = Date.now();
   const response = await params.llm.responsesCreate({
     apiKey: params.apiKey,
     model: params.model,
@@ -379,7 +440,7 @@ async function runCharacterWorkerTool(params: {
     usage: response.usage,
     status: response.status,
     error: response.error ?? response.incomplete_details,
-  });
+  }, llmStartedAt);
   if (!toolCall) return {};
   const parsed = parseObjectArgs(toolCall.arguments);
   return parsed.ok ? parsed.value : {};

@@ -40,6 +40,87 @@ export interface SystemsDesignerTaskContext {
   mechanicsRequest?: MechanicsWorkerRequest | null;
 }
 
+/**
+ * Lean seed for the Systems Designer agent prompt.
+ *
+ * Design rule: IDs + short one-line hooks. Full telemetry, full observations,
+ * and the full mechanics request are NOT in the seed; the agent pulls them via
+ * inspect_systems_scene / inspect_local_affordances / inspect_pending_prompt.
+ */
+export interface SystemsDesignerTaskBrief {
+  taskId: string;
+  intent: SystemsTurnIntent;
+  executionMode: 'full_agent' | 'direct_mechanics';
+  playerText: string;
+  pendingPrompt: { id: string; kind: string; question: string } | null;
+  location: { id: string | null; name: string | null };
+  travelCandidateIds: Array<{
+    id: string;
+    name: string;
+    distanceMeters: number;
+    blockedNow: boolean;
+    requiresConfirm: boolean;
+  }>;
+  landmarkCount: number;
+  nearby: {
+    actorCount: number;
+    itemsOnGroundCount: number;
+  };
+  affordanceHints: {
+    verbs: string[];
+  };
+  hasMechanicsRequest: boolean;
+}
+
+const SD_MAX_TEXT = 140;
+
+function sdClip(value: string | undefined | null, max = SD_MAX_TEXT): string {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (trimmed.length <= max) return trimmed;
+  return `${trimmed.slice(0, max - 1)}…`;
+}
+
+export function buildSystemsDesignerBrief(
+  taskId: string,
+  context: SystemsDesignerTaskContext,
+): SystemsDesignerTaskBrief {
+  const telemetry = context.telemetry as { location?: { id?: string | null; name?: string | null } } | undefined;
+  const location = telemetry?.location || {};
+  const verbs = Object.keys(context.localAffordances || {}).slice(0, 8);
+  return {
+    taskId,
+    intent: context.intent,
+    executionMode: context.executionMode ?? 'full_agent',
+    playerText: sdClip(context.playerText, 400),
+    pendingPrompt: context.pendingPrompt
+      ? {
+          id: context.pendingPrompt.id,
+          kind: context.pendingPrompt.kind,
+          question: sdClip(context.pendingPrompt.question),
+        }
+      : null,
+    location: {
+      id: location.id ?? null,
+      name: location.name ? sdClip(location.name, 80) : null,
+    },
+    travelCandidateIds: context.travelCandidates.slice(0, 6).map(t => ({
+      id: t.id,
+      name: sdClip(t.name, 80),
+      distanceMeters: t.distanceMeters,
+      blockedNow: t.blockedNow,
+      requiresConfirm: t.requiresConfirm,
+    })),
+    landmarkCount: context.landmarks.length,
+    nearby: {
+      actorCount: context.nearby.actors.length,
+      itemsOnGroundCount: context.nearby.itemsOnGround.length,
+    },
+    affordanceHints: { verbs },
+    hasMechanicsRequest: Boolean(context.mechanicsRequest),
+  };
+}
+
 export interface SystemsDesignerResultDetail {
   handled: boolean;
   fallbackReason?: string;

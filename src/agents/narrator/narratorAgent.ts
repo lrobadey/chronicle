@@ -103,6 +103,7 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
     emitDebugEvent(debug, { type: 'narrator.completed', phase: 'turn', text: fallback });
     return fallback;
   }
+  const llmStartedAt = Date.now();
   try {
     let streamedText = '';
     const response = await llm.responsesCreate({
@@ -137,7 +138,7 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
       usage: response.usage,
       status: response.status,
       error: response.error ?? response.incomplete_details,
-    });
+    }, llmStartedAt);
     const rendered = response.output_text?.trim() || streamedText.trim() || fallbackNarration(playerText, telemetry, diff, rejectedEvents);
     if (!response.output_text?.trim() && !streamedText.trim()) {
       onNarrationDelta?.(rendered);
@@ -150,7 +151,7 @@ export async function narrateTurn(params: NarratorParams): Promise<string> {
       inputItems: 1,
       status: 'failed',
       error: classifyLLMError(error),
-    });
+    }, llmStartedAt);
     const fallback = fallbackNarration(playerText, telemetry, diff, rejectedEvents);
     onNarrationDelta?.(fallback);
     emitDebugEvent(debug, { type: 'narrator.completed', phase: 'turn', text: fallback });
@@ -178,6 +179,7 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
     emitDebugEvent(debug, { type: 'narrator.completed', phase: 'opening', text: fallback });
     return fallback;
   }
+  const llmStartedAt = Date.now();
   try {
     let streamedText = '';
     const response = await llm.responsesCreate({
@@ -203,7 +205,7 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
       usage: response.usage,
       status: response.status,
       error: response.error ?? response.incomplete_details,
-    });
+    }, llmStartedAt);
     const rendered = response.output_text?.trim() || streamedText.trim() || fallbackOpening(telemetry, openingMode, openingContext);
     if (!response.output_text?.trim() && !streamedText.trim()) {
       onOpeningDelta?.(rendered);
@@ -216,7 +218,7 @@ export async function narrateOpening(params: NarratorOpeningParams): Promise<str
       inputItems: 1,
       status: 'failed',
       error: classifyLLMError(error),
-    });
+    }, llmStartedAt);
     const fallback = fallbackOpening(telemetry, openingMode, openingContext);
     onOpeningDelta?.(fallback);
     emitDebugEvent(debug, { type: 'narrator.completed', phase: 'opening', text: fallback });

@@ -169,7 +169,7 @@ describe('TurnEngine', () => {
     }
   });
 
-  it('injects full player-facing conversation history into CharacterDesigner context without leaking internal fields', async () => {
+  it('seeds the CharacterDesigner brief with the conversation tail without leaking internal fields', async () => {
     const { rootDir, store } = await createStore();
     try {
       const llm = new QueueLLM([
@@ -258,46 +258,26 @@ describe('TurnEngine', () => {
       const characterPayload = parseFirstSystemInput(characterCall);
       const rawCharacterPayload = JSON.stringify(characterPayload);
 
-      assert.deepEqual(characterPayload.context.conversationHistory, [
+      // The brief seeds the agent with only the recent conversation tail.
+      // Full history is pulled on demand via inspect_conversation_history.
+      const conversationTail = characterPayload.brief?.conversationTail;
+      assert.ok(Array.isArray(conversationTail), 'brief.conversationTail should be an array');
+      assert.deepEqual(conversationTail, [
         {
-          turn: 0,
-          role: 'opening',
-          speakerName: 'Narrator',
-          text: init.opening,
-          source: 'openingNarration',
-        },
-        {
-          turn: 1,
-          role: 'player',
-          speakerId: 'player-1',
-          speakerName: 'You',
-          text: 'Ask Tamar about the weed-line',
-          source: 'playerText',
-        },
-        {
-          turn: 1,
-          role: 'npc',
           speakerId: 'tamar-vane',
-          speakerName: 'Tamar Vane',
           text: 'Fresh drag marks. Not from this tide.',
-          source: 'npcPublicUtterance',
         },
         {
-          turn: 1,
-          role: 'narrator',
-          speakerName: 'Narrator',
+          speakerId: null,
           text: 'Tamar points at the higher pilings.',
-          source: 'turnNarration',
         },
         {
-          turn: 2,
-          role: 'player',
           speakerId: 'player-1',
-          speakerName: 'You',
           text: 'talk to Mira about what you saw after that',
-          source: 'playerText',
         },
       ]);
+
+      // Internal fields must not leak into the brief or the seed payload.
       assert.equal(rawCharacterPayload.includes('warn_player'), false);
       assert.equal(rawCharacterPayload.includes('secret specialist note'), false);
       assert.equal(rawCharacterPayload.includes('internal trace detail'), false);

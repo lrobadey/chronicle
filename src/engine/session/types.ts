@@ -132,6 +132,14 @@ export interface TurnTraceLLMCall {
     | 'world_worker';
   responseId?: string;
   previousResponseId?: string;
+  /** Epoch ms when the LLM request was issued (just before the network call). */
+  startedAtMs?: number;
+  /** Epoch ms when the LLM response returned. */
+  endedAtMs?: number;
+  /** Wall time of the LLM call in ms (endedAtMs - startedAtMs). */
+  durationMs?: number;
+  /** Response id of the parent agent call that triggered this one (e.g. a council call that fired a worker). */
+  parentResponseId?: string;
   inputItems?: number;
   outputItems?: number;
   toolCalls?: number;

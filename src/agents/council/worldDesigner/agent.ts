@@ -12,6 +12,7 @@ import type {
   WorldDesignerTaskContext,
   WorldDraftResult,
 } from './types';
+import { buildWorldDesignerBrief } from './types';
 
 export interface WorldDesignerAgentParams {
   apiKey?: string;
@@ -61,12 +62,14 @@ async function runWorldDesignerLoop(
     });
   }
 
+  const brief = buildWorldDesignerBrief(task.taskId, context);
   let previousResponseId: string | undefined;
   let pendingInput: ResponseInputItem[] = [
-    { role: 'system', content: JSON.stringify(task) },
+    { role: 'system', content: JSON.stringify({ brief }) },
     { role: 'user', content: context.playerText },
   ];
   for (let index = 0; index < 4; index += 1) {
+    const llmStartedAt = Date.now();
     const response = await params.llm.responsesCreate({
       apiKey: params.apiKey,
       model: params.model || DEFAULT_MODEL,
@@ -89,7 +92,7 @@ async function runWorldDesignerLoop(
       usage: response.usage,
       status: response.status,
       error: response.error ?? response.incomplete_details,
-    });
+    }, llmStartedAt);
     previousResponseId = response.id || previousResponseId;
     if (!toolCalls.length) {
       return emptyWorldResult(task.taskId, response.output_text || 'World Designer ended without a result.');
@@ -127,36 +130,104 @@ function createWorldRuntime(
     inspect_world_scene: async (input) => ({
       ok: true,
       question: input.question || null,
-      playerText: context.playerText,
-      sceneAgenda: context.sceneAgenda,
-      recentTurns: context.recentTurns,
+      scene: {
+        focus: context.sceneAgenda.currentFocus ?? null,
+        topPressures: context.sceneAgenda.pressures.slice(0, 5),
+        topTensions: context.sceneAgenda.immediateTensions.slice(0, 5),
+        unresolvedBeats: context.sceneAgenda.unresolvedBeats.slice(0, 5),
+      },
+      recentTurnHeadlines: context.recentTurns.slice(-3).map(turn => ({
+        turn: turn.turn,
+        headline: (turn.playerText || turn.narration || '').slice(0, 160),
+      })),
+      totals: { recentTurns: context.recentTurns.length },
     }),
-    inspect_world_pressure: async (input) => ({
-      ok: true,
-      includeThreads: input.includeThreads === true,
-      sceneAgenda: context.sceneAgenda,
-      worldAgenda: context.worldAgenda,
-      activeThreads: input.includeThreads === true ? context.activeThreads : [],
-      pendingWorldEvents: context.pendingWorldEvents,
-    }),
-    inspect_world_threads: async (input) => ({
-      ok: true,
-      activeThreads: typeof input.limit === 'number' && input.limit > 0
-        ? context.activeThreads.slice(0, Math.floor(input.limit))
-        : context.activeThreads,
-    }),
-    inspect_held_beats: async (input) => ({
-      ok: true,
-      heldBeats: typeof input.limit === 'number' && input.limit > 0
-        ? context.heldBeats.slice(0, Math.floor(input.limit))
-        : context.heldBeats,
-    }),
-    inspect_pending_world_events: async (input) => ({
-      ok: true,
-      pendingWorldEvents: typeof input.pressureFloor === 'number'
-        ? context.pendingWorldEvents.filter(event => (event.pressure || 0) >= input.pressureFloor!)
-        : context.pendingWorldEvents,
-    }),
+    inspect_world_pressure: async (input) => {
+      const includeThreads = input.includeThreads === true;
+      const topThreads = [...context.activeThreads]
+        .sort((a, b) => (b.pressure ?? 0) - (a.pressure ?? 0))
+        .slice(0, 5)
+        .map(t => ({ id: t.id, name: t.name, pressure: t.pressure, status: t.status }));
+      const topPendingEvents = [...context.pendingWorldEvents]
+        .sort((a, b) => (b.pressure ?? 0) - (a.pressure ?? 0))
+        .slice(0, 5)
+        .map(e => ({ id: e.id, summary: e.summary, pressure: e.pressure ?? null, dueTurn: e.dueTurn ?? null }));
+      return {
+        ok: true,
+        scene: {
+          topPressures: context.sceneAgenda.pressures.slice(0, 5),
+          topTensions: context.sceneAgenda.immediateTensions.slice(0, 5),
+        },
+        world: {
+          activeThreadHints: context.worldAgenda.activeThreads.slice(0, 5),
+          escalationHooks: context.worldAgenda.escalationHooks.slice(0, 5),
+        },
+        topActiveThreads: includeThreads ? topThreads : [],
+        topPendingEvents,
+        totals: {
+          activeThreads: context.activeThreads.length,
+          pendingWorldEvents: context.pendingWorldEvents.length,
+        },
+      };
+    },
+    inspect_world_threads: async (input) => {
+      const requested = typeof input.limit === 'number' && input.limit > 0 ? Math.floor(input.limit) : 6;
+      const limit = Math.min(requested, 12);
+      const threads = [...context.activeThreads]
+        .sort((a, b) => (b.pressure ?? 0) - (a.pressure ?? 0))
+        .slice(0, limit)
+        .map(t => ({
+          id: t.id,
+          name: t.name,
+          pressure: t.pressure,
+          status: t.status,
+          domain: t.domain ?? null,
+          createdTurn: t.createdTurn,
+          lastUpdatedTurn: t.lastUpdatedTurn,
+        }));
+      return {
+        ok: true,
+        activeThreads: threads,
+        totals: { activeThreads: context.activeThreads.length },
+      };
+    },
+    inspect_held_beats: async (input) => {
+      const requested = typeof input.limit === 'number' && input.limit > 0 ? Math.floor(input.limit) : 4;
+      const limit = Math.min(requested, 8);
+      const heldBeats = context.heldBeats.slice(0, limit).map(b => ({
+        id: b.id,
+        note: b.note,
+        releaseConditions: b.releaseConditions ?? [],
+        createdTurn: b.createdTurn,
+      }));
+      return {
+        ok: true,
+        heldBeats,
+        totals: { heldBeats: context.heldBeats.length },
+      };
+    },
+    inspect_pending_world_events: async (input) => {
+      const floor = typeof input.pressureFloor === 'number' ? input.pressureFloor : 0;
+      const filtered = context.pendingWorldEvents.filter(event => (event.pressure ?? 0) >= floor);
+      const events = [...filtered]
+        .sort((a, b) => (b.pressure ?? 0) - (a.pressure ?? 0))
+        .slice(0, 6)
+        .map(e => ({
+          id: e.id,
+          summary: e.summary,
+          pressure: e.pressure ?? null,
+          dueTurn: e.dueTurn ?? null,
+          domain: e.domain ?? null,
+        }));
+      return {
+        ok: true,
+        pendingWorldEvents: events,
+        totals: {
+          filtered: filtered.length,
+          pendingWorldEvents: context.pendingWorldEvents.length,
+        },
+      };
+    },
     worker_draft_scene_motion: async () => draftWorldWorker({
       apiKey: params.apiKey,
       llm: params.llm,
@@ -239,6 +310,7 @@ async function draftWorldWorker(params: {
   trace?: { llmCalls?: any[] };
 }): Promise<WorldDraftResult> {
   if (!params.apiKey) return { summary: params.fallbackSummary, candidateEvents: [] };
+  const llmStartedAt = Date.now();
   const response = await params.llm.responsesCreate({
     apiKey: params.apiKey,
     model: params.model,
@@ -273,7 +345,7 @@ async function draftWorldWorker(params: {
     usage: response.usage,
     status: response.status,
     error: response.error ?? response.incomplete_details,
-  });
+  }, llmStartedAt);
   const toolCall = response.output.filter(isFunctionCallItem).find(call => call.name === 'emit_world_worker_result');
   const parsed = toolCall ? parseObjectArgs(toolCall.arguments) : null;
   return {

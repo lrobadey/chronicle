@@ -14,6 +14,7 @@ import type {
   SystemsDesignerResultDetail,
   SystemsDesignerTaskContext,
 } from './types';
+import { buildSystemsDesignerBrief } from './types';
 import type { WorldEvent } from '../../../sim/events';
 
 export interface SystemsDesignerAgentParams {
@@ -132,12 +133,14 @@ async function runSystemsDesignerLoop(
     return emptySystemsResult(task.taskId, 'Systems Designer had no safe deterministic path.');
   }
 
+  const brief = buildSystemsDesignerBrief(task.taskId, context);
   let previousResponseId: string | undefined;
   let pendingInput: ResponseInputItem[] = [
-    { role: 'system', content: JSON.stringify(task) },
+    { role: 'system', content: JSON.stringify({ brief }) },
     { role: 'user', content: context.playerText },
   ];
   for (let index = 0; index < 4; index += 1) {
+    const llmStartedAt = Date.now();
     const response = await params.llm.responsesCreate({
       apiKey: params.apiKey,
       model: params.model || DEFAULT_MODEL,
@@ -160,7 +163,7 @@ async function runSystemsDesignerLoop(
       usage: response.usage,
       status: response.status,
       error: response.error ?? response.incomplete_details,
-    });
+    }, llmStartedAt);
     previousResponseId = response.id || previousResponseId;
     if (!toolCalls.length) {
       return emptySystemsResult(task.taskId, response.output_text || 'Systems Designer ended without a result.');
@@ -198,24 +201,67 @@ function createSystemsRuntime(
   const scheduleResolutions = new Map<string, ScheduleResolution>();
 
   return {
-    inspect_systems_scene: async (input) => ({
-      ok: true,
-      question: input.question || null,
-      intent: context.intent,
-      telemetry: context.telemetry,
-      observation: context.observation,
-      nearby: context.nearby,
-      travelCandidates: context.travelCandidates,
-      landmarks: context.landmarks,
-    }),
-    inspect_local_affordances: async (input) => ({
-      ok: true,
-      focus: input.focus || null,
-      localAffordances: context.localAffordances,
-    }),
+    inspect_systems_scene: async (input) => {
+      const t = context.telemetry;
+      return {
+        ok: true,
+        question: input.question || null,
+        intent: context.intent,
+        location: { id: t.location.id, name: t.location.name, description: t.location.description.slice(0, 180) },
+        player: {
+          id: t.player.id,
+          name: t.player.name,
+          inventory: t.player.inventory.slice(0, 8).map(i => ({ id: i.id, name: i.name })),
+          inventoryTotal: t.player.inventory.length,
+        },
+        time: t.time,
+        weather: t.weather,
+        nearbyActors: t.nearbyActors.slice(0, 6),
+        nearbyLocations: t.nearbyLocations.slice(0, 6),
+        travelCandidates: context.travelCandidates.slice(0, 6).map(c => ({
+          id: c.id,
+          name: c.name,
+          distanceMeters: c.distanceMeters,
+          blockedNow: c.blockedNow,
+          requiresConfirm: c.requiresConfirm,
+        })),
+        totals: {
+          nearbyActors: t.nearbyActors.length,
+          nearbyLocations: t.nearbyLocations.length,
+          travelCandidates: context.travelCandidates.length,
+          landmarks: context.landmarks.length,
+          nearbyItemsOnGround: context.nearby.itemsOnGround.length,
+        },
+      };
+    },
+    inspect_local_affordances: async (input) => {
+      const focus = input.focus || null;
+      const allVerbs = Object.keys(context.localAffordances || {});
+      if (focus && context.localAffordances && (context.localAffordances as Record<string, unknown>)[focus] !== undefined) {
+        return {
+          ok: true,
+          focus,
+          affordance: (context.localAffordances as Record<string, unknown>)[focus],
+          knownVerbs: allVerbs,
+        };
+      }
+      return {
+        ok: true,
+        focus,
+        verbs: allVerbs,
+        totals: { verbs: allVerbs.length },
+      };
+    },
     inspect_pending_prompt: async () => ({
       ok: true,
-      pendingPrompt: context.pendingPrompt,
+      pendingPrompt: context.pendingPrompt
+        ? {
+            id: context.pendingPrompt.id,
+            kind: context.pendingPrompt.kind,
+            question: context.pendingPrompt.question,
+            options: context.pendingPrompt.options ?? [],
+          }
+        : null,
     }),
     resolve_mechanics: async (input) => {
       const request = {

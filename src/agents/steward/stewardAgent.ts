@@ -6,6 +6,7 @@ import { emitDebugEvent } from '../../engine/debug';
 import { STEWARD_SYSTEM_PROMPT } from './prompts';
 import { STEWARD_TOOL_DEFS } from './tools';
 import type { StewardAgentParams, StewardFinishTurnInput } from './types';
+import { buildStewardBrief } from './types';
 
 const STEWARD_TOOL_NAMES = new Set([
   'inspect_world_summary',
@@ -39,9 +40,10 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
     executionMs: 0,
   });
 
+  const brief = buildStewardBrief(context);
   let previousResponseId: string | undefined;
   let pendingInput: ResponseInputItem[] = [
-    { role: 'system', content: JSON.stringify(context) },
+    { role: 'system', content: JSON.stringify({ brief }) },
     { role: 'user', content: playerText },
   ];
 
@@ -49,6 +51,7 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
     const iteration = index + 1;
     emitDebugEvent(debug, { type: 'steward.iteration.started', iteration });
     let response;
+    const llmStartedAt = Date.now();
     try {
       response = await llm.responsesCreate({
         apiKey,
@@ -68,7 +71,7 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
         inputItems: pendingInput.length,
         status: 'failed',
         error: classifyLLMError(error),
-      });
+      }, llmStartedAt);
       throw error;
     }
 
@@ -94,7 +97,7 @@ export async function runStewardAgent(params: StewardAgentParams): Promise<{ fin
       usage: response.usage,
       status: response.status,
       error: response.error ?? response.incomplete_details,
-    });
+    }, llmStartedAt);
 
     previousResponseId = response.id || previousResponseId;
     if (!toolCalls.length) {

@@ -90,6 +90,7 @@ export async function runNpcAgent(params: NpcAgentParams): Promise<NpcAgentOutpu
   });
 
   let response;
+  const llmStartedAt = Date.now();
   try {
     response = await llm.responsesCreate({
       apiKey,
@@ -107,7 +108,7 @@ export async function runNpcAgent(params: NpcAgentParams): Promise<NpcAgentOutpu
       inputItems: 1,
       status: 'failed',
       error: classifyLLMError(error),
-    });
+    }, llmStartedAt);
     const fallback = {
       npcId,
       publicUtterance: `${persona.name} says nothing.`,
@@ -128,7 +129,7 @@ export async function runNpcAgent(params: NpcAgentParams): Promise<NpcAgentOutpu
     usage: response.usage,
     status: response.status,
     error: response.error ?? response.incomplete_details,
-  });
+  }, llmStartedAt);
 
   if (!resultCall) {
     const fallback = {

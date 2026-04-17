@@ -61,6 +61,7 @@ export async function runSpecialistAgent(params: SpecialistAgentParams): Promise
   }
 
   let response;
+  const llmStartedAt = Date.now();
   try {
     response = await llm.responsesCreate({
       apiKey,
@@ -79,7 +80,7 @@ export async function runSpecialistAgent(params: SpecialistAgentParams): Promise
       inputItems: 1,
       status: 'failed',
       error: classifyLLMError(error),
-    });
+    }, llmStartedAt);
     const fallback = fallbackSpecialistOutput(specialistType, question, focus);
     emitDebugEvent(debug, { type: 'specialist.completed', specialistType, output: fallback });
     return fallback;
@@ -97,7 +98,7 @@ export async function runSpecialistAgent(params: SpecialistAgentParams): Promise
     usage: response.usage,
     status: response.status,
     error: response.error ?? response.incomplete_details,
-  });
+  }, llmStartedAt);
 
   if (!resultCall) {
     const fallback = fallbackSpecialistOutput(specialistType, question, focus);

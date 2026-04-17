@@ -169,6 +169,7 @@ export async function runMechanicsAgent(params: MechanicsAgentParams): Promise<M
   for (let index = 0; index < selectedModels.length; index++) {
     const selectedModel = selectedModels[index]!;
     let response;
+    const llmStartedAt = Date.now();
 
     try {
       response = await llm.responsesCreate({
@@ -189,7 +190,7 @@ export async function runMechanicsAgent(params: MechanicsAgentParams): Promise<M
         inputItems: 1,
         status: 'failed',
         error: failureReason,
-      });
+      }, llmStartedAt);
       return failedMechanicsOutput(
         request,
         failureReason,
@@ -210,7 +211,7 @@ export async function runMechanicsAgent(params: MechanicsAgentParams): Promise<M
       usage: response.usage,
       status: response.status,
       error: response.error ?? response.incomplete_details,
-    });
+    }, llmStartedAt);
 
     if (!resultCall) {
       lastFailureReason = String(response.error ?? response.incomplete_details ?? 'missing_function_output');
