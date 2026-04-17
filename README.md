@@ -1,15 +1,33 @@
 # Chronicle vNext
 
-Chronicle vNext is the active Chronicle runtime: a deterministic simulation core with an agentic GM layer, a small HTTP API, and an interactive CLI. The default world is **Isle of Marrow**.
+Chronicle vNext is the active Chronicle runtime: a deterministic simulation core with a steward-routed agent hierarchy, a small HTTP API, and an operator-first CLI. The default world is **Isle of Marrow**.
 
 ## Agent Architecture
 
-Chronicle is currently in a transition state between a legacy GM-centric loop and the planned Steward + Council hierarchy.
+Chronicle is now running the steward + council shape in the active runtime.
 
-- The implemented current-state architecture is documented in [`docs/CURRENT_AGENT_ARCHITECTURE.md`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/docs/CURRENT_AGENT_ARCHITECTURE.md).
+- The current runtime boundary is documented in [`docs/CURRENT_AGENT_ARCHITECTURE.md`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/docs/CURRENT_AGENT_ARCHITECTURE.md).
 - The long-term target remains [`docs/CHRONICLE_NORTH_STAR.md`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/docs/CHRONICLE_NORTH_STAR.md).
 
-Short version: the steward is real in the active runtime, but only owns a narrow systems slice today. The full multi-domain council is not yet in place, and the GM still handles most turns.
+Short version: the steward is the turn router and synthesis layer, the council has real domain agents for character, world, and systems work, and the GM remains a fallback path for turns the steward cannot safely own.
+
+## Current Status
+
+The repo is centered on the active vNext runtime rather than a legacy hybrid.
+
+- `src/engine/turnEngine.ts` is the main orchestration seam.
+- `src/agents/steward/*` owns turn opening, task dispatch, and turn closure.
+- `src/agents/council/*` contains the active domain agents.
+- `src/cli/*` is now operator-first, with structured inspection and turn controls.
+- `src/server.ts` still exposes the small HTTP compatibility API.
+
+Recent commits that show the current direction:
+
+- `7ad87f9` - `Add startup world selection and CLI thinking animation` on 2026-04-16.
+- `a1a5847` - `Add operator-first CLI workflows` on 2026-04-15.
+- `77d4399` - `Reshape steward as router and expand council into per-domain agent loops` on 2026-04-15.
+- `8db9442` - `Promote steward to full GM: remove delegate_legacy_gm, add direct NPC/specialist/event tools` on 2026-04-15.
+- `fa551be` - `Document current steward architecture and export hierarchy APIs` on 2026-04-15.
 
 ## What's In This Repo
 

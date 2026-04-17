@@ -9,15 +9,15 @@ This file defines the implemented runtime boundary.
 
 ## Status
 
-Chronicle does **not** yet have the full Steward + Council system in place.
+Chronicle now has the active Steward + Council system in place.
 
 What exists today is:
 
 - a real Steward entry/exit path in the active turn engine
 - a real hierarchy type layer (`TurnPlan`, council task/result packets, registry types)
-- one implemented council domain: `systems`
-- a legacy GM loop that still owns most turns
-- proto-council components that remain advisory rather than domain-authoritative
+- three implemented council domains: `character`, `world`, and `systems`
+- a legacy GM loop that remains available as an explicit fallback and compatibility path
+- stewardship and council dispatch that are domain-authoritative for the turns they own
 
 ## Runtime Shape
 
@@ -28,16 +28,16 @@ Each player turn currently follows this shape:
 1. `TurnEngine` builds bounded turn context.
 2. `openStewardTurn()` classifies the action and may emit council tasks.
 3. If the turn is clearly mechanics-owned, the steward attempts deterministic mechanics preflight.
-4. If the turn matches the current systems slice, the engine dispatches the task to `runSystemsDesignerTask()`.
-5. `closeStewardTurn()` decides whether the steward-owned result is safe to commit and whether narration can use a systems handoff packet.
+4. The steward dispatches bounded council work to the appropriate domain runner, including `runCharacterDesignerTask()`, `runWorldDesignerTask()`, or `runSystemsDesignerTask()`.
+5. `closeStewardTurn()` decides whether the steward-owned result is safe to commit and whether narration can use a council handoff packet.
 6. If that steward path does not fully handle the turn, control falls back to the legacy GM loop via `runGMAgent()`.
-7. Narration is generated from either the systems handoff packet or the legacy GM-driven turn result.
+7. Narration is generated from either the council handoff packet or the legacy GM-driven turn result.
 
 In other words:
 
 - the steward is real
-- the council is partial
-- the GM is still the general fallback governor
+- the council is real and domain-split
+- the GM is still the fallback governor, not the primary owner of routine turns
 
 ## What The Steward Owns Today
 
@@ -47,17 +47,18 @@ Today the steward can:
 
 - classify a turn using `classifyTurn()`
 - recognize deterministic mechanics-owned turns
-- build one systems council task for:
+- build council tasks for:
   - read-only observation
   - cardinal movement
-- synthesize the result of that systems task
+- route work to the matching council domain
+- synthesize the result of those tasks
 - decide whether to commit those proposed events or fall back to the GM
 
 Today the steward does **not** yet:
 
-- maintain its own distinct runtime agent with cross-session reasoning
-- dispatch multiple council domains in parallel
-- use `CouncilRegistry` at runtime
+- maintain its own persistent cross-session memory as a separate world-authority layer
+- dispatch arbitrarily many council domains without bounded turn context
+- use `CouncilRegistry` as an open-ended free-for-all
 - directly own DirectorState evolution in a richer way than the existing GM contract
 - replace the GM for ambiguous or multi-domain turns
 
@@ -69,22 +70,22 @@ The council surface lives in [`src/agents/council/`](/Users/lucarobadey/Desktop/
 
 Implemented now:
 
+- `characterDesigner`
+  - real executable task runner
+  - handles character-facing bounded reasoning
+- `worldDesigner`
+  - real executable task runner
+  - handles world-facing bounded reasoning
 - `systemsDesigner`
   - real executable task runner
   - can own observation turns
   - can own safe cardinal movement turns by delegating to the mechanics worker
 
-Scaffold only:
-
-- `worldDesigner` types only
-- `characterDesigner` types only
-
 Not yet true in the active runtime:
 
-- world designer dispatch
-- character designer dispatch
-- multi-council synthesis
-- council-owned worker trees beyond the systems slice
+- unbounded multi-council fanout with no turn budgeting
+- autonomous council loops that bypass steward routing
+- council-owned worker trees without turn-level guardrails
 
 ## Relation To The GM
 
@@ -100,9 +101,9 @@ That GM still:
 
 So the current architecture is best described as:
 
-**Steward-first routing for a narrow systems-owned slice, with legacy GM fallback for everything else.**
+**Steward-first routing with a real multi-domain council, plus explicit GM fallback for turns that need it.**
 
-It is **not** yet a fully promoted steward replacing the GM as the universal turn owner.
+The GM is no longer the primary owner of the whole runtime, but it still remains part of the safety net and legacy compatibility path.
 
 ## Proto-Council Components
 
@@ -112,16 +113,16 @@ Several older agent surfaces already behave like proto-council pieces but are no
 - [`src/agents/npc/`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/npc)
 - [`src/agents/mechanics/`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/mechanics)
 
-Right now they are mostly called by the GM or by the systems council slice, not by a generalized council registry.
+Right now they are mostly called through steward/council routing or by the GM fallback, not by a generalized open-ended registry.
 
 ## Official Working Definition
 
 Until the broader migration lands, Chronicle should use this terminology:
 
-- **Steward**: the active routing and synthesis layer that opens a turn, may dispatch bounded council work, and either closes the turn or falls back to the GM.
+- **Steward**: the active routing and synthesis layer that opens a turn, dispatches bounded council work, and either closes the turn or falls back to the GM.
 - **Council**: the bounded domain-owner interface represented by hierarchy contracts and council task/result packets.
-- **Systems Council**: the only currently implemented council domain in active turn execution.
-- **GM**: the legacy generalist controller that remains responsible for all turns the current steward path cannot safely own.
+- **Systems Council**: one of the currently implemented council domains in active turn execution.
+- **GM**: the legacy generalist controller that remains responsible for turns the current steward path cannot safely own.
 
 ## Practical Migration Standard
 
