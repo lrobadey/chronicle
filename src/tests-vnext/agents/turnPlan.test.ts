@@ -109,6 +109,20 @@ describe('classifyTurn', () => {
     assert.deepEqual(turnPlan.optionalDomains, ['world']);
   });
 
+  it('routes prefixed observation to systems with world advisory', () => {
+    const turnPlan = classifyTurn({
+      playerText: 'i look around',
+      directorState: createDirectorState(),
+      telemetry: {},
+      pendingPrompt: null,
+      turnNumber: 3,
+    });
+
+    assert.equal(turnPlan.classification, 'simple_council');
+    assert.deepEqual(turnPlan.requiredDomains, ['systems']);
+    assert.deepEqual(turnPlan.optionalDomains, ['world']);
+  });
+
   it('routes NPC interaction to character and adds systems for trade language', () => {
     const talkPlan = classifyTurn({
       playerText: 'talk to Mira',

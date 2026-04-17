@@ -9,7 +9,7 @@ import type {
 function inferSystemsIntent(playerText: string): SystemsDesignerTaskContext['intent'] | null {
   const text = playerText.trim().toLowerCase();
   if (
-    /^(look\b|look around|observe|examine surroundings|where am i|inventory|check inventory|what do i (have|see|carry))/.test(text)
+    /^(?:i\s+)?(look\b|look around|observe|examine surroundings|where am i|inventory|check inventory|what do i (have|see|carry))/.test(text)
   ) {
     return 'observation';
   }

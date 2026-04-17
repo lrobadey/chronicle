@@ -328,16 +328,42 @@ export class OperatorCliEngine {
     narratorStyle?: NarratorStyle;
     onDebugEvent?: (event: DebugEvent) => void;
   }): Promise<TurnExecutionReport> {
-    const init = await this.initSessionDetailed({
-      sessionId: params.sessionId,
-      worldId: params.worldId,
-      apiKey: params.apiKey,
-      apiMode: params.apiMode,
-      onDebugEvent: params.onDebugEvent,
-    });
+    const runTurnDetailedStartedAt = Date.now();
+    // #region agent log
+    fetch('http://127.0.0.1:7412/ingest/6414e5d3-0ba2-48dd-aec2-bcdd9c092ae4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'10fa75'},body:JSON.stringify({sessionId:'10fa75',runId:'operator-run-turn',hypothesisId:'H3',location:'src/cli/operatorEngine.ts:331',message:'runTurnDetailed entered',data:{hasSessionId:Boolean(params.sessionId),worldId:params.worldId??null,apiMode:params.apiMode,playerTextLength:params.playerText.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    const reinitStartedAt = Date.now();
+    const existingState = params.sessionId ? await this.store.loadSession(params.sessionId) : null;
+    let resolvedSessionId: string;
+    let resolvedWorldId: string;
+    let resolvedWorldDisplayName: string;
+    let sessionCreated = false;
+    let initUsedFallback = false;
+    if (existingState && params.sessionId) {
+      const world = this.worldResolver(existingState.meta.worldId);
+      resolvedSessionId = params.sessionId;
+      resolvedWorldId = world.id;
+      resolvedWorldDisplayName = world.displayName;
+    } else {
+      const init = await this.initSessionDetailed({
+        sessionId: params.sessionId,
+        worldId: params.worldId,
+        apiKey: params.apiKey,
+        apiMode: params.apiMode,
+        onDebugEvent: params.onDebugEvent,
+      });
+      resolvedSessionId = init.result.sessionId;
+      resolvedWorldId = init.result.world.id;
+      resolvedWorldDisplayName = init.result.world.displayName;
+      sessionCreated = init.result.created;
+      initUsedFallback = init.usedFallback;
+    }
+    // #region agent log
+    fetch('http://127.0.0.1:7412/ingest/6414e5d3-0ba2-48dd-aec2-bcdd9c092ae4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'10fa75'},body:JSON.stringify({sessionId:'10fa75',runId:'operator-run-turn',hypothesisId:'H3',location:'src/cli/operatorEngine.ts:338',message:'runTurnDetailed session init completed',data:{elapsedMs:Date.now()-reinitStartedAt,sessionCreated,usedFallback:initUsedFallback,resolvedSessionId,reusedExisting:Boolean(existingState)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
-    const beforeState = await this.loadSessionState(init.result.sessionId);
-    const beforeHistory = await this.store.loadTurnLog(init.result.sessionId);
+    const beforeState = await this.loadSessionState(resolvedSessionId);
+    const beforeHistory = await this.store.loadTurnLog(resolvedSessionId);
     const pendingPromptBefore = beforeState.meta.pendingPrompt ?? beforeHistory[beforeHistory.length - 1]?.pendingPrompt ?? null;
     const beforeTelemetry = buildTelemetry(beforeState, params.playerId);
     const routePlan = classifyTurn({
@@ -353,9 +379,10 @@ export class OperatorCliEngine {
       debugEvents.push(event);
       params.onDebugEvent?.(event);
     };
+    const engineRunStartedAt = Date.now();
     const { result, usedFallback } = await runTurnWithFallback({
       engine: this.engine,
-      sessionId: init.result.sessionId,
+      sessionId: resolvedSessionId,
       playerId: params.playerId,
       playerText: params.playerText,
       apiKey: params.apiKey,
@@ -364,19 +391,22 @@ export class OperatorCliEngine {
       narratorStyle: params.narratorStyle,
       onDebugEvent: emitDebug,
     });
+    // #region agent log
+    fetch('http://127.0.0.1:7412/ingest/6414e5d3-0ba2-48dd-aec2-bcdd9c092ae4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'10fa75'},body:JSON.stringify({sessionId:'10fa75',runId:'operator-run-turn',hypothesisId:'H4',location:'src/cli/operatorEngine.ts:367',message:'engine runTurn completed',data:{elapsedMs:Date.now()-engineRunStartedAt,usedFallback,turn:result.turn,acceptedEvents:result.acceptedEvents.length,rejectedEvents:result.rejectedEvents.length,totalElapsedMs:Date.now()-runTurnDetailedStartedAt},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
-    const afterState = await this.loadSessionState(init.result.sessionId);
-    const afterHistory = await this.store.loadTurnLog(init.result.sessionId);
+    const afterState = await this.loadSessionState(resolvedSessionId);
+    const afterHistory = await this.store.loadTurnLog(resolvedSessionId);
     const latestTurn = afterHistory[afterHistory.length - 1];
     if (!latestTurn) {
       throw new Error(`Missing turn record after executing turn ${result.turn}`);
     }
 
     const afterTelemetry = latestTurn.telemetry || buildTelemetry(afterState, params.playerId);
-    const sessionSummary = await this.getSessionSummary(init.result.sessionId);
+    const sessionSummary = await this.getSessionSummary(resolvedSessionId);
     const route = buildRouteSummary(latestTurn, routePlan);
     const stateDelta = buildStateDeltaReport(beforeTelemetry, afterTelemetry, latestTurn.acceptedEvents);
-    const executionMode = usedFallback
+    const executionMode = usedFallback || initUsedFallback
       ? 'auto->fallback'
       : params.apiMode === 'fallback' || !params.apiKey
         ? 'fallback'
@@ -391,15 +421,15 @@ export class OperatorCliEngine {
     });
 
     return {
-      sessionCreated: init.result.created,
+      sessionCreated,
       sessionSummary,
       input: {
         rawPlayerText: params.playerText,
         normalizedPlayerText: normalizePlayerText(params.playerText),
-        sessionId: init.result.sessionId,
+        sessionId: resolvedSessionId,
         playerId: params.playerId,
-        worldId: init.result.world.id,
-        worldDisplayName: init.result.world.displayName,
+        worldId: resolvedWorldId,
+        worldDisplayName: resolvedWorldDisplayName,
         pendingPromptBefore,
         executionMode,
       },
@@ -426,7 +456,7 @@ export class OperatorCliEngine {
       decision: buildDecisionSummary(latestTurn),
       narration: buildNarrationSummary(latestTurn),
       persistence: {
-        sessionId: init.result.sessionId,
+        sessionId: resolvedSessionId,
         turn: latestTurn.turn,
         turnRecordSaved: true,
         snapshotSaved: true,

@@ -847,7 +847,6 @@ describe('TurnEngine', () => {
     try {
       const llm = new QueueLLM([
         { id: 'open-1', output: [], output_text: 'First opener.' },
-        { id: 'open-2', output: [], output_text: 'Resume opener.' },
       ]);
       const engine = new TurnEngine({ store, llm });
 
@@ -858,17 +857,48 @@ describe('TurnEngine', () => {
       assert.equal(resumed.created, false);
 
       const firstInput = JSON.parse(String(llm.calls[0]?.input));
-      const resumedInput = JSON.parse(String(llm.calls[1]?.input));
 
       assert.equal(firstInput.openingMode, 'first-world');
       assert.equal(firstInput.openingContext.isFirstWorldMessage, true);
       assert.equal(firstInput.openingContext.focalLocal.name, 'Tamar Vane');
       assert.equal(firstInput.openingContext.focusLocation.id, 'the-landing');
+
+      assert.equal(llm.calls.length, 1, 'resume should not re-invoke narrator when opening is cached');
+      assert.equal(resumed.opening, 'First opener.');
+
+      const state = await store.loadSession(init.sessionId);
+      assert.equal(state?.meta.openingNarration, 'First opener.');
+    } finally {
+      await removeDir(rootDir);
+    }
+  });
+
+  it('re-narrates a resume opening when no opening narration is cached', async () => {
+    const { rootDir, store } = await createStore();
+    try {
+      const llm = new QueueLLM([
+        { id: 'open-1', output: [], output_text: 'First opener.' },
+        { id: 'open-2', output: [], output_text: 'Resume opener.' },
+      ]);
+      const engine = new TurnEngine({ store, llm });
+
+      const init = await engine.initSession({ apiKey: 'test-key' });
+      const beforeResume = await store.loadSession(init.sessionId);
+      assert.ok(beforeResume);
+      beforeResume.meta.openingNarration = '';
+      await store.saveSnapshot(init.sessionId, beforeResume);
+
+      const resumed = await engine.initSession({ sessionId: init.sessionId, apiKey: 'test-key' });
+
+      assert.equal(resumed.created, false);
+      assert.equal(resumed.opening, 'Resume opener.');
+      assert.equal(llm.calls.length, 2);
+      const resumedInput = JSON.parse(String(llm.calls[1]?.input));
       assert.equal(resumedInput.openingMode, 'resume');
       assert.equal(resumedInput.openingContext, null);
 
       const state = await store.loadSession(init.sessionId);
-      assert.equal(state?.meta.openingNarration, 'First opener.');
+      assert.equal(state?.meta.openingNarration, 'Resume opener.');
     } finally {
       await removeDir(rootDir);
     }

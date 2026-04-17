@@ -27,16 +27,19 @@ import {
   type RenderOptions,
 } from './operatorRender';
 import {
+  renderDebugEvent,
   resolveApiKey,
   resolveCliApiMode,
   resolveStartupWorld,
   thinkingPhaseForDebugEvent,
   type CliApiMode,
+  type DebugDetail,
   type CliTerminal,
   type CliTranscriptEvent,
 } from './app';
 import type { GMReasoningEffort } from '../agents/gm/gmAgent';
 import type { NarratorStyle } from '../agents/narrator/narratorAgent';
+import type { DebugEvent } from '../engine/debug';
 import { startStaffCli } from './staffApp';
 import { ThinkingAnimation } from './thinkingAnimation';
 
@@ -330,6 +333,7 @@ async function runPlayLoop(params: {
     terminal,
     ansi: shouldUseAnsi(params.env || process.env),
   });
+  const playLoopStartedAt = Date.now();
   const writeOutput = (text: string) => {
     thinkingAnimation.beforeWrite();
     params.transcript?.({ type: 'output', text });
@@ -351,7 +355,25 @@ async function runPlayLoop(params: {
   }
 
   let state: PlayState | null = null;
+  const liveDebugDetail = (): DebugDetail => {
+    const view = state?.render.view ?? params.options.view;
+    return view === 'full' || view === 'raw' ? 'raw' : 'summary';
+  };
+  const streamDebugEvent = (event: DebugEvent) => {
+    const phase = thinkingPhaseForDebugEvent(event);
+    if (phase) {
+      thinkingAnimation.setPhase(phase);
+    }
+    const rendered = renderDebugEvent(event, liveDebugDetail());
+    if (rendered) {
+      writeOutput(rendered);
+    }
+  };
   try {
+    const worldPromptStartedAt = Date.now();
+    // #region agent log
+    fetch('http://127.0.0.1:7412/ingest/6414e5d3-0ba2-48dd-aec2-bcdd9c092ae4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'10fa75'},body:JSON.stringify({sessionId:'10fa75',runId:'play-startup',hypothesisId:'H1',location:'src/cli/operatorCli.ts:355',message:'play loop entered',data:{apiMode:params.options.apiMode,hasSessionId:Boolean(params.options.sessionId),hasStartupWorldId:Boolean(params.options.worldId)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const startupWorld = await resolveStartupWorld({
       terminal,
       readLine,
@@ -359,23 +381,25 @@ async function runPlayLoop(params: {
       sessionId: params.options.sessionId,
       startupWorldId: params.options.worldId,
     });
+    // #region agent log
+    fetch('http://127.0.0.1:7412/ingest/6414e5d3-0ba2-48dd-aec2-bcdd9c092ae4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'10fa75'},body:JSON.stringify({sessionId:'10fa75',runId:'play-startup',hypothesisId:'H1',location:'src/cli/operatorCli.ts:362',message:'startup world resolved',data:{elapsedMs:Date.now()-worldPromptStartedAt,selectedWorldId:startupWorld?.id??null},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     if (!startupWorld) {
       return 0;
     }
 
     thinkingAnimation.start('opening');
+    const initSessionStartedAt = Date.now();
     const initialized = await params.operator.initSessionDetailed({
       sessionId: params.options.sessionId,
       worldId: startupWorld.id,
       apiKey: effectiveApiKey(params.apiKey, params.options.apiMode),
       apiMode: params.options.apiMode,
-      onDebugEvent: event => {
-        const phase = thinkingPhaseForDebugEvent(event);
-        if (phase) {
-          thinkingAnimation.setPhase(phase);
-        }
-      },
+      onDebugEvent: streamDebugEvent,
     });
+    // #region agent log
+    fetch('http://127.0.0.1:7412/ingest/6414e5d3-0ba2-48dd-aec2-bcdd9c092ae4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'10fa75'},body:JSON.stringify({sessionId:'10fa75',runId:'play-startup',hypothesisId:'H2',location:'src/cli/operatorCli.ts:379',message:'initial session initialized',data:{elapsedMs:Date.now()-initSessionStartedAt,worldId:startupWorld.id,usedFallback:initialized.usedFallback,created:initialized.result.created},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     thinkingAnimation.stop();
     state = {
       sessionId: initialized.result.sessionId,
@@ -423,6 +447,7 @@ async function runPlayLoop(params: {
       }
 
       thinkingAnimation.start('thinking');
+      const playTurnStartedAt = Date.now();
       const report = await params.operator.runTurnDetailed({
         sessionId: state.sessionId,
         worldId: state.worldId,
@@ -432,13 +457,11 @@ async function runPlayLoop(params: {
         apiMode: state.apiMode,
         gmReasoningEffort: state.gmReasoningEffort,
         narratorStyle: state.narratorStyle,
-        onDebugEvent: event => {
-          const phase = thinkingPhaseForDebugEvent(event);
-          if (phase) {
-            thinkingAnimation.setPhase(phase);
-          }
-        },
+        onDebugEvent: streamDebugEvent,
       });
+      // #region agent log
+      fetch('http://127.0.0.1:7412/ingest/6414e5d3-0ba2-48dd-aec2-bcdd9c092ae4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'10fa75'},body:JSON.stringify({sessionId:'10fa75',runId:'play-turn',hypothesisId:'H5',location:'src/cli/operatorCli.ts:442',message:'play turn completed',data:{elapsedMs:Date.now()-playTurnStartedAt,totalSincePlayLoopMs:Date.now()-playLoopStartedAt,executionMode:report.input.executionMode,route:report.route.classification,councilDomains:report.route.councilDomains},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       thinkingAnimation.stop();
       if (report.input.executionMode === 'auto->fallback') {
         state.apiMode = 'fallback';

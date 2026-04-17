@@ -53,7 +53,7 @@ export interface TurnPlan {
 // ---------------------------------------------------------------------------
 
 const OBSERVATION_PATTERN =
-  /^\s*(look\b|look around|observe|examine surroundings|where am i|inventory|check inventory|what do i (have|see|carry))/i;
+  /^\s*(?:i\s+)?(look\b|look around|observe|examine surroundings|where am i|inventory|check inventory|what do i (have|see|carry))/i;
 
 const NPC_INTERACTION_PATTERN =
   /^\s*(talk to|speak (to|with)|ask\s+\w+|tell\s+\w+|greet|hail)\b/i;

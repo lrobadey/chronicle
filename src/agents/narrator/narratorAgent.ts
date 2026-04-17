@@ -247,7 +247,7 @@ function fallbackNarration(
   diff: TurnDiff,
   rejectedEvents?: Array<{ reason: string; event?: unknown }>,
 ): string {
-  if (/^\s*(look\b|look around|observe|examine surroundings|where am i|inventory|check inventory|what do i (have|see|carry))/i.test(playerText)) {
+  if (/^\s*(?:i\s+)?(look\b|look around|observe|examine surroundings|where am i|inventory|check inventory|what do i (have|see|carry))/i.test(playerText)) {
     return `${telemetry.location.description} Nearby: ${
       telemetry.nearbyActors.slice(0, 2).map(actor => actor.name).join(', ') || 'no one close at hand'
     }.`;

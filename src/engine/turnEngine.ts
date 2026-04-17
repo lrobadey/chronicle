@@ -201,6 +201,12 @@ export class TurnEngine {
       const telemetry = buildTelemetry(ensured.state, 'player-1');
       const history = buildWebTranscriptHistory(ensured.state, turnHistory);
       const world = this.describeWorldState(ensured.state);
+
+      const cachedOpening = !ensured.created ? ensured.state.meta.openingNarration?.trim() || null : null;
+      if (cachedOpening) {
+        return { sessionId: ensured.sessionId, created: false, telemetry, opening: cachedOpening, history, world };
+      }
+
       stream?.onOpeningStart?.(telemetry);
       const opening = await narrateOpening({
         apiKey,
@@ -211,13 +217,11 @@ export class TurnEngine {
         debug: emit,
         onOpeningDelta: stream?.onOpeningDelta,
       });
-      if (ensured.created || !ensured.state.meta.openingNarration?.trim()) {
-        ensured.state.meta.openingNarration = opening;
-        if (ensured.created) {
-          await this.store.saveInitialState(ensured.sessionId, ensured.state);
-        }
-        await this.store.saveSnapshot(ensured.sessionId, ensured.state);
+      ensured.state.meta.openingNarration = opening;
+      if (ensured.created) {
+        await this.store.saveInitialState(ensured.sessionId, ensured.state);
       }
+      await this.store.saveSnapshot(ensured.sessionId, ensured.state);
       return { sessionId: ensured.sessionId, created: ensured.created, telemetry, opening, history, world };
     } catch (error) {
       emitDebugEvent(emit, { type: 'error', stage: 'init', message: error instanceof Error ? error.message : 'unknown' });
@@ -297,6 +301,7 @@ export class TurnEngine {
       debug,
       stream,
     } = input;
+    const turnStartedAt = Date.now();
     const emit = debug?.onEvent;
     if (!playerText?.trim()) throw new InputValidationError('playerText is required');
 
@@ -322,6 +327,7 @@ export class TurnEngine {
     const trace: TurnTrace | undefined = debug?.includeTrace ? { toolCalls: [], llmCalls: [] } : undefined;
     draft.meta.turn = nextTurn;
     emitDebugEvent(emit, { type: 'turn.started', sessionId, turn: nextTurn, playerText });
+    const orchestrationStartedAt = Date.now();
 
     const applyProposedEvents = (events: WorldEvent[]) => {
       const batch = Array.isArray(events) ? events.map(event => normalizeWorldEvent(event)) : [];
@@ -1389,6 +1395,9 @@ export class TurnEngine {
     const recentTurns = buildRecentTurnDigests(draft, turnHistory);
     const recentSpeech = buildRecentSpeechDigests(turnHistory);
     stream?.onNarrationStart?.(afterTelemetry);
+    // #region agent log
+    fetch('http://127.0.0.1:7412/ingest/6414e5d3-0ba2-48dd-aec2-bcdd9c092ae4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'10fa75'},body:JSON.stringify({sessionId:'10fa75',runId:'engine-turn',hypothesisId:'H4',location:'src/engine/turnEngine.ts:1391',message:'pre-narration orchestration completed',data:{elapsedMs:Date.now()-orchestrationStartedAt,turn:nextTurn,acceptedEvents:acceptedEvents.length,rejectedEvents:rejectedEvents.length,pendingPromptCreatedThisTurn:draft.meta.pendingPrompt?.createdTurn===nextTurn},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     // Skip the narrator LLM call for pure prompt-creation turns: no events, no speech,
     // and the pending prompt was just created this turn. The prompt's question field is
     // already a user-facing string authored at output quality; there is nothing else to
@@ -1401,6 +1410,7 @@ export class TurnEngine {
       draft.meta.pendingPrompt?.createdTurn === nextTurn
         ? draft.meta.pendingPrompt.question
         : null;
+    const narrationStartedAt = Date.now();
     const narration = promptOnlyNarration ?? await narrateTurn(
       systemsNarratorPacket
         ? buildNarratorParamsFromSystemsPacket({
@@ -1438,6 +1448,9 @@ export class TurnEngine {
             trace,
           },
     );
+    // #region agent log
+    fetch('http://127.0.0.1:7412/ingest/6414e5d3-0ba2-48dd-aec2-bcdd9c092ae4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'10fa75'},body:JSON.stringify({sessionId:'10fa75',runId:'engine-turn',hypothesisId:'H4',location:'src/engine/turnEngine.ts:1441',message:'narration completed',data:{elapsedMs:Date.now()-narrationStartedAt,usedPromptOnlyNarration:Boolean(promptOnlyNarration),turn:nextTurn,totalElapsedMs:Date.now()-turnStartedAt,narrationLength:narration.length},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
 
     const finalizedSpecialistOutputs = finalizeSpecialistConsultations(specialistOutputs, acceptedEvents);
     if (trace) {

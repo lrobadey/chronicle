@@ -81,8 +81,34 @@ describe('operator CLI play mode', () => {
     assert.equal(terminal.transientEvents.at(-1), 'clear');
 
     const output = terminal.output();
+    assert.ok(output.includes('[init] starting'));
+    assert.ok(output.includes('[turn] #1 "look around"'));
+    assert.ok(output.includes('[narrator] rendering'));
     assert.ok(output.includes('[route]'));
     assert.ok(output.includes('[state]'));
+    assert.ok(output.indexOf('[turn] #1 "look around"') < output.indexOf('[route]'));
+    assert.ok(output.indexOf('[narrator] rendering') < output.indexOf('[route]'));
     assert.ok(output.includes('Hint: :inspect trace --view full | :inspect council | :inspect route'));
+  });
+
+  it('upgrades streamed debug output to raw payloads after detail raw', async () => {
+    const { engine, store } = await createEngine();
+    const terminal = new AnimatedTerminal(['1', ':detail raw', 'look around', ':exit']);
+
+    const exitCode = await runOperatorCli({
+      argv: [],
+      env: { CHRONICLE_API_MODE: 'fallback' },
+      engine,
+      store,
+      playTerminal: terminal,
+    });
+
+    assert.equal(exitCode, 0);
+    const output = terminal.output();
+    assert.ok(output.includes('Detail view updated. view=raw'));
+    assert.ok(output.includes('[turn] #1 "look around"'));
+    assert.ok(output.includes('[narrator] rendering complete'));
+    assert.ok(output.includes('"phase": "turn"'));
+    assert.ok(output.includes('"text": "'));
   });
 });
