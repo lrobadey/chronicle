@@ -520,7 +520,7 @@ function shouldUseAnsi(env: NodeJS.ProcessEnv): boolean {
   return true;
 }
 
-async function resolveStartupWorld(params: {
+export async function resolveStartupWorld(params: {
   terminal: CliTerminal;
   readLine: (prompt: string) => Promise<string | null>;
   write: (text: string) => void;
@@ -566,7 +566,7 @@ async function resolveStartupWorld(params: {
   }
 }
 
-function selectWorldFromChoice(choice: string, worlds: WorldModule[]): WorldModule | undefined {
+export function selectWorldFromChoice(choice: string, worlds: WorldModule[]): WorldModule | undefined {
   if (!choice) return undefined;
   if (choice === '1') return worlds[0];
   if (choice === '2') return worlds[1];
@@ -662,7 +662,7 @@ function createDebugWriter(
   };
 }
 
-function thinkingPhaseForDebugEvent(event: DebugEvent): ThinkingPhase | null {
+export function thinkingPhaseForDebugEvent(event: DebugEvent): ThinkingPhase | null {
   switch (event.type) {
     case 'init.started':
       return 'opening';

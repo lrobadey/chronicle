@@ -303,6 +303,7 @@ export class OperatorCliEngine {
     worldId?: string;
     apiKey?: string;
     apiMode: CliApiMode;
+    onDebugEvent?: (event: DebugEvent) => void;
   }): Promise<{ result: InitResult; usedFallback: boolean; sessionSummary: SessionSummaryRow }> {
     const { result, usedFallback } = await initSessionWithFallback({
       engine: this.engine,
@@ -310,6 +311,7 @@ export class OperatorCliEngine {
       worldId: params.worldId,
       apiKey: params.apiKey,
       apiMode: params.apiMode,
+      onDebugEvent: params.onDebugEvent,
     });
     const sessionSummary = await this.getSessionSummary(result.sessionId);
     return { result, usedFallback, sessionSummary };
@@ -324,12 +326,14 @@ export class OperatorCliEngine {
     apiMode: CliApiMode;
     gmReasoningEffort?: GMReasoningEffort;
     narratorStyle?: NarratorStyle;
+    onDebugEvent?: (event: DebugEvent) => void;
   }): Promise<TurnExecutionReport> {
     const init = await this.initSessionDetailed({
       sessionId: params.sessionId,
       worldId: params.worldId,
       apiKey: params.apiKey,
       apiMode: params.apiMode,
+      onDebugEvent: params.onDebugEvent,
     });
 
     const beforeState = await this.loadSessionState(init.result.sessionId);
@@ -345,6 +349,10 @@ export class OperatorCliEngine {
     });
 
     const debugEvents: DebugEvent[] = [];
+    const emitDebug = (event: DebugEvent) => {
+      debugEvents.push(event);
+      params.onDebugEvent?.(event);
+    };
     const { result, usedFallback } = await runTurnWithFallback({
       engine: this.engine,
       sessionId: init.result.sessionId,
@@ -354,7 +362,7 @@ export class OperatorCliEngine {
       apiMode: params.apiMode,
       gmReasoningEffort: params.gmReasoningEffort,
       narratorStyle: params.narratorStyle,
-      onDebugEvent: event => debugEvents.push(event),
+      onDebugEvent: emitDebug,
     });
 
     const afterState = await this.loadSessionState(init.result.sessionId);
@@ -1163,12 +1171,16 @@ async function initSessionWithFallback(params: {
   worldId?: string;
   apiKey?: string;
   apiMode: CliApiMode;
+  onDebugEvent?: (event: DebugEvent) => void;
 }): Promise<{ result: InitResult; usedFallback: boolean }> {
   if (params.apiMode === 'fallback' || !params.apiKey) {
     return {
       result: await params.engine.initSession({
         sessionId: params.sessionId,
         worldId: params.worldId,
+        debug: {
+          onEvent: params.onDebugEvent,
+        },
       }),
       usedFallback: false,
     };
@@ -1180,6 +1192,9 @@ async function initSessionWithFallback(params: {
         sessionId: params.sessionId,
         worldId: params.worldId,
         apiKey: params.apiKey,
+        debug: {
+          onEvent: params.onDebugEvent,
+        },
       }),
       usedFallback: false,
     };
@@ -1189,6 +1204,9 @@ async function initSessionWithFallback(params: {
       result: await params.engine.initSession({
         sessionId: params.sessionId,
         worldId: params.worldId,
+        debug: {
+          onEvent: params.onDebugEvent,
+        },
       }),
       usedFallback: true,
     };

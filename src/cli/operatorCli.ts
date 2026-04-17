@@ -26,10 +26,19 @@ import {
   renderWorldList,
   type RenderOptions,
 } from './operatorRender';
-import { resolveApiKey, resolveCliApiMode, type CliApiMode, type CliTranscriptEvent } from './app';
+import {
+  resolveApiKey,
+  resolveCliApiMode,
+  resolveStartupWorld,
+  thinkingPhaseForDebugEvent,
+  type CliApiMode,
+  type CliTerminal,
+  type CliTranscriptEvent,
+} from './app';
 import type { GMReasoningEffort } from '../agents/gm/gmAgent';
 import type { NarratorStyle } from '../agents/narrator/narratorAgent';
 import { startStaffCli } from './staffApp';
+import { ThinkingAnimation } from './thinkingAnimation';
 
 export interface OperatorCliRunOptions {
   argv: string[];
@@ -38,6 +47,7 @@ export interface OperatorCliRunOptions {
   store: JsonlSessionStore;
   allowNonTty?: boolean;
   transcript?: (event: CliTranscriptEvent) => void;
+  playTerminal?: CliTerminal;
 }
 
 type InspectTarget =
@@ -125,6 +135,8 @@ export async function runOperatorCli(options: OperatorCliRunOptions): Promise<nu
       apiKey,
       options: parsed.options,
       transcript: options.transcript,
+      terminal: options.playTerminal,
+      env,
     });
   }
 
@@ -310,11 +322,19 @@ async function runPlayLoop(params: {
   apiKey?: string;
   options: GlobalOptions;
   transcript?: (event: CliTranscriptEvent) => void;
+  terminal?: CliTerminal;
+  env?: NodeJS.ProcessEnv;
 }): Promise<number> {
-  const terminal = createTerminal();
+  const terminal = params.terminal || createTerminal();
+  const thinkingAnimation = new ThinkingAnimation({
+    terminal,
+    ansi: shouldUseAnsi(params.env || process.env),
+  });
   const writeOutput = (text: string) => {
+    thinkingAnimation.beforeWrite();
     params.transcript?.({ type: 'output', text });
-    output.write(text);
+    terminal.write(text);
+    thinkingAnimation.afterWrite();
   };
   const readLine = async (prompt: string) => {
     params.transcript?.({ type: 'prompt', text: prompt });
@@ -332,12 +352,31 @@ async function runPlayLoop(params: {
 
   let state: PlayState | null = null;
   try {
+    const startupWorld = await resolveStartupWorld({
+      terminal,
+      readLine,
+      write: writeOutput,
+      sessionId: params.options.sessionId,
+      startupWorldId: params.options.worldId,
+    });
+    if (!startupWorld) {
+      return 0;
+    }
+
+    thinkingAnimation.start('opening');
     const initialized = await params.operator.initSessionDetailed({
       sessionId: params.options.sessionId,
-      worldId: params.options.worldId || DEFAULT_WORLD_ID,
+      worldId: startupWorld.id,
       apiKey: effectiveApiKey(params.apiKey, params.options.apiMode),
       apiMode: params.options.apiMode,
+      onDebugEvent: event => {
+        const phase = thinkingPhaseForDebugEvent(event);
+        if (phase) {
+          thinkingAnimation.setPhase(phase);
+        }
+      },
     });
+    thinkingAnimation.stop();
     state = {
       sessionId: initialized.result.sessionId,
       playerId: 'player-1',
@@ -350,6 +389,13 @@ async function runPlayLoop(params: {
       render: toRenderOptions(params.options),
     };
 
+    if (state.apiMode === 'fallback') {
+      writeOutput('(Fallback mode - deterministic runtime)\n\n');
+    } else if (!state.apiKey) {
+      writeOutput('(No API key - running in deterministic fallback mode)\n\n');
+    } else if (initialized.usedFallback) {
+      writeOutput('(API unavailable - switched to deterministic fallback mode)\n\n');
+    }
     writeOutput(`## Chronicle Play\nsession=${state.sessionId} | world=${state.worldDisplayName}\n\n`);
     writeOutput(`${initialized.result.opening}\n\n`);
     writeOutput('Type `:help` for operator commands, or enter your action.\n\n');
@@ -376,6 +422,7 @@ async function runPlayLoop(params: {
         continue;
       }
 
+      thinkingAnimation.start('thinking');
       const report = await params.operator.runTurnDetailed({
         sessionId: state.sessionId,
         worldId: state.worldId,
@@ -385,17 +432,27 @@ async function runPlayLoop(params: {
         apiMode: state.apiMode,
         gmReasoningEffort: state.gmReasoningEffort,
         narratorStyle: state.narratorStyle,
+        onDebugEvent: event => {
+          const phase = thinkingPhaseForDebugEvent(event);
+          if (phase) {
+            thinkingAnimation.setPhase(phase);
+          }
+        },
       });
+      thinkingAnimation.stop();
       if (report.input.executionMode === 'auto->fallback') {
         state.apiMode = 'fallback';
         state.apiKey = undefined;
+        writeOutput('(API request failed - switched to deterministic fallback mode)\n\n');
       }
       writeOutput(`${renderPlayTurnSummary(report, state.render)}\n\n`);
     }
   } catch (error) {
+    thinkingAnimation.stop();
     writeOutput(`Error: ${formatError(error)}\n`);
     return 1;
   } finally {
+    thinkingAnimation.stop();
     terminal.close();
   }
 }
@@ -726,7 +783,7 @@ function effectiveApiKey(apiKey: string | undefined, apiMode: CliApiMode): strin
   return apiMode === 'fallback' ? undefined : apiKey;
 }
 
-function createTerminal() {
+function createTerminal(): CliTerminal {
   const rl = readline.createInterface({ input, output });
   const queuedLines: string[] = [];
   let pendingResolve: ((line: string | null) => void) | undefined;
@@ -753,6 +810,9 @@ function createTerminal() {
 
   return {
     isTTY: () => Boolean(input.isTTY && output.isTTY),
+    write: text => {
+      output.write(text);
+    },
     readLine: (prompt: string) => {
       output.write(prompt);
       if (queuedLines.length) {
@@ -765,8 +825,21 @@ function createTerminal() {
         pendingResolve = resolve;
       });
     },
+    supportsTransientStatus: () => Boolean(input.isTTY && output.isTTY),
+    renderTransientStatus: text => {
+      output.write(`\x1b[2K\r${text}`);
+    },
+    clearTransientStatus: () => {
+      output.write('\x1b[2K\r');
+    },
     close: () => rl.close(),
   };
+}
+
+function shouldUseAnsi(env: NodeJS.ProcessEnv): boolean {
+  if (env.NO_COLOR) return false;
+  if (env.TERM === 'dumb') return false;
+  return true;
 }
 
 function playPrompt(state: PlayState): string {
