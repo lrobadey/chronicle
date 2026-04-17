@@ -149,6 +149,51 @@ describe('closeStewardTurn', () => {
     });
 
     assert.equal(result.handled, true);
+    assert.equal(result.directorUpdates, null);
+    assert.equal(result.narratorHandoff.kind, 'systems_v1');
+    assert.equal(result.trace.route, 'council');
+  });
+
+  it('releases held beats that the turn plan already marked for consideration', () => {
+    const result = closeStewardTurn({
+      turnPlan: {
+        classification: 'simple_council',
+        deterministicOwner: null,
+        requiredDomains: ['systems'],
+        optionalDomains: ['world'],
+        heldBeatsToConsider: ['beat-lantern'],
+        pendingEventsToCheck: [],
+        rationale: 'Observation intent detected.',
+      },
+      councilResults: [{
+        executionMs: 1,
+        result: {
+          taskId: 'systems-3',
+          domain: 'systems',
+          summary: 'Observed the local state without mutating the world.',
+          proposedEvents: [],
+          confidence: 1,
+          warnings: [],
+          detail: {
+            handled: true,
+            narratorPacket: {
+              version: 'systems_v1',
+              intent: 'observation',
+              playerText: 'look around',
+              summary: 'Read-only observation of the player surroundings.',
+              telemetry: { player: { id: 'player-1' } },
+              observation: { player: { id: 'player-1' } },
+              warnings: [],
+            },
+            mechanicsResolution: null,
+          },
+        },
+      }],
+      directorState: createDirectorState(),
+    });
+
+    assert.equal(result.handled, true);
+    assert.deepEqual(result.directorUpdates, { removeHeldBeats: ['beat-lantern'] });
     assert.equal(result.narratorHandoff.kind, 'systems_v1');
     assert.equal(result.trace.route, 'council');
   });

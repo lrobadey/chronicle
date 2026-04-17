@@ -86,6 +86,8 @@ export function closeStewardTurn(input: StewardCloseInput): StewardCloseResult {
     };
   }
 
+  const heldBeatsToRelease = input.turnPlan.heldBeatsToConsider;
+
   return {
     handled: true,
     summary: systemsPacket?.result.summary || characterPacket?.result.summary || worldPacket?.result.summary || 'Council turn handled.',
@@ -93,7 +95,9 @@ export function closeStewardTurn(input: StewardCloseInput): StewardCloseResult {
     acceptedEvents: [],
     rejectedEvents: [],
     agendaUpdates: emptyAgendaUpdates(),
-    directorUpdates: null,
+    directorUpdates: heldBeatsToRelease.length > 0
+      ? { removeHeldBeats: heldBeatsToRelease }
+      : null,
     councilArtifacts,
     narratorHandoff: systemsDetail?.handled && systemsDetail.narratorPacket
       ? { kind: 'systems_v1', packet: systemsDetail.narratorPacket }
