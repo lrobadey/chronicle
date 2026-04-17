@@ -69,6 +69,7 @@ export default function App() {
   const [apiBase, setApiBase] = useState(DEFAULT_API_BASE);
   const [runtimeState, setRuntimeState] = useState<RuntimeState>('booting');
   const [drawer, setDrawer] = useState<DrawerKind>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [sessionId, setSessionId] = useState(() => readStoredSessionId());
   const [narratorStyle, setNarratorStyle] = useState<NarratorStyle>('michener');
   const [debugTrace, setDebugTrace] = useState(true);
@@ -87,6 +88,7 @@ export default function App() {
   const turnRequestIdRef = useRef(0);
   const sessionEpochRef = useRef(0);
   const logEndRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const activeTurn = useMemo(() => {
     const current = findTurnEntry(entries, selectedTurn);
@@ -106,12 +108,23 @@ export default function App() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        setMenuOpen(false);
         setDrawer(null);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  useEffect(() => {
+    const onPointerDown = (event: MouseEvent) => {
+      if (!menuOpen) return;
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setMenuOpen(false);
+    };
+    window.addEventListener('mousedown', onPointerDown);
+    return () => window.removeEventListener('mousedown', onPointerDown);
+  }, [menuOpen]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -171,8 +184,7 @@ export default function App() {
       setSessionId(result.sessionId);
       writeStoredSessionId(result.sessionId);
       setBootOpening('');
-      const latest = latestTurnEntry(nextEntries);
-      setSelectedTurn(latest?.turn || null);
+      setSelectedTurn(null);
     } catch (error) {
       if (bootRequestId !== bootRequestIdRef.current) return;
       setRuntimeState('error');
@@ -251,32 +263,60 @@ export default function App() {
 
   const bootingVisible = runtimeState === 'booting';
   const isBusy = runtimeState === 'booting' || runtimeState === 'sending';
+  const headerTime = telemetry ? formatWorldTime(telemetry) : 'Gathering time';
+
+  function openSecondarySurface(nextDrawer: Exclude<DrawerKind, null>) {
+    setMenuOpen(false);
+    setDrawer(nextDrawer);
+  }
+
+  function handleWorldTitleClick() {
+    setMenuOpen(false);
+    setDrawer(selectedTurn != null ? 'trace' : 'world');
+  }
 
   return (
     <div className="chronicle-app">
       <div className="chronicle-backdrop" />
       <header className={`app-header${headerCondensed ? ' compact' : ''}`}>
-        <div className="brand-block">
-          <span className="eyebrow">Chronicle vNext</span>
+        <button type="button" className="world-link" onClick={handleWorldTitleClick}>
+          <span className="eyebrow">Chronicle</span>
           <h1>{formatWorldTitle(world)}</h1>
+        </button>
+        <div className="header-meta">
+          <span className="detail-label">Time</span>
+          <strong>{headerTime}</strong>
         </div>
-        <div className="header-center">
-          <span className="session-pill">
-            <span className="status-dot" />
-            {sessionId ? shortSessionId(sessionId) : 'opening a new session'}
-          </span>
-        </div>
-        <div className="header-actions">
-          <button type="button" className="header-action" onClick={() => setDrawer('world')}>World</button>
-          <button type="button" className="header-action" onClick={() => setDrawer('trace')}>Trace</button>
-          <button type="button" className="header-action" onClick={() => setDrawer('session')}>Session</button>
+        <div className="header-actions" ref={menuRef}>
+          <button
+            type="button"
+            className={`header-action gear-trigger${menuOpen ? ' open' : ''}`}
+            onClick={() => setMenuOpen(open => !open)}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-label="Open story controls"
+          >
+            <span className="gear-glyph" aria-hidden="true" />
+          </button>
+          <div className={`gear-menu${menuOpen ? ' open' : ''}`} role="menu" aria-label="Secondary surfaces">
+            <button type="button" role="menuitem" className="gear-menu-item" onClick={() => openSecondarySurface('world')}>
+              <span>World</span>
+              <small>Current state</small>
+            </button>
+            <button type="button" role="menuitem" className="gear-menu-item" onClick={() => openSecondarySurface('trace')}>
+              <span>Trace</span>
+              <small>{selectedTurn != null ? `Turn ${selectedTurn}` : 'Latest turn'}</small>
+            </button>
+            <button type="button" role="menuitem" className="gear-menu-item" onClick={() => openSecondarySurface('session')}>
+              <span>Session</span>
+              <small>{sessionId ? 'Runtime controls' : 'Startup controls'}</small>
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="app-main">
         <section className="story-column">
-          <CompactWorldCard telemetry={telemetry} onOpenWorld={() => setDrawer('world')} />
-
           {runtimeState === 'error' && entries.length === 0 ? (
             <BootErrorScreen details={errorDetails} onRetry={() => void bootSession()} />
           ) : (
@@ -287,10 +327,7 @@ export default function App() {
                 <Transcript
                   entries={entries}
                   selectedTurn={selectedTurn}
-                  onSelectTurn={turn => {
-                    setSelectedTurn(turn);
-                    setDrawer('trace');
-                  }}
+                  onSelectTurn={turn => setSelectedTurn(turn)}
                 />
               )}
               <div ref={logEndRef} />
@@ -330,7 +367,7 @@ export default function App() {
       <Drawer
         open={drawer === 'world'}
         title="World"
-        subtitle="Current state around the player"
+        subtitle="State beneath the story"
         onClose={() => setDrawer(null)}
       >
         <WorldDrawer telemetry={telemetry} />
@@ -348,7 +385,7 @@ export default function App() {
       <Drawer
         open={drawer === 'session'}
         title="Session"
-        subtitle="Hidden runtime controls"
+        subtitle="Story controls and runtime"
         onClose={() => setDrawer(null)}
       >
         <SessionDrawer
@@ -369,48 +406,6 @@ export default function App() {
         />
       </Drawer>
     </div>
-  );
-}
-
-function CompactWorldCard(props: { telemetry?: Telemetry; onOpenWorld: () => void }) {
-  const telemetry = props.telemetry;
-  const inventory = telemetry?.player.inventory || [];
-  const nearbyActors = telemetry?.nearbyActors.slice(0, 3) || [];
-  const nearbyLocations = telemetry?.nearbyLocations.slice(0, 3) || [];
-
-  return (
-    <section className="world-card">
-      <div className="world-card-heading">
-        <div>
-          <span className="eyebrow">Present Tense</span>
-          <h2>{telemetry?.location.name || 'Finding the shoreline'}</h2>
-        </div>
-        <button type="button" className="text-button" onClick={props.onOpenWorld}>Open world view</button>
-      </div>
-      <p className="world-description">{telemetry?.location.description || 'The tide is still pulling its shape together.'}</p>
-      <div className="world-grid">
-        <div>
-          <span className="detail-label">Time</span>
-          <strong>{telemetry ? formatWorldTime(telemetry) : 'Loading'}</strong>
-        </div>
-        <div>
-          <span className="detail-label">Weather</span>
-          <strong>{telemetry ? `${titleCase(telemetry.weather.type)}, ${telemetry.weather.windKph} kph wind` : 'Loading'}</strong>
-        </div>
-        <div>
-          <span className="detail-label">Nearby actors</span>
-          <strong>{nearbyActors.length ? nearbyActors.map(actor => actor.name).join(', ') : 'No one nearby'}</strong>
-        </div>
-        <div>
-          <span className="detail-label">Nearby places</span>
-          <strong>{nearbyLocations.length ? nearbyLocations.map(location => `${location.name} (${formatDistance(location.distance)})`).join(', ') : 'No marked destination'}</strong>
-        </div>
-        <div>
-          <span className="detail-label">Inventory</span>
-          <strong>{inventory.length ? inventory.map(item => item.name).join(', ') : 'Empty-handed'}</strong>
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -486,33 +481,19 @@ function TurnCard(props: { entry: TurnEntry; selected: boolean; onSelect: () => 
         {entry.narration ? <Prose text={entry.narration} /> : <p className="pending-copy">Resolving the world state…</p>}
       </div>
       {entry.pending ? (
-        <div className="result-strip quiet">
-          <span className="strip-kicker">Pending</span>
-          <span>Chronicle is resolving the turn.</span>
-        </div>
+        <TurnOutcomeBadge tone="quiet" label="Resolving" detail="Chronicle is resolving the turn." />
       ) : entry.summary ? (
-        <ResultStrip summary={entry.summary} traceAvailable={Boolean(entry.trace?.toolCalls?.length)} />
+        <TurnOutcomeBadge tone={entry.summary.outcome} label={entry.summary.headline} />
       ) : null}
     </article>
   );
 }
 
-function ResultStrip(props: { summary: WebTurnSummary; traceAvailable: boolean }) {
+function TurnOutcomeBadge(props: { tone: WebTurnSummary['outcome']; label: string; detail?: string }) {
   return (
-    <div className={`result-strip ${props.summary.outcome}`}>
-      <div className="result-main">
-        <span className="strip-kicker">Result</span>
-        <strong>{props.summary.headline}</strong>
-      </div>
-      <div className="result-detail">
-        {props.summary.accepted.slice(0, 2).map(item => (
-          <span key={item} className="result-chip accepted">{item}</span>
-        ))}
-        {props.summary.rejected.slice(0, 2).map(item => (
-          <span key={item} className="result-chip rejected">{item}</span>
-        ))}
-        {props.traceAvailable ? <span className="result-chip neutral">Trace available</span> : null}
-      </div>
+    <div className={`outcome-badge ${props.tone}`}>
+      <span className="strip-kicker">{props.label}</span>
+      {props.detail ? <small>{props.detail}</small> : null}
     </div>
   );
 }
