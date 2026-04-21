@@ -1,137 +1,233 @@
 # Current Agent Architecture
 
-This document describes the active architecture in the codebase today.
+This document describes the architecture that is actually live in Chronicle today.
 
-It is intentionally narrower than [`docs/CHRONICLE_NORTH_STAR.md`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/docs/CHRONICLE_NORTH_STAR.md).
+It is intentionally narrower than [`docs/CHRONICLE_NORTH_STAR.md`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/docs/CHRONICLE_NORTH_STAR.md). The north star is the destination. This file is the runtime truth.
 
-The north star defines the intended end-state.
-This file defines the implemented runtime boundary.
+## Runtime Authority
 
-## Status
+The real ownership seam is [`src/engine/turnEngine.ts`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/engine/turnEngine.ts), especially `TurnEngine.runTurn()`.
 
-Chronicle now has the active Steward + Council system in place.
+That one method is where Chronicle:
 
-What exists today is:
+- loads state and turn history
+- opens the steward route for the incoming player action
+- dispatches bounded council work when the turn can be cleanly classified
+- decides whether council output is safe to commit
+- falls back to the legacy GM loop when that bounded path does not safely resolve the turn
+- runs the freeform steward loop for ambiguous `steward_judgment` turns
+- hands the final state into narration and persistence
 
-- a real Steward entry/exit path in the active turn engine
-- a real hierarchy type layer (`TurnPlan`, council task/result packets, registry types)
-- three implemented council domains: `character`, `world`, and `systems`
-- a legacy GM loop that remains available as an explicit fallback and compatibility path
-- stewardship and council dispatch that are domain-authoritative for the turns they own
+If a description of the architecture does not match that control flow, it is describing an aspiration or an older snapshot, not the live runtime.
 
-## Runtime Shape
+## Plain-System Summary
 
-The active turn runtime lives in [`src/engine/turnEngine.ts`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/engine/turnEngine.ts).
+The live system is best understood as three layers:
 
-Each player turn currently follows this shape:
+- **Steward ownership**: the steward gets first routing authority over the turn. It decides whether the turn is narrow enough for bounded handling or broad enough to require steward judgment.
+- **Council dispatch**: when the turn fits a bounded domain shape, the steward sends targeted work to the council domains that are relevant.
+- **GM fallback**: when the bounded path does not produce a commit-safe outcome, Chronicle still has an explicit legacy GM loop as a safety net.
 
-1. `TurnEngine` builds bounded turn context.
-2. `openStewardTurn()` classifies the action and may emit council tasks.
-3. If the turn is clearly mechanics-owned, the steward attempts deterministic mechanics preflight.
-4. The steward dispatches bounded council work to the appropriate domain runner, including `runCharacterDesignerTask()`, `runWorldDesignerTask()`, or `runSystemsDesignerTask()`.
-5. `closeStewardTurn()` decides whether the steward-owned result is safe to commit and whether narration can use a council handoff packet.
-6. If that steward path does not fully handle the turn, control falls back to the legacy GM loop via `runGMAgent()`.
-7. Narration is generated from either the council handoff packet or the legacy GM-driven turn result.
+That means Chronicle is **not** "the steward replaced the GM everywhere."
 
-In other words:
+It is also **not** "the GM still owns everything and the steward is cosmetic."
 
-- the steward is real
-- the council is real and domain-split
-- the GM is still the fallback governor, not the primary owner of routine turns
+The live truth is:
 
-## What The Steward Owns Today
+**The steward owns routing, the council owns bounded domain work, and the GM still exists as an explicit fallback path for turns the routed path cannot safely close.**
 
-The implemented steward surface is in [`src/agents/steward/`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/steward).
+## What `runTurn()` Actually Does
 
-Today the steward can:
+At a high level, every turn currently follows this sequence:
 
-- classify a turn using `classifyTurn()`
-- recognize deterministic mechanics-owned turns
-- build council tasks for:
-  - read-only observation
-  - cardinal movement
-- route work to the matching council domain
-- synthesize the result of those tasks
-- decide whether to commit those proposed events or fall back to the GM
+1. Load the current world state and recent turn history.
+2. Build bounded context bundles for steward, council, mechanics, and GM-facing work.
+3. Call `openStewardTurn()` to classify the player action into one of three shapes:
+   - `deterministic`
+   - `simple_council`
+   - `steward_judgment`
+4. If `openStewardTurn()` emits council tasks, dispatch them to the real council runners:
+   - `runCharacterDesignerTask()`
+   - `runWorldDesignerTask()`
+   - `runSystemsDesignerTask()`
+5. Call `closeStewardTurn()` to decide whether the council output is actually handled and safe to commit.
+6. If that classified council path fails to close cleanly, call the explicit legacy fallback loop through `runLegacyGMProposal()`, which in turn can run `runGMAgent()`.
+7. If the original turn was classified as `steward_judgment` and was not already handled, run `runStewardAgent()` with a bounded tool runtime so the steward can inspect, dispatch, and finish the turn directly.
+8. Narrate the final committed result and persist the turn record.
 
-Today the steward does **not** yet:
+The key distinction is that Chronicle currently has **two steward phases**:
 
-- maintain its own persistent cross-session memory as a separate world-authority layer
-- dispatch arbitrarily many council domains without bounded turn context
-- use `CouncilRegistry` as an open-ended free-for-all
-- directly own DirectorState evolution in a richer way than the existing GM contract
-- replace the GM for ambiguous or multi-domain turns
+- a deterministic/open-close routing phase for turns that can be classified up front
+- a tool-using steward judgment phase for turns that need broader synthesis
 
-## What The Council Means Today
+## Steward Ownership Today
 
-The hierarchy contracts live in [`src/agents/hierarchy/`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/hierarchy).
+The live steward surface sits in [`src/agents/steward/`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/steward).
 
-The council surface lives in [`src/agents/council/`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/council).
+Today the steward really does own:
 
-Implemented now:
+- opening the turn through `openStewardTurn()`
+- classifying the turn via `classifyTurn()`
+- deciding whether the turn is deterministic, simple council, or steward judgment
+- creating bounded council tasks from that routing decision
+- closing classified council turns through `closeStewardTurn()`
+- running a direct steward tool loop through `runStewardAgent()` for `steward_judgment` turns
+- carrying turn-level synthesis tools such as:
+  - `inspect_world_summary`
+  - `dispatch_character_task`
+  - `dispatch_world_task`
+  - `dispatch_systems_task`
+  - `inspect_council_results`
+  - `finish_steward_turn`
 
-- `characterDesigner`
-  - real executable task runner
-  - handles character-facing bounded reasoning
-- `worldDesigner`
-  - real executable task runner
-  - handles world-facing bounded reasoning
-- `systemsDesigner`
-  - real executable task runner
-  - can own observation turns
-  - can own safe cardinal movement turns by delegating to the mechanics worker
+In systems terms, the steward is the **traffic controller and final turn-shaper**, not the universal doer of every subtask.
 
-Not yet true in the active runtime:
+## What The Council Means In The Live Runtime
 
-- unbounded multi-council fanout with no turn budgeting
-- autonomous council loops that bypass steward routing
-- council-owned worker trees without turn-level guardrails
+The hierarchy contracts live in [`src/agents/hierarchy/`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/hierarchy/).
 
-## Relation To The GM
+The active domain runners live in [`src/agents/council/`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/council/).
 
-The GM remains the broad orchestration fallback in [`src/agents/gm/gmAgent.ts`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/gm/gmAgent.ts).
+The council is real in the live runtime, but it is still bounded.
 
-That GM still:
+Implemented today:
 
-- consults NPC agents
-- consults specialists
-- manages agenda and DirectorState updates
-- reviews mechanics and schedule resolutions
-- finishes most turns
+- `character`
+  - executed by `runCharacterDesignerTask()`
+  - used for NPC-facing or character-facing bounded interpretation
+- `world`
+  - executed by `runWorldDesignerTask()`
+  - used for scene motion and world-thread surfacing
+- `systems`
+  - executed by `runSystemsDesignerTask()`
+  - used for observation, movement, mechanics-owned handling, narrator handoff packets, and pending-prompt recommendations
 
-So the current architecture is best described as:
+The council does **not** currently operate as an open-ended autonomous committee.
 
-**Steward-first routing with a real multi-domain council, plus explicit GM fallback for turns that need it.**
+It only runs when the steward or the steward runtime dispatches specific bounded tasks into those domains.
 
-The GM is no longer the primary owner of the whole runtime, but it still remains part of the safety net and legacy compatibility path.
+## Where GM Fallback Still Matters
 
-## Proto-Council Components
+The legacy GM path is still real in [`src/agents/gm/gmAgent.ts`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/gm/gmAgent.ts), and `turnEngine.ts` still wires it in on purpose.
 
-Several older agent surfaces already behave like proto-council pieces but are not formally promoted yet:
+When a classified council turn does not close safely, `runTurn()` calls `runLegacyGMProposal(...)`.
 
-- [`src/agents/specialists/`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/specialists)
-- [`src/agents/npc/`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/npc)
-- [`src/agents/mechanics/`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/mechanics)
+That fallback path can still:
 
-Right now they are mostly called through steward/council routing or by the GM fallback, not by a generalized open-ended registry.
+- inspect the world from the broad GM context
+- consult NPC agents
+- consult specialists
+- resolve and review mechanics work
+- schedule and review schedule work
+- produce agenda updates and director updates
+- finish a turn proposal through the GM runtime
 
-## Official Working Definition
+So the GM is no longer the default first owner of every turn, but it is still the broad compatibility and recovery path when the newer routed architecture does not safely finish the job.
 
-Until the broader migration lands, Chronicle should use this terminology:
+## The Three Live Turn Paths
 
-- **Steward**: the active routing and synthesis layer that opens a turn, dispatches bounded council work, and either closes the turn or falls back to the GM.
-- **Council**: the bounded domain-owner interface represented by hierarchy contracts and council task/result packets.
-- **Systems Council**: one of the currently implemented council domains in active turn execution.
-- **GM**: the legacy generalist controller that remains responsible for turns the current steward path cannot safely own.
+Chronicle currently has three real turn paths:
 
-## Practical Migration Standard
+### 1. Classified council path
 
-A feature should only be called "moved to the council" when all of the following are true:
+Used when `openStewardTurn()` identifies a narrow, bounded path.
 
-- the steward emits a domain task for it
-- the domain has a concrete executable council agent, not only types
-- the council result is structured and decision-ready
-- the steward can close that path without GM intervention for the happy path
-- fallback to GM is explicit rather than implicit
+Examples:
 
-Until those conditions hold, the feature is still GM-owned with council-style scaffolding.
+- observation
+- cardinal movement
+- clear NPC interaction
+
+Shape:
+
+- steward classifies
+- council domains run
+- steward closes
+- result commits if handled
+
+### 2. Council-to-GM fallback path
+
+Used when the classified path ran, but the result was not safe to commit.
+
+Examples:
+
+- no council domain produced a handled result
+- proposed systems events were rejected or could not be fully applied
+- the systems domain explicitly signaled fallback
+
+Shape:
+
+- steward classifies
+- council domains run
+- steward close says "not safely handled"
+- legacy GM fallback takes over for proposal generation
+
+### 3. Steward judgment path
+
+Used when the turn does not fit a narrow deterministic or simple single-pattern route.
+
+Examples:
+
+- broader ambiguous actions
+- turns where a pending prompt changes the routing logic
+- multi-domain intent that needs live steward synthesis
+
+Shape:
+
+- steward open classifies as `steward_judgment`
+- the classified council fast path does not own the turn
+- `runStewardAgent()` uses bounded tools to inspect, dispatch, and finish the turn
+
+This is the part of the runtime where the steward behaves most like an actual active controller rather than only a classifier.
+
+## What `closeStewardTurn()` Really Means
+
+[`src/agents/steward/closeTurn.ts`](/Users/lucarobadey/Desktop/Projects/Coding/Chronicle/src/agents/steward/closeTurn.ts) is the handoff decision point for classified council work.
+
+It currently does three important things:
+
+- converts council output into durable `councilArtifacts`
+- decides whether the result counts as `handled`
+- prepares narrator handoff data and director updates such as releasing relevant held beats
+
+In plain terms: this is the place where Chronicle decides whether the routed council answer is a real turn result or only useful advice that still needs fallback.
+
+## What Is Actually Moved Out Of GM Ownership
+
+The following are genuinely steward/council-owned in the live runtime:
+
+- turn opening and route classification
+- bounded council dispatch for `character`, `world`, and `systems`
+- classified observation and cardinal-movement handling through the systems path
+- systems narrator handoff packets and pending-prompt recommendations
+- council artifact persistence in the turn record
+
+The following are **not** fully moved out of GM ownership yet:
+
+- broad recovery for failed classified turns
+- the legacy NPC/specialist generalist loop
+- the broad GM proposal runtime used during explicit fallback
+- general turn handling for cases the steward classifies as needing open-ended judgment unless and until the steward tool loop itself finishes the turn
+
+## Working Definition For The Repo
+
+When describing the current system in README text, CLI copy, or internal docs, the accurate short form is:
+
+**Chronicle is a steward-routed runtime with real bounded council domains and an explicit legacy GM fallback.**
+
+That wording matches the live code more closely than either of these overclaims:
+
+- "the GM is gone"
+- "the steward fully owns every turn"
+
+## Practical Standard For Calling Something "Council-Owned"
+
+A capability should only be described as moved into the council when all of these are true in the runtime:
+
+- the steward emits a concrete task for it
+- a real council runner executes that task
+- the result comes back in structured form
+- `closeStewardTurn()` or `finish_steward_turn` can convert it into a committed turn result on the happy path
+- fallback remains explicit if that path fails
+
+If those conditions are not true, the feature is still partly or fully living in the legacy GM recovery layer.

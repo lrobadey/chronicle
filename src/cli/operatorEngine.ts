@@ -1,5 +1,5 @@
 import type { CliApiMode } from './app';
-import { isChronicleError } from '../engine/errors';
+import { IncompatibleSessionError, isChronicleError } from '../engine/errors';
 import type { TurnEngine, InitResult } from '../engine/turnEngine';
 import { buildStewardContext, buildStewardRoutingSummary } from '../engine/contextBuilders';
 import type { DebugEvent } from '../engine/debug';
@@ -212,6 +212,45 @@ export interface WorldInspection {
     factions: number;
     scheduledProcesses: number;
   };
+}
+
+export interface LastRunExplainTurn {
+  turn: number;
+  atIso: string;
+  playerText: string;
+  routeClassification: string;
+  ownerLabel: string;
+  ownerSummary: string;
+  councilDomains: string[];
+  majorDecisions: string[];
+  fallbackUsed: boolean;
+  fallbackReason: string | null;
+  fallbackSummary: string;
+  stateDeltaSummary: string;
+  narrationOutcome: string;
+  raw: {
+    route: TurnRouteSummary;
+    council: CouncilInspection;
+    decision: DecisionSummary;
+    narration: NarrationSummary;
+    gmFallback: GmFallbackSummary | null;
+    stateDelta: StateDeltaReport;
+    timeline: TraceTimelineEvent[];
+    turnRecord: TurnRecord;
+  };
+}
+
+export interface LastRunExplainReport {
+  status: 'ok' | 'no_completed_run';
+  message: string;
+  sessionId: string | null;
+  worldId: string | null;
+  worldDisplayName: string | null;
+  turnCount: number;
+  fallbackTurnCount: number;
+  lastUpdatedAtIso: string | null;
+  summary: string;
+  turns: LastRunExplainTurn[];
 }
 
 export interface TurnExecutionReport {
@@ -681,6 +720,46 @@ export class OperatorCliEngine {
     };
   }
 
+  async getLastRunExplainReport(params: {
+    sessionId?: string;
+    playerId?: string;
+  } = {}): Promise<LastRunExplainReport> {
+    const playerId = params.playerId || 'player-1';
+    const sessionId = params.sessionId || await this.resolveLatestCompletedSessionId();
+    if (!sessionId) {
+      return buildNoCompletedRunReport('No completed Chronicle run was found yet. Start a session and finish at least one turn first.');
+    }
+
+    const turnHistory = await this.store.loadTurnLog(sessionId);
+    if (!turnHistory.length) {
+      return buildNoCompletedRunReport(
+        `Session ${sessionId} exists, but it does not have any persisted turns to explain yet.`,
+        sessionId,
+      );
+    }
+
+    const state = await this.loadSessionState(sessionId);
+    const world = this.worldResolver(state.meta.worldId);
+    const initialState = await this.store.loadInitialState(sessionId);
+    const initialTelemetry = initialState ? buildTelemetry(initialState, playerId) : null;
+    const turns = buildLastRunExplainTurns(turnHistory, initialTelemetry);
+    const fallbackTurnCount = turns.filter(turn => turn.fallbackUsed).length;
+    const lastUpdatedAtIso = turnHistory[turnHistory.length - 1]?.atIso || null;
+
+    return {
+      status: 'ok',
+      message: `Explained ${turns.length} persisted turn${turns.length === 1 ? '' : 's'} from ${sessionId}.`,
+      sessionId,
+      worldId: world.id,
+      worldDisplayName: world.displayName,
+      turnCount: turns.length,
+      fallbackTurnCount,
+      lastUpdatedAtIso,
+      summary: summarizeRunExplanation(turns),
+      turns,
+    };
+  }
+
   async listSessions(): Promise<SessionSummaryRow[]> {
     const ids = await this.store.listSessionIds();
     const rows = await Promise.all(ids.map(async sessionId => {
@@ -750,6 +829,28 @@ export class OperatorCliEngine {
     const state = await this.store.loadSession(sessionId);
     if (!state) throw new Error(`Session not found: ${sessionId}`);
     return state;
+  }
+
+  private async resolveLatestCompletedSessionId(): Promise<string | null> {
+    const sessionIds = await this.store.listSessionIds();
+    let latest: { sessionId: string; atIso: string } | null = null;
+
+    for (const sessionId of sessionIds) {
+      const turnHistory = await this.store.loadTurnLog(sessionId);
+      const atIso = turnHistory[turnHistory.length - 1]?.atIso;
+      if (!atIso) continue;
+      try {
+        await this.loadSessionState(sessionId);
+      } catch (error) {
+        if (error instanceof IncompatibleSessionError) continue;
+        throw error;
+      }
+      if (!latest || atIso > latest.atIso) {
+        latest = { sessionId, atIso };
+      }
+    }
+
+    return latest?.sessionId || null;
   }
 
   private async loadExplainContext(params: {
@@ -822,6 +923,69 @@ function buildSessionSummaryRow(
   };
 }
 
+function buildNoCompletedRunReport(message: string, sessionId: string | null = null): LastRunExplainReport {
+  return {
+    status: 'no_completed_run',
+    message,
+    sessionId,
+    worldId: null,
+    worldDisplayName: null,
+    turnCount: 0,
+    fallbackTurnCount: 0,
+    lastUpdatedAtIso: null,
+    summary: message,
+    turns: [],
+  };
+}
+
+function buildLastRunExplainTurns(
+  turnHistory: TurnRecord[],
+  initialTelemetry: Telemetry | null,
+): LastRunExplainTurn[] {
+  let previousTelemetry = initialTelemetry;
+
+  return turnHistory.map(turn => {
+    const route = buildRouteSummary(turn);
+    const council = buildCouncilInspection(turn);
+    const decision = buildDecisionSummary(turn);
+    const gmFallback = buildGmFallbackSummary(turn);
+    const narration = buildNarrationSummary(turn);
+    const stateDelta = previousTelemetry && turn.telemetry
+      ? buildStateDeltaReport(previousTelemetry, turn.telemetry, turn.acceptedEvents)
+      : buildUnavailableStateDelta(turn.acceptedEvents);
+
+    if (turn.telemetry) {
+      previousTelemetry = turn.telemetry;
+    }
+
+    return {
+      turn: turn.turn,
+      atIso: turn.atIso,
+      playerText: turn.playerText,
+      routeClassification: route.classification || 'unknown',
+      ownerLabel: route.ownerLabel,
+      ownerSummary: describeTurnOwner(route),
+      councilDomains: route.councilDomains,
+      majorDecisions: describeMajorDecisions(turn, route, decision, council),
+      fallbackUsed: Boolean(gmFallback),
+      fallbackReason: gmFallback?.reason || route.fallbackReason || null,
+      fallbackSummary: describeFallback(gmFallback, route),
+      stateDeltaSummary: stateDelta.summary,
+      narrationOutcome: describeNarrationOutcome(narration),
+      raw: {
+        route,
+        council,
+        decision,
+        narration,
+        gmFallback,
+        stateDelta,
+        timeline: buildTraceTimeline(turn),
+        turnRecord: turn,
+      },
+    };
+  });
+}
+
 function buildRouteSummary(turn: TurnRecord, fallbackPlan?: ReturnType<typeof classifyTurn>): TurnRouteSummary {
   const openCall = getMostInformativeToolCall(turn.trace, 'open_steward_turn');
   const closeCall = getLastToolCall(turn.trace, 'close_steward_turn');
@@ -838,9 +1002,9 @@ function buildRouteSummary(turn: TurnRecord, fallbackPlan?: ReturnType<typeof cl
   const heldBeatsToConsider = readStringArray(openOutput, 'heldBeatsToConsider', fallbackPlan?.heldBeatsToConsider || []);
   const pendingEventsToCheck = readStringArray(openOutput, 'pendingEventsToCheck', fallbackPlan?.pendingEventsToCheck || []);
   const rationale = readString(openOutput, 'rationale') || fallbackPlan?.rationale || null;
-  const councilDispatches = getToolCalls(turn.trace, 'dispatch_council_task');
+  const councilDispatches = getCouncilDispatches(turn.trace);
   const councilDomains = councilDispatches
-    .map(call => readString(asRecord(call.input), 'domain'))
+    .map(readCouncilDomainFromTraceCall)
     .filter((value): value is string => Boolean(value));
   const closeRoute = readString(closeOutput, 'route')
     || (finishSteward ? 'steward' : finishTurn ? 'legacy_gm' : null);
@@ -879,6 +1043,32 @@ function buildRouteSummary(turn: TurnRecord, fallbackPlan?: ReturnType<typeof cl
   };
 }
 
+function getCouncilDispatches(trace?: TurnTrace): TurnTraceToolCall[] {
+  return getToolCalls(trace).filter(call => {
+    if (call.tool === 'dispatch_council_task') return true;
+    return call.tool === 'dispatch_character_task'
+      || call.tool === 'dispatch_world_task'
+      || call.tool === 'dispatch_systems_task';
+  });
+}
+
+function readCouncilDomainFromTraceCall(call: TurnTraceToolCall): string | null {
+  if (call.tool === 'dispatch_council_task') {
+    return readString(asRecord(call.input), 'domain') || null;
+  }
+  if (call.tool === 'dispatch_character_task') return 'character';
+  if (call.tool === 'dispatch_world_task') return 'world';
+  if (call.tool === 'dispatch_systems_task') return 'systems';
+  return null;
+}
+
+function readCouncilDispatchOutput(call?: TurnTraceToolCall): Record<string, unknown> | null {
+  if (!call) return null;
+  const output = asRecord(call.output);
+  if (!output) return null;
+  return getNestedRecord(output, 'result') || output;
+}
+
 function buildPreflightSummary(params: {
   playerText: string;
   pendingPromptBefore: PendingPrompt | null;
@@ -903,17 +1093,17 @@ function buildPreflightSummary(params: {
 
 function buildCouncilInspection(turn: TurnRecord): CouncilInspection {
   const artifacts = turn.councilArtifacts || [];
-  const dispatchCalls = getToolCalls(turn.trace, 'dispatch_council_task');
+  const dispatchCalls = getCouncilDispatches(turn.trace);
   const domains = ['character', 'world', 'systems'].map(domain => {
-    const call = dispatchCalls.find(candidate => readString(asRecord(candidate.input), 'domain') === domain);
+    const call = dispatchCalls.find(candidate => readCouncilDomainFromTraceCall(candidate) === domain);
     const input = asRecord(call?.input);
-    const output = asRecord(call?.output);
+    const output = readCouncilDispatchOutput(call);
     const artifact = artifacts.find(candidate => candidate.domain === domain) || null;
     return {
       domain,
       ran: Boolean(call),
       taskId: readString(input, 'taskId') || null,
-      directive: readString(input, 'directive') || null,
+      directive: readString(input, 'directive') || readString(input, 'reason') || null,
       priority: readString(input, 'priority') || null,
       contextSummary: describeContext(input?.context),
       context: input?.context,
@@ -996,6 +1186,169 @@ function buildStateDeltaReport(before: Telemetry, after: Telemetry, acceptedEven
     before,
     after,
   };
+}
+
+function buildUnavailableStateDelta(acceptedEvents: WorldEvent[]): StateDeltaReport {
+  return {
+    summary: acceptedEvents.length
+      ? 'State changed, but the persisted telemetry was not detailed enough to explain the delta cleanly.'
+      : 'No state delta was available from the persisted telemetry.',
+    timeDeltaMinutes: 0,
+    moved: false,
+    newItems: [],
+    newClues: [],
+    acceptedEvents,
+    before: undefined as unknown as Telemetry,
+    after: undefined as unknown as Telemetry,
+  };
+}
+
+function summarizeRunExplanation(turns: LastRunExplainTurn[]): string {
+  if (!turns.length) return 'No persisted turns were available to explain.';
+  const ownerCounts = new Map<string, number>();
+  for (const turn of turns) {
+    ownerCounts.set(turn.ownerLabel, (ownerCounts.get(turn.ownerLabel) || 0) + 1);
+  }
+  const dominantOwner = [...ownerCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || 'unknown owner';
+  const fallbackTurns = turns.filter(turn => turn.fallbackUsed).length;
+  if (fallbackTurns) {
+    return `This run covered ${turns.length} persisted turn${turns.length === 1 ? '' : 's'}. Most turns were ${dominantOwner}, and ${fallbackTurns} turn${fallbackTurns === 1 ? '' : 's'} had to fall back to the legacy GM.`;
+  }
+  return `This run covered ${turns.length} persisted turn${turns.length === 1 ? '' : 's'}. Most turns were ${dominantOwner}, and none needed the legacy GM fallback.`;
+}
+
+function describeTurnOwner(route: TurnRouteSummary): string {
+  if (route.classification === 'deterministic') {
+    return route.deterministicOwner
+      ? `Deterministic ${route.deterministicOwner} logic owned this turn, so Chronicle did not need open-ended judgment.`
+      : 'Deterministic logic owned this turn, so Chronicle did not need open-ended judgment.';
+  }
+  if (route.gmHandled) {
+    return 'The steward could not close this turn on its own, so the legacy GM took over the final decision.';
+  }
+  if (route.councilDomains.length) {
+    return `The steward owned routing, then handed judgment to ${formatNaturalList(route.councilDomains.map(domain => `${domain} council`))}.`;
+  }
+  if (route.stewardHandled) {
+    return 'The steward handled this turn directly without needing the legacy GM.';
+  }
+  return 'Chronicle recorded the turn, but the owning subsystem was not obvious from the persisted trace.';
+}
+
+function describeMajorDecisions(
+  turn: TurnRecord,
+  route: TurnRouteSummary,
+  decision: DecisionSummary,
+  council: CouncilInspection,
+): string[] {
+  const notes: string[] = [];
+
+  if (route.rationale) {
+    notes.push(`Route reason: ${route.rationale}`);
+  }
+
+  if (route.councilDomains.length) {
+    notes.push(`Council involvement: ${formatNaturalList(route.councilDomains)} weighed in on this turn.`);
+  }
+
+  for (const artifact of decision.councilArtifacts) {
+    notes.push(`${capitalize(artifact.domain)} direction: ${artifact.summary}`);
+  }
+
+  if (decision.acceptedEvents.length) {
+    notes.push(`Committed outcomes: ${formatNaturalList(decision.acceptedEvents.slice(0, 4).map(describeWorldEvent))}.`);
+  }
+
+  if (decision.rejectedEvents.length) {
+    notes.push(`Rejected outcomes: ${formatNaturalList(decision.rejectedEvents.slice(0, 3).map(event => describeRejectedEvent(event.reason, event.event)))}.`);
+  }
+
+  const councilWarnings = council.domains.flatMap(domain =>
+    domain.warnings.map(warning => `${domain.domain}: ${warning}`),
+  );
+  if (councilWarnings.length) {
+    notes.push(`Warnings carried forward: ${formatNaturalList(councilWarnings.slice(0, 3))}.`);
+  }
+
+  if (!notes.length) {
+    notes.push(turn.narration
+      ? 'The main visible outcome was the narrated reply.'
+      : 'Chronicle recorded the turn, but no major decision summary was persisted.');
+  }
+
+  return notes;
+}
+
+function describeFallback(
+  gmFallback: GmFallbackSummary | null,
+  route: TurnRouteSummary,
+): string {
+  if (!gmFallback) {
+    return 'No legacy GM fallback was needed.';
+  }
+  const reason = gmFallback.reason || route.fallbackReason || 'Chronicle did not persist a fallback reason';
+  const summary = gmFallback.summary ? ` Result: ${gmFallback.summary}` : '';
+  return `Legacy GM fallback was used because ${reason}.${summary}`.trim();
+}
+
+function describeNarrationOutcome(narration: NarrationSummary): string {
+  if (!narration.invoked || !narration.text.trim()) {
+    return 'No player-facing narration was persisted for this turn.';
+  }
+  const source = narration.source === 'systems_packet'
+    ? 'the systems packet'
+    : narration.source === 'steward'
+      ? 'the steward close path'
+      : narration.source === 'gm'
+        ? 'the legacy GM close path'
+        : narration.source === 'prompt_only'
+          ? 'a pending prompt'
+          : 'an unknown source';
+  const preview = summarizeText(narration.text, 140) || 'Narration was persisted.';
+  return `The player received narration from ${source}. Preview: ${preview}`;
+}
+
+function describeWorldEvent(event: WorldEvent): string {
+  switch (event.type) {
+    case 'Speak':
+      return event.toActorId
+        ? `${event.actorId} spoke to ${event.toActorId}`
+        : `${event.actorId} spoke aloud`;
+    case 'RecordClue':
+      return event.subject ? `a clue was recorded about ${event.subject}` : 'a clue was recorded';
+    case 'SetFlag':
+      return `${event.key} was updated`;
+    case 'CreateEntity':
+      return `${event.entity.data.name} was introduced`;
+    case 'TravelToLocation':
+      return `travel moved to ${event.locationId}`;
+    case 'MoveActor':
+      return event.toLocationId ? `movement shifted to ${event.toLocationId}` : 'an actor moved';
+    case 'AdvanceTime':
+      return `${event.minutes} minute${event.minutes === 1 ? '' : 's'} passed`;
+    case 'Inspect':
+      return `${event.subject} was inspected`;
+    case 'Explore':
+      return `the player explored ${event.area.replaceAll('_', ' ')}`;
+    default:
+      return event.type.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  }
+}
+
+function describeRejectedEvent(reason: string, event: WorldEvent): string {
+  return `${describeWorldEvent(event)} was rejected (${reason})`;
+}
+
+function formatNaturalList(values: string[]): string {
+  const cleaned = values.map(value => value.trim()).filter(Boolean);
+  if (!cleaned.length) return 'nothing explicit';
+  if (cleaned.length === 1) return cleaned[0]!;
+  if (cleaned.length === 2) return `${cleaned[0]} and ${cleaned[1]}`;
+  return `${cleaned.slice(0, -1).join(', ')}, and ${cleaned[cleaned.length - 1]}`;
+}
+
+function capitalize(value: string): string {
+  return value ? value[0]!.toUpperCase() + value.slice(1) : value;
 }
 
 function buildTraceTimeline(turn: TurnRecord, debugEvents: DebugEvent[] = []): TraceTimelineEvent[] {

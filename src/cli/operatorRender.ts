@@ -1,5 +1,6 @@
 import type {
   CouncilInspection,
+  LastRunExplainReport,
   OperatorViewMode,
   PromptInspection,
   SessionSummaryRow,
@@ -361,6 +362,57 @@ export function renderWorldInspection(world: WorldInspection, options: RenderOpt
       metadata: world.world.metadata,
       cliTheme: world.world.cliTheme,
     }));
+  }
+
+  return joinSections(sections);
+}
+
+export function renderLastRunExplain(report: LastRunExplainReport, options: RenderOptions): string {
+  if (report.status === 'no_completed_run') {
+    return renderBlock('Last Run Explain', report.message);
+  }
+
+  const sections: string[] = [
+    renderKeyValues('Last Run', [
+      ['session', report.sessionId || 'none'],
+      ['world', report.worldDisplayName && report.worldId ? `${report.worldDisplayName} (${report.worldId})` : 'unknown'],
+      ['turns', String(report.turnCount)],
+      ['fallback_turns', String(report.fallbackTurnCount)],
+      ['updated_at', report.lastUpdatedAtIso || 'n/a'],
+      ['summary', report.summary],
+    ]),
+  ];
+
+  for (const turn of report.turns) {
+    const lines = [
+      `When the player said: ${JSON.stringify(turn.playerText)}`,
+      `Route Chronicle took: ${turn.routeClassification}`,
+      `Owning subsystem: ${turn.ownerLabel}`,
+      `Why that subsystem owned it: ${turn.ownerSummary}`,
+      'Major decisions:',
+      ...turn.majorDecisions.map(item => `- ${item}`),
+      `Fallback use: ${turn.fallbackSummary}`,
+      `State change: ${turn.stateDeltaSummary}`,
+      `Narration outcome: ${turn.narrationOutcome}`,
+    ];
+
+    if (isFullView(options)) {
+      lines.push(`Council domains: ${formatList(turn.councilDomains)}`);
+      lines.push('');
+      lines.push('Route detail:');
+      lines.push(indent(prettyJSON(turn.raw.route), 2));
+      lines.push('');
+      lines.push('Decision detail:');
+      lines.push(indent(prettyJSON(turn.raw.decision), 2));
+    }
+
+    if (isRawView(options)) {
+      lines.push('');
+      lines.push('Raw turn detail:');
+      lines.push(indent(prettyJSON(turn.raw), 2));
+    }
+
+    sections.push(renderBlock(`Turn ${turn.turn}`, lines.join('\n')));
   }
 
   return joinSections(sections);
