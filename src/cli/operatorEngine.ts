@@ -1,5 +1,5 @@
 import type { CliApiMode } from './app';
-import { IncompatibleSessionError, isChronicleError } from '../engine/errors';
+import { isChronicleError } from '../engine/errors';
 import type { TurnEngine, InitResult } from '../engine/turnEngine';
 import { buildStewardContext, buildStewardRoutingSummary } from '../engine/contextBuilders';
 import type { DebugEvent } from '../engine/debug';
@@ -842,8 +842,9 @@ export class OperatorCliEngine {
       try {
         await this.loadSessionState(sessionId);
       } catch (error) {
-        if (error instanceof IncompatibleSessionError) continue;
-        throw error;
+        // "Latest run" should mean latest session we can actually inspect.
+        // Keep explicit `--session` behavior strict; only auto-selection skips bad saves.
+        continue;
       }
       if (!latest || atIso > latest.atIso) {
         latest = { sessionId, atIso };

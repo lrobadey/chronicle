@@ -19,3 +19,8 @@ command = "npm run staff-cli"
 name = "web"
 icon = "run"
 command = "npm run web:dev"
+
+[[actions]]
+name = "last turn review"
+icon = "tool"
+command = "python3 scripts/last_run_explain.py"

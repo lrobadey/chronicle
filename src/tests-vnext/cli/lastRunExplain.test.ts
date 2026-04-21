@@ -295,6 +295,26 @@ async function seedIncompatibleSessionWithTurns(root: string, sessionId: string,
   );
 }
 
+async function seedCorruptSessionWithTurns(root: string, sessionId: string, turns: TurnRecord[]) {
+  const sessionDir = path.join(root, sessionId);
+  const initial = createWorldState();
+  const snapshot = createWorldState();
+  snapshot.meta.turn = turns.length;
+  const firstItemId = Object.keys(snapshot.items)[0];
+  if (!firstItemId) throw new Error('Expected seeded world to contain at least one item');
+  for (const relationId of Object.keys(snapshot.spine.relations)) {
+    const relation = snapshot.spine.relations[relationId];
+    if (relation?.from === firstItemId) delete snapshot.spine.relations[relationId];
+  }
+  await fs.mkdir(sessionDir, { recursive: true });
+  await fs.writeFile(path.join(sessionDir, 'initial.json'), JSON.stringify(initial, null, 2));
+  await fs.writeFile(path.join(sessionDir, 'snapshot.json'), JSON.stringify(snapshot, null, 2));
+  await fs.writeFile(
+    path.join(sessionDir, 'events.jsonl'),
+    `${turns.map(turn => JSON.stringify(turn)).join('\n')}\n`,
+  );
+}
+
 async function runPythonHelper(args: string[], env: Record<string, string>) {
   const stdoutChunks: string[] = [];
   const stderrChunks: string[] = [];
@@ -400,6 +420,36 @@ describe('last run explain report', () => {
 
     await seedSessionWithTurns(root, 'session-compatible', [compatibleTurn]);
     await seedIncompatibleSessionWithTurns(root, 'session-incompatible', [incompatibleTurn]);
+
+    const report = await operator.getLastRunExplainReport();
+
+    assert.equal(report.status, 'ok');
+    assert.equal(report.sessionId, 'session-compatible');
+  });
+
+  it('skips newer corrupt sessions when resolving the latest completed run', async () => {
+    const root = await makeTempRoot('chronicle-last-run-corrupt-');
+    const { operator } = await createOperator(root);
+
+    const compatibleTurn = createTurnRecord({
+      sessionId: 'session-compatible',
+      turn: 1,
+      atIso: '2026-04-20T10:00:00.000Z',
+      playerText: 'ask tamar about the tide',
+      narration: 'Tamar answers in a low, practical voice.',
+      trace: createStewardTrace(),
+    });
+    const corruptTurn = createTurnRecord({
+      sessionId: 'session-corrupt',
+      turn: 1,
+      atIso: '2026-04-20T11:00:00.000Z',
+      playerText: 'inspect the dock',
+      narration: 'The dock timbers complain under the tide.',
+      trace: createStewardTrace(),
+    });
+
+    await seedSessionWithTurns(root, 'session-compatible', [compatibleTurn]);
+    await seedCorruptSessionWithTurns(root, 'session-corrupt', [corruptTurn]);
 
     const report = await operator.getLastRunExplainReport();
 
