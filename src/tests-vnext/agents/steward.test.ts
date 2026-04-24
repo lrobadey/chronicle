@@ -29,6 +29,54 @@ function createDirectorState(): DirectorState {
   };
 }
 
+function handledSystemsCouncilResult() {
+  return {
+    executionMs: 1,
+    result: {
+      taskId: 'systems-3',
+      domain: 'systems' as const,
+      summary: 'Observed the local state without mutating the world.',
+      proposedEvents: [],
+      confidence: 1,
+      warnings: [],
+      detail: {
+        handled: true,
+        narratorPacket: {
+          version: 'systems_v1' as const,
+          intent: 'observation',
+          playerText: 'look around',
+          summary: 'Read-only observation of the player surroundings.',
+          telemetry: { player: { id: 'player-1' } },
+          observation: { player: { id: 'player-1' } },
+          warnings: [],
+        },
+        mechanicsResolution: null,
+      },
+    },
+  };
+}
+
+function worldCouncilResult(surfacedPendingEventIds: string[]) {
+  return {
+    executionMs: 1,
+    result: {
+      taskId: 'world-3',
+      domain: 'world' as const,
+      summary: 'World pressure surfaced into the scene.',
+      proposedEvents: [],
+      confidence: 0.8,
+      warnings: [],
+      detail: {
+        sceneMotionNotes: ['The storm front presses closer.'],
+        worldMotionNotes: ['A pending pressure became visible.'],
+        surfacedThreadIds: [],
+        surfacedPendingEventIds,
+        artifacts: [],
+      },
+    },
+  };
+}
+
 describe('openStewardTurn', () => {
   it('returns the classifier result and no council tasks for deterministic mechanics', () => {
     const result = openStewardTurn({
@@ -195,6 +243,78 @@ describe('closeStewardTurn', () => {
     assert.equal(result.handled, true);
     assert.deepEqual(result.directorUpdates, { removeHeldBeats: ['beat-lantern'] });
     assert.equal(result.narratorHandoff.kind, 'systems_v1');
+    assert.equal(result.trace.route, 'council');
+  });
+
+  it('removes due pending events only when the world result surfaced them', () => {
+    const result = closeStewardTurn({
+      turnPlan: {
+        classification: 'simple_council',
+        deterministicOwner: null,
+        requiredDomains: ['systems'],
+        optionalDomains: ['world'],
+        heldBeatsToConsider: [],
+        pendingEventsToCheck: ['event-storm', 'event-debt'],
+        rationale: 'Observation intent detected.',
+      },
+      councilResults: [
+        handledSystemsCouncilResult(),
+        worldCouncilResult(['event-storm', 'event-unrelated']),
+      ],
+      directorState: createDirectorState(),
+    });
+
+    assert.equal(result.handled, true);
+    assert.deepEqual(result.directorUpdates, { removePendingEvents: ['event-storm'] });
+    assert.equal(result.trace.route, 'council');
+  });
+
+  it('keeps pending events when they were due but not surfaced', () => {
+    const result = closeStewardTurn({
+      turnPlan: {
+        classification: 'simple_council',
+        deterministicOwner: null,
+        requiredDomains: ['systems'],
+        optionalDomains: ['world'],
+        heldBeatsToConsider: [],
+        pendingEventsToCheck: ['event-storm'],
+        rationale: 'Observation intent detected.',
+      },
+      councilResults: [
+        handledSystemsCouncilResult(),
+        worldCouncilResult(['event-other']),
+      ],
+      directorState: createDirectorState(),
+    });
+
+    assert.equal(result.handled, true);
+    assert.equal(result.directorUpdates, null);
+    assert.equal(result.trace.route, 'council');
+  });
+
+  it('combines held-beat and pending-event releases in one director update', () => {
+    const result = closeStewardTurn({
+      turnPlan: {
+        classification: 'simple_council',
+        deterministicOwner: null,
+        requiredDomains: ['systems'],
+        optionalDomains: ['world'],
+        heldBeatsToConsider: ['beat-lantern'],
+        pendingEventsToCheck: ['event-storm'],
+        rationale: 'Observation intent detected.',
+      },
+      councilResults: [
+        handledSystemsCouncilResult(),
+        worldCouncilResult(['event-storm']),
+      ],
+      directorState: createDirectorState(),
+    });
+
+    assert.equal(result.handled, true);
+    assert.deepEqual(result.directorUpdates, {
+      removeHeldBeats: ['beat-lantern'],
+      removePendingEvents: ['event-storm'],
+    });
     assert.equal(result.trace.route, 'council');
   });
 });

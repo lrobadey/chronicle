@@ -87,6 +87,12 @@ export function closeStewardTurn(input: StewardCloseInput): StewardCloseResult {
   }
 
   const heldBeatsToRelease = input.turnPlan.heldBeatsToConsider;
+  const surfacedPendingEventIds = new Set(worldDetail?.surfacedPendingEventIds ?? []);
+  const pendingEventsToRelease = input.turnPlan.pendingEventsToCheck.filter(id => surfacedPendingEventIds.has(id));
+  const directorUpdates = {
+    ...(heldBeatsToRelease.length > 0 ? { removeHeldBeats: heldBeatsToRelease } : {}),
+    ...(pendingEventsToRelease.length > 0 ? { removePendingEvents: pendingEventsToRelease } : {}),
+  };
 
   return {
     handled: true,
@@ -95,9 +101,7 @@ export function closeStewardTurn(input: StewardCloseInput): StewardCloseResult {
     acceptedEvents: [],
     rejectedEvents: [],
     agendaUpdates: emptyAgendaUpdates(),
-    directorUpdates: heldBeatsToRelease.length > 0
-      ? { removeHeldBeats: heldBeatsToRelease }
-      : null,
+    directorUpdates: Object.keys(directorUpdates).length > 0 ? directorUpdates : null,
     councilArtifacts,
     narratorHandoff: systemsDetail?.handled && systemsDetail.narratorPacket
       ? { kind: 'systems_v1', packet: systemsDetail.narratorPacket }

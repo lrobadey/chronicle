@@ -4,12 +4,13 @@ import { randomUUID } from 'node:crypto';
 import type { SessionStore, TurnRecord } from './types';
 import type { StewardMemory, WorldState } from '../../sim/state';
 import { syncWorldSpine } from '../../sim/spine';
-import { IncompatibleSessionError } from '../errors';
+import { IncompatibleSessionError, InputValidationError } from '../errors';
 
 const SNAPSHOT_FILE = 'snapshot.json';
 const INITIAL_FILE = 'initial.json';
 const EVENTS_FILE = 'events.jsonl';
 const VNEXT_VERSION_PREFIX = 'vnext-';
+const SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
 
 export class JsonlSessionStore implements SessionStore {
   constructor(private rootDir: string) {}
@@ -21,7 +22,7 @@ export class JsonlSessionStore implements SessionStore {
       createWorld: (worldId?: string) => WorldState;
     },
   ) {
-    const id = sessionId || `session-${randomUUID()}`;
+    const id = validateSessionId(sessionId || `session-${randomUUID()}`);
     const dir = this.sessionDir(id);
     const exists = await this.exists(dir);
     if (!exists) {
@@ -106,7 +107,7 @@ export class JsonlSessionStore implements SessionStore {
   }
 
   private sessionDir(sessionId: string) {
-    return path.join(this.rootDir, sessionId);
+    return path.join(this.rootDir, validateSessionId(sessionId));
   }
 
   private async readState(p: string): Promise<WorldState | null> {
@@ -145,6 +146,13 @@ export class JsonlSessionStore implements SessionStore {
       return false;
     }
   }
+}
+
+function validateSessionId(sessionId: string): string {
+  if (!SESSION_ID_PATTERN.test(sessionId)) {
+    throw new InputValidationError('sessionId must be 1-80 characters using only letters, numbers, underscores, or hyphens');
+  }
+  return sessionId;
 }
 
 function normalizeLoadedState(state: WorldState): WorldState {

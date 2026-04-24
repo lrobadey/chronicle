@@ -32,6 +32,8 @@
   "exclude": [
     "node_modules",
     "dist",
-    "deprecated"
+    "deprecated",
+    "**/* 2.ts",
+    "**/* 2.tsx"
   ]
 }

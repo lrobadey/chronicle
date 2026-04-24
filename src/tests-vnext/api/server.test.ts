@@ -168,6 +168,34 @@ describe('vNext API compatibility', () => {
     assert.equal(typeof body.error, 'string');
   });
 
+  it('rejects path-like session ids on /api/init', async () => {
+    const { baseUrl } = await createRunningServer();
+
+    const initResponse = await fetch(`${baseUrl}/api/init`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: '../escaped' }),
+    });
+
+    assert.equal(initResponse.status, 400);
+    const body = await initResponse.json() as Record<string, unknown>;
+    assert.equal(body.code, 'invalid_input');
+  });
+
+  it('rejects path-like session ids on /api/turn', async () => {
+    const { baseUrl } = await createRunningServer();
+
+    const turnResponse = await fetch(`${baseUrl}/api/turn`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sessionId: 'a/b', playerText: 'Look around' }),
+    });
+
+    assert.equal(turnResponse.status, 400);
+    const body = await turnResponse.json() as Record<string, unknown>;
+    assert.equal(body.code, 'invalid_input');
+  });
+
   it('streams /api/init with SSE domain events', async () => {
     const { baseUrl } = await createRunningServer();
     const response = await fetch(`${baseUrl}/api/init`, {

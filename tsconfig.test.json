@@ -12,5 +12,12 @@
     "sourceMap": false
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["node_modules", "dist", "deprecated", ".tmp-tests"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "deprecated",
+    ".tmp-tests",
+    "**/* 2.ts",
+    "**/* 2.tsx"
+  ]
 }
